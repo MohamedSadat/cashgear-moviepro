@@ -80,6 +80,7 @@ const child = spawn(join(root, 'target/release/cgv-desktop.exe'), [], {
   windowsHide: true,
   env: {
     ...process.env,
+    CGV_FFMPEG_DIR: process.env.CGV_FFMPEG_DIR ?? join(root, '.tools/ffmpeg/bin'),
     WEBVIEW2_USER_DATA_FOLDER: profile,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: browserArguments,
   },
@@ -153,8 +154,55 @@ try {
       software,
     });
   }
-  await page.goto(origin + '/');
+  // Media: native registration, cgv-media streaming, ffprobe and a ProRes proxy.
+  await page.goto(origin + '/?diagnostic=1');
   await expect(page.getByTestId('engine-status')).toHaveText('Engine ready', { timeout: 30000 });
+  const paths = ['h264-1080p30-aac.mp4', 'prores-720p2997-pcm.mov'].map((file) =>
+    join(root, 'tests/media', file),
+  );
+  const media = await page.evaluate(async (paths) => {
+    const hooks = window.__cgv;
+    const api = hooks.client.api;
+    for (const item of await api.mediaSnapshot()) await hooks.library.remove(item.id);
+    await hooks.library.importRequests(await hooks.platform.registerPaths(paths));
+    const deadline = Date.now() + 180000;
+    let items = await api.mediaSnapshot();
+    while (
+      Date.now() < deadline &&
+      !items.every((item) =>
+        ['ready', 'proxyReady', 'proxyFailed', 'unsupported'].includes(item.status.state),
+      )
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      items = await api.mediaSnapshot();
+    }
+    const reads = {};
+    for (const item of items) {
+      reads[item.name] = [];
+      for (const frame of [0, 1, 45, 89])
+        reads[item.name].push([frame, (await api.readFrame(item.id, frame)).barcode]);
+    }
+    return {
+      items: items.map((item) => ({
+        name: item.name,
+        status: item.status,
+        codec: item.video?.codecLabel,
+      })),
+      reads,
+      notices: hooks.library.notices,
+    };
+  }, paths);
+  console.log(JSON.stringify(media, null, 2));
+  const status = Object.fromEntries(media.items.map((item) => [item.name, item.status.state]));
+  if (status['h264-1080p30-aac.mp4'] !== 'ready')
+    throw new Error('H.264 should play directly on desktop: ' + JSON.stringify(media.items));
+  if (status['prores-720p2997-pcm.mov'] !== 'proxyReady')
+    throw new Error('ProRes should play through its proxy: ' + JSON.stringify(media.items));
+  for (const [name, reads] of Object.entries(media.reads))
+    for (const [frame, barcode] of reads)
+      if (frame !== barcode) throw new Error(`${name}: frame ${frame} decoded as ${barcode}`);
+  results.push({ media });
+
   await page.screenshot({ path: join(root, 'bench/results/desktop.png') });
   await writeFile(
     join(root, 'bench/results/desktop-smoke.json'),

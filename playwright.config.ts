@@ -2,6 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 // CI runners have no GPU: GPU_TEST_SOFTWARE=1 switches to SwiftShader for WebGPU
 // and WARP or SwiftShader for WebGL2. Locally the specs run on the real GPU.
+// Both use installed Chrome or Edge: Playwright's bundled Chromium has no H.264 or AAC.
 const software = process.env.GPU_TEST_SOFTWARE === '1';
 export default defineConfig({
   testDir: './tests/e2e',
@@ -35,12 +36,12 @@ export default defineConfig({
   },
   projects: software
     ? [
-        { name: 'software-webgpu', use: { channel: 'chromium' } },
+        { name: 'software-webgpu', use: { channel: 'chrome' } },
         {
           name: 'software-webgl2',
           grep: /WebGL2/,
           use: {
-            channel: 'chromium',
+            channel: 'chrome',
             launchOptions: {
               args: [
                 '--enable-unsafe-webgpu',
