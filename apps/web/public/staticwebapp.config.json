@@ -1,0 +1,24 @@
+{
+  "globalHeaders": {
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Embedder-Policy": "require-corp",
+    "Cross-Origin-Resource-Policy": "same-origin"
+  },
+  "mimeTypes": {
+    ".wasm": "application/wasm"
+  },
+  "routes": [
+    {
+      "route": "/",
+      "headers": { "Cache-Control": "no-cache" }
+    },
+    {
+      "route": "/index.html",
+      "headers": { "Cache-Control": "no-cache" }
+    },
+    {
+      "route": "/assets/*",
+      "headers": { "Cache-Control": "public, max-age=31536000, immutable" }
+    }
+  ]
+}

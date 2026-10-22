@@ -15,6 +15,8 @@ Serve `.wasm` files as `application/wasm`.
 Without the first two headers, the page is not cross-origin isolated. `SharedArrayBuffer` is then unavailable, and the startup capability check blocks the app with a message that names the missing headers.
 
 - **Netlify or Cloudflare Pages:** `apps/web/public/_headers` already sets everything.
+- **Azure Static Web Apps:** Azure ignores `_headers`, so `apps/web/public/staticwebapp.config.json` sets the headers, the `.wasm` type and caching (immutable `/assets/*`, `no-cache` for `/`).
+  - `.github/workflows/azure-static-web-apps-white-river-02e4e2210.yml` runs `pnpm build` with the pinned toolchain, then uploads `apps/web/dist` with `skip_app_build`, because Oryx cannot build this workspace.
 - **nginx:**
 
   ```nginx

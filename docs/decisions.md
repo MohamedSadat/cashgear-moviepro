@@ -2,6 +2,12 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-23: Azure Static Web Apps
+
+- **Early web deploy:** the user connected the repository to Azure Static Web Apps ahead of Phase 11. The production host and domain are still the Phase 11 question.
+- **Build:** the Azure workflow builds with the same pins as CI (Rust 1.99.1, Node 24, pnpm 12.11.2, wasm-bindgen 0.2.129 from `taiki-e/install-action`) and uploads `apps/web/dist` prebuilt, as `cashgear-fotoeditor` does. Oryx cannot detect or build this workspace.
+- **Headers:** `apps/web/public/staticwebapp.config.json` sets COOP, COEP and CORP on every response, serves `.wasm` as `application/wasm`, caches `/assets/*` as immutable and sends `no-cache` for `/` and `/index.html`.
+
 ## 2026-10-23: Phase 1 answers
 
 - **Demuxer:** Mediabunny (MPL-2.0), running in the engine worker. Our own WebCodecs decoder wrappers, decoder pool, frame-accurate seek and frame cache sit on top of its packet API.

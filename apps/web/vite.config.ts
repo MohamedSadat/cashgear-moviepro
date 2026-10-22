@@ -2,7 +2,8 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // SharedArrayBuffer needs cross-origin isolation. The same headers are set for
-// static hosting (public/_headers) and in the Tauri config.
+// static hosting (public/_headers, public/staticwebapp.config.json) and in the
+// Tauri config.
 const headers = {
   'Cross-Origin-Opener-Policy': 'same-origin',
   'Cross-Origin-Embedder-Policy': 'require-corp',
