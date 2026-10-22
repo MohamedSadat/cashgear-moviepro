@@ -18,5 +18,5 @@
   ],
   "deny": ["GPL-", "AGPL-", "LGPL-", "SSPL-", "BUSL-"],
   "exceptions": [],
-  "mustInclude": ["react", "react-dom", "comlink", "@tauri-apps/api"]
+  "mustInclude": ["react", "react-dom", "comlink", "mediabunny", "@tauri-apps/api"]
 }

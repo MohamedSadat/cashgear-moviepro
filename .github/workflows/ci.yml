@@ -42,9 +42,11 @@ jobs:
   windows:
     name: Build and test (Windows)
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     env:
       GPU_TEST_SOFTWARE: '1'
+      # The FFmpeg integration tests must run here, not skip.
+      CGV_REQUIRE_FFMPEG: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -68,6 +70,17 @@ jobs:
       - name: Ensure WebView2 Runtime
         run: ./scripts/setup-webview2.ps1
       - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: .tools/ffmpeg
+          key: ffmpeg-${{ runner.os }}-${{ hashFiles('scripts/build-ffmpeg-lgpl.mjs') }}
+      - name: LGPL FFmpeg (pinned, hash-checked)
+        run: pnpm setup:ffmpeg
+      - uses: actions/cache@v4
+        with:
+          path: tests/media
+          key: test-media-${{ hashFiles('tests/media/manifest.json') }}
+      - run: pnpm fetch-test-media
       - run: cargo fmt --all --check
       # The generated engine bindings and apps/web/dist are untracked; build them
       # before clippy (Tauri embeds dist), typecheck and the browser tests.
@@ -79,7 +92,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm format:check
       - run: pnpm test
-      - run: pnpm exec playwright install chromium
+      # Browser tests use the runner's installed Chrome (H.264 and AAC included).
       - run: pnpm test:e2e
       - run: pnpm --filter @cgv/desktop build
       - run: pnpm desktop:smoke

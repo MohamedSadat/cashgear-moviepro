@@ -1,10 +1,25 @@
 {
   "MIT": [
-    { "name": "react", "versions": ["19.3.1"], "license": "MIT", "paths": [] },
-    { "name": "react-dom", "versions": ["19.3.1"], "license": "MIT", "paths": [] }
+    {
+      "name": "react",
+      "versions": ["19.3.1"],
+      "license": "MIT",
+      "paths": []
+    },
+    {
+      "name": "react-dom",
+      "versions": ["19.3.1"],
+      "license": "MIT",
+      "paths": []
+    }
   ],
   "Apache-2.0": [
-    { "name": "comlink", "versions": ["4.4.2"], "license": "Apache-2.0", "paths": [] }
+    {
+      "name": "comlink",
+      "versions": ["4.4.2"],
+      "license": "Apache-2.0",
+      "paths": []
+    }
   ],
   "Apache-2.0 OR MIT": [
     {
@@ -15,6 +30,19 @@
     }
   ],
   "GPL-3.0-only": [
-    { "name": "gpl-fixture", "versions": ["1.0.0"], "license": "GPL-3.0-only", "paths": [] }
+    {
+      "name": "gpl-fixture",
+      "versions": ["1.0.0"],
+      "license": "GPL-3.0-only",
+      "paths": []
+    }
+  ],
+  "MPL-2.0": [
+    {
+      "name": "mediabunny",
+      "versions": ["1.61.3"],
+      "license": "MPL-2.0",
+      "paths": []
+    }
   ]
 }
