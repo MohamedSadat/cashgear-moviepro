@@ -71,4 +71,48 @@ mod bridge {
             panic!("diagnostic engine panic");
         }
     }
+
+    fn js_error(error: impl std::fmt::Display) -> JsValue {
+        JsValue::from_str(&error.to_string())
+    }
+
+    /// The media library. Values cross the boundary as JSON matching
+    /// `cgv_media::MediaProbe`, `MediaStatus` and `MediaItem`.
+    #[wasm_bindgen]
+    pub struct MediaLibrary {
+        inner: cgv_media::MediaLibrary,
+    }
+
+    #[wasm_bindgen]
+    impl MediaLibrary {
+        /// `platform` is `"web"` or `"desktop"`.
+        #[wasm_bindgen(constructor)]
+        pub fn new(platform: &str) -> Result<MediaLibrary, JsValue> {
+            let platform = match platform {
+                "web" => cgv_media::Platform::Web,
+                "desktop" => cgv_media::Platform::Desktop,
+                other => return Err(js_error(format!("Unknown platform {other}"))),
+            };
+            Ok(Self {
+                inner: cgv_media::MediaLibrary::new(platform),
+            })
+        }
+        /// Adds a probed file and returns the normalized item.
+        pub fn add(&mut self, probe: &str) -> Result<String, JsValue> {
+            let probe: cgv_media::MediaProbe = serde_json::from_str(probe).map_err(js_error)?;
+            let item = self.inner.add(probe).map_err(js_error)?;
+            serde_json::to_string(item).map_err(js_error)
+        }
+        pub fn set_status(&mut self, id: &str, status: &str) -> Result<String, JsValue> {
+            let status: cgv_media::MediaStatus = serde_json::from_str(status).map_err(js_error)?;
+            let item = self.inner.set_status(id, status).map_err(js_error)?;
+            serde_json::to_string(item).map_err(js_error)
+        }
+        pub fn remove(&mut self, id: &str) -> bool {
+            self.inner.remove(id)
+        }
+        pub fn snapshot(&self) -> Result<String, JsValue> {
+            serde_json::to_string(self.inner.items()).map_err(js_error)
+        }
+    }
 }
