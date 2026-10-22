@@ -1,0 +1,44 @@
+[workspace]
+resolver = "2"
+members = ["crates/*", "apps/desktop/src-tauri"]
+# Plain `cargo build` skips the Tauri shell; `--workspace` includes it.
+default-members = [
+  "crates/cgv-time",
+  "crates/cgv-model",
+  "crates/cgv-media",
+  "crates/cgv-render",
+  "crates/cgv-audio",
+  "crates/cgv-engine",
+  "crates/cgv-wasm",
+  "crates/cgv-native",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "LicenseRef-CashGear-Proprietary"
+publish = false
+rust-version = "1.99.1"
+
+[workspace.dependencies]
+wgpu = { version = "=30.0.1", default-features = false, features = ["std", "webgpu", "webgl", "wgsl"] }
+naga = { version = "=30.0.1", features = ["wgsl-in"] }
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "0.4.79"
+web-sys = "0.3.106"
+js-sys = "0.3.106"
+serde = { version = "1", features = ["derive"] }
+cgv-time = { path = "crates/cgv-time" }
+cgv-model = { path = "crates/cgv-model" }
+cgv-media = { path = "crates/cgv-media" }
+cgv-render = { path = "crates/cgv-render" }
+cgv-audio = { path = "crates/cgv-audio" }
+cgv-engine = { path = "crates/cgv-engine" }
+cgv-native = { path = "crates/cgv-native" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

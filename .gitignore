@@ -1,0 +1,17 @@
+node_modules/
+target/
+dist/
+pkg/
+test-results/
+playwright-report/
+.vite/
+.tools/
+bench/results/
+tests/media/*
+!tests/media/manifest.json
+apps/desktop/src-tauri/gen/
+*.log
+.env
+.env.*
+!.env.example
+.claude/launch.json

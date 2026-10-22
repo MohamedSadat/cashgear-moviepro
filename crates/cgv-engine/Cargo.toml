@@ -1,0 +1,11 @@
+[package]
+name = "cgv-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+cgv-render.workspace = true
+web-sys = { workspace = true, features = ["OffscreenCanvas"] }

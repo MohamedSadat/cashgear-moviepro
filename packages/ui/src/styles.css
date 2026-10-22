@@ -1,0 +1,180 @@
+:root {
+  color-scheme: dark;
+  --cgv-bg: #121418;
+  --cgv-panel: #1b1e24;
+  --cgv-border: #2b2f37;
+  --cgv-text: #e7e9ee;
+  --cgv-muted: #9aa1ad;
+  --cgv-accent: #3d8bfd;
+  --cgv-warn: #f2b84b;
+  --cgv-danger: #ef5a5a;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  background: var(--cgv-bg);
+  color: var(--cgv-text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+.cgv-app {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+}
+
+.cgv-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 16px;
+  background: var(--cgv-panel);
+  border-bottom: 1px solid var(--cgv-border);
+}
+
+.cgv-header h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.cgv-diagnostics {
+  display: flex;
+  gap: 8px;
+}
+
+.cgv-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 16px;
+}
+
+/* Letterboxes a 16:9 program monitor inside whatever space the stage leaves. */
+.cgv-monitor-area {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  container-type: size;
+}
+
+.cgv-monitor {
+  position: relative;
+  width: min(100cqw, 100cqh * 16 / 9);
+  aspect-ratio: 16 / 9;
+  background: #000;
+  outline: 1px solid var(--cgv-border);
+}
+
+.cgv-monitor canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.cgv-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  padding: 6px 16px;
+  font-size: 12px;
+  color: var(--cgv-muted);
+  background: var(--cgv-panel);
+  border-top: 1px solid var(--cgv-border);
+}
+
+.cgv-strip [data-ok='false'],
+.cgv-strip [data-state='error'] {
+  color: var(--cgv-danger);
+}
+
+.cgv-notice,
+.cgv-error {
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.cgv-notice {
+  border: 1px solid var(--cgv-warn);
+  color: var(--cgv-warn);
+}
+
+.cgv-notice p,
+.cgv-error p {
+  margin: 0;
+}
+
+.cgv-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--cgv-danger);
+}
+
+.cgv-error a {
+  color: var(--cgv-accent);
+}
+
+button {
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 10px;
+  color: var(--cgv-text);
+  background: #2a2f38;
+  border: 1px solid var(--cgv-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #343a45;
+}
+
+.cgv-blocked {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(10 11 14 / 0.94);
+}
+
+.cgv-blocked-card {
+  max-width: 560px;
+  padding: 24px;
+  background: var(--cgv-panel);
+  border: 1px solid var(--cgv-danger);
+  border-radius: 8px;
+}
+
+.cgv-blocked-card h2 {
+  margin-top: 0;
+  font-size: 18px;
+}
+
+.cgv-blocked-card li {
+  margin-bottom: 8px;
+}
+
+.cgv-blocked-card p {
+  color: var(--cgv-muted);
+  margin-bottom: 0;
+}
