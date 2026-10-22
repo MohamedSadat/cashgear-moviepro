@@ -2,6 +2,68 @@
 
 Newest phase first. Each phase lists the evidence for every exit criterion.
 
+## Phase 1: Media import, decoding, proxies, thumbnails (complete)
+
+- **Completed:** 2026-10-23, tag `phase-1`.
+- **CI:** [run 39869268031](https://github.com/MohamedSadat/cashgear-moviepro/actions/runs/39869268031) on commit `8857eae`, green (License gates 31 s; Windows build and test 10 min 25 s). It fetched the pinned FFmpeg and all 36 test files from the release, ran the 3 FFmpeg integration tests on the runner, passed 20 software-GPU browser tests, and the desktop smoke took ProRes to `proxyReady`.
+- **Reference machine:** as in Phase 0: GTX 1650, driver 457.51, Chrome 156, Edge and WebView2 155.
+
+### Shipped
+
+- **Time:** `cgv-time` with integer flicks, frame rates that snap measured values to the standard rates, and SMPTE timecode including drop-frame (15 tests).
+- **Library model:** `cgv-media` normalizes probes into items with kind, codec labels, frame rate, rotation, colour and status (9 tests). The worker reaches it through WASM.
+- **Engine worker media pipeline:**
+  - Mediabunny demuxing.
+  - WebCodecs decoder sessions in a pool of 4.
+  - Frame-exact seeks, using a presentation-order frame index and decoding forward from the previous key frame.
+  - A 5-frame look-ahead for sequential reads.
+  - A 256 MB LRU cache of native-format frame copies.
+  - Every VideoFrame wrapped, closed once and counted.
+- **Background jobs worker:** filmstrip thumbnails (key frames, rotated for display) and waveform peaks (WebCodecs, plus the engine's own PCM decoding).
+- **Library panel:**
+  - Import by picker, file input or drop, showing thumbnail or waveform, name, duration, resolution, frame rate, codecs, size and status.
+  - Remembered across reloads: File System Access handles where the browser has them, OPFS copies elsewhere.
+  - Thumbnail and peak caches live in OPFS on the web and in the app cache folder on desktop.
+  - A dev overlay (`?dev=1`, Ctrl+Shift+D) shows open frames, the cache and decoders.
+- **Desktop:**
+  - The `cgv-media` protocol streams only registered files, in capped byte ranges.
+  - ffprobe runs on every file, so containers Mediabunny can't read still import.
+  - 720p H.264 proxies with a 0.5 s GOP and the source's frame timing and orientation, with progress.
+  - Native file dialog and drag and drop.
+- **Scripts:**
+  - `setup:ffmpeg` fetches the pinned LGPL FFmpeg 9.0.1, checks its hash and license flags.
+  - `make-test-media` and `fetch-test-media` handle 11 synthetic clips with frame-number barcodes, plus 25 FFmpeg I420 reference crops, published as release [test-media-v1](https://github.com/MohamedSadat/cashgear-moviepro/releases/tag/test-media-v1).
+
+### Exit criteria
+
+| Criterion                                                                                                       | Result                 | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A test set (H.264 MP4, HEVC MOV, VP9 WebM, ProRes MOV on desktop, MP3, WAV, PNG) imports and shows correct info | Passed                 | `imports the test set and shows correct info` passes on Chrome 156 and Edge 155 (hardware) and software Chrome in CI. It imports all 11 files (plus AAC, Opus, JPEG and WebP) and checks the shown resolution, frame rate, codec, rotation, sample rate and channels against the manifest. The desktop smoke imports H.264 and ProRes natively.                                                                                                                       |
+| Seeking to frame N matches the reference frame extracted by FFmpeg                                              | Passed, byte-identical | `seeks to the exact frame, byte-identical to FFmpeg reference frames`: the raw I420 planes of a 384×216 or 256×144 crop equal FFmpeg's decode with 0 differing bytes. Chrome checked 25 frames (H.264 9, HEVC with B-frames 9, VP9 with alt-ref 7). Edge and software Chrome checked 16 each; neither can decode HEVC here. Barcodes match on 25 further random frames per clip, and the desktop smoke reads frames 0, 1, 45 and 89 exactly through the ProRes proxy. |
+| Unsupported codecs get proxies on desktop and a clear message on the web                                        | Passed                 | Desktop smoke: ProRes 422 Proxy reaches `proxyReady`, and its frames read exactly through the proxy. WebView2 on Windows 10 also proxies HEVC. Web: ProRes, and HEVC where the browser lacks it, show "_codec_ can't be decoded in this browser. Open the file in the CashGear Video desktop app, which converts it to a playable proxy."                                                                                                                             |
+| 1,000 random seeks leave zero open VideoFrames and stable memory                                                | Passed                 | `1,000 random seeks leave zero open VideoFrames and stable memory`: 0 wrong frames, the cache never over its 256 MB budget, 0 open frames and 0 cached bytes after release. JS heap 4.70 to 4.77 MB (Chrome), 4.71 to 4.36 MB (Edge), 4.72 to 3.96 MB (software). The 1,000 seeks took 64 s (Chrome) and 50 s (Edge), including readback.                                                                                                                             |
+
+### Local verification
+
+| Check                                                          | Result                                                                                                                                              |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| fmt, clippy `-D warnings` (native and wasm32)                  | Clean                                                                                                                                               |
+| `cargo test --workspace` (`CGV_REQUIRE_FFMPEG=1`)              | 47 passed, including real ffprobe and ffmpeg runs: probes of the test set, and a ProRes to 720p H.264 proxy with key frames at most 15 frames apart |
+| Vitest                                                         | 33 passed: frame cache, decoder pool, frame index, barcode, PCM, peaks, cache keys, capabilities, license policy                                    |
+| Playwright, hardware: Chrome 156, Edge 155                     | 32 passed                                                                                                                                           |
+| Playwright, software (`GPU_TEST_SOFTWARE=1`, installed Chrome) | 20 passed                                                                                                                                           |
+| Desktop smoke, WebView2 155                                    | Passed on hardware and software, including the media import and ProRes proxy                                                                        |
+| Licenses                                                       | cargo-deny ok; npm 154 packages (Mediabunny MPL-2.0 shipped); GPL self-test rejects both fixtures                                                   |
+| Release WASM                                                   | 2,707,882 bytes; gzip 1,041,193, within the 1,500,000 budget                                                                                        |
+
+### Known gaps
+
+- Edge and WebView2 on Windows 10 decode HEVC only with Microsoft's HEVC Video Extensions. Without them, desktop proxies HEVC and the web refuses it.
+- NVENC needs a newer NVIDIA driver than 457.51. Proxies use Media Foundation `h264_mf` here and `libopenh264` in CI.
+- Chrome converts CPU-backed YUV frames with the BT.601 matrix, so thumbnails of software-decoded video can be slightly off in colour. Phase 3's GPU compositor converts with each frame's own matrix.
+- macOS has no pinned FFmpeg build or desktop test yet.
+- Proxies made in an earlier session are reused by id, but a changed source file does not invalidate its proxy yet. Relinking comes in Phase 2.
+
 ## Phase 0: Scaffold, toolchain, CI (complete)
 
 - **Completed:** 2026-10-22, tag `phase-0`.
