@@ -1,4 +1,13 @@
-//! Desktop-only native side: files, the media protocol and FFmpeg jobs (from Phase 1).
+//! Desktop-only native side: the media registry behind the `cgv-media://`
+//! protocol, FFmpeg probes and proxies (run as child processes), and the
+//! cache folder for thumbnails and waveforms.
+pub mod cache;
+pub mod ffmpeg;
+pub mod probe;
+pub mod proxy;
+pub mod range;
+pub mod registry;
+
 use serde::Serialize;
 
 /// Identifies the native host to the UI. Returned by the `native_info` Tauri command.
