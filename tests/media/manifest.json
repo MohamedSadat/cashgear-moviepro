@@ -1,0 +1,4 @@
+{
+  "comment": "Test clips for pnpm fetch-test-media. Phase 1 adds licensed clips (H.264 MP4, HEVC MOV, VP9 WebM, ProRes MOV, MP3, WAV, PNG).",
+  "clips": []
+}
