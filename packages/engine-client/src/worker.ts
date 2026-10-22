@@ -1,20 +1,31 @@
 import { expose } from 'comlink';
 import { FrameLoop, workerScheduler } from './frame-loop';
+import { MediaService } from './media/service';
 import type { EngineApi, EngineEvent, EngineInfo, GpuFault, InitOptions } from './types';
-import initWasm, { Engine } from './pkg/cgv_wasm';
+import initWasm, { Engine, MediaLibrary } from './pkg/cgv_wasm';
 
 let engine: Engine | undefined;
 let loop: FrameLoop | undefined;
+let media: MediaService | undefined;
 let initializing = false;
 let disposed = false;
 let diagnostic = false;
+let wasm: Promise<unknown> | undefined;
 
+function ensureWasm() {
+  wasm ??= initWasm({ module_or_path: new URL('./pkg/cgv_wasm_bg.wasm', import.meta.url) });
+  return wasm;
+}
 function post(event: EngineEvent) {
   self.postMessage(event);
 }
 function fatal(message: string) {
   loop?.stop();
   post({ type: 'engine-fatal', message });
+}
+function requireMedia() {
+  if (!media) throw new Error('The media library is not configured');
+  return media;
 }
 
 // Worker-local fault injection lets browser tests exercise the real Rust
@@ -44,7 +55,7 @@ const api: EngineApi = {
     initializing = true;
     diagnostic = options.diagnostic;
     if (diagnostic && options.simulateGpuFailure) simulateGpuFailure(options.simulateGpuFailure);
-    await initWasm({ module_or_path: new URL('./pkg/cgv_wasm_bg.wasm', import.meta.url) });
+    await ensureWasm();
     const created = await Engine.create(canvas, options.backend, fatal);
     if (disposed) {
       created.dispose();
@@ -85,6 +96,7 @@ const api: EngineApi = {
     disposed = true;
     loop?.stop();
     loop = undefined;
+    media?.releaseFrames();
     engine?.dispose();
     engine?.free();
     engine = undefined;
@@ -94,5 +106,20 @@ const api: EngineApi = {
     if (kind === 'device-loss') engine.diagnostic_device_loss();
     else engine.diagnostic_panic();
   },
+
+  async configureMedia(platform) {
+    if (media) throw new Error('The media library is already configured');
+    await ensureWasm();
+    media = new MediaService(new MediaLibrary(platform));
+  },
+  importMedia: (requests) => requireMedia().import(requests),
+  mediaSnapshot: () => requireMedia().snapshot(),
+  setMediaStatus: (id, status) => requireMedia().setStatus(id, status),
+  attachProxy: (id, source) => requireMedia().attachProxy(id, source),
+  removeMedia: (id) => requireMedia().remove(id),
+  mediaStats: () => requireMedia().stats(),
+  frameCount: (id) => requireMedia().frameCount(id),
+  readFrame: (id, frame, crop) => requireMedia().readback(id, frame, crop),
+  releaseFrames: () => requireMedia().releaseFrames(),
 };
 expose(api);

@@ -55,12 +55,191 @@ body,
   gap: 8px;
 }
 
+.cgv-workspace {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) 1fr;
+  min-height: 0;
+}
+
 .cgv-stage {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  min-width: 0;
   padding: 16px;
+}
+
+.cgv-library {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px;
+  background: var(--cgv-panel);
+  border-right: 1px solid var(--cgv-border);
+  overflow: auto;
+}
+
+.cgv-library-drop {
+  outline: 2px dashed var(--cgv-accent);
+  outline-offset: -6px;
+}
+
+.cgv-library-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cgv-library-header h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--cgv-muted);
+}
+
+.cgv-library-empty {
+  margin: 24px 8px;
+  font-size: 13px;
+  color: var(--cgv-muted);
+  text-align: center;
+}
+
+.cgv-library-notice {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  border: 1px solid var(--cgv-warn);
+  border-radius: 4px;
+  color: var(--cgv-warn);
+}
+
+.cgv-library-notice-error {
+  border-color: var(--cgv-danger);
+  color: var(--cgv-danger);
+}
+
+.cgv-library-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cgv-media-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 6px;
+  background: #22262d;
+}
+
+.cgv-media-item:hover .cgv-media-remove {
+  opacity: 1;
+}
+
+.cgv-media-poster {
+  width: 112px;
+  height: 63px;
+  object-fit: contain;
+  background: #000;
+  border-radius: 3px;
+}
+
+.cgv-media-poster-empty {
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  color: var(--cgv-muted);
+  text-transform: uppercase;
+}
+
+.cgv-media-waveform {
+  width: 112px;
+  height: 63px;
+  background: #11151b;
+  border-radius: 3px;
+}
+
+.cgv-media-text {
+  min-width: 0;
+}
+
+.cgv-media-text p {
+  margin: 0;
+}
+
+.cgv-media-name {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cgv-media-meta,
+.cgv-media-size {
+  font-size: 11px;
+  color: var(--cgv-muted);
+}
+
+.cgv-media-status {
+  margin-top: 4px !important;
+  font-size: 11px;
+  color: var(--cgv-warn);
+}
+
+.cgv-media-status progress {
+  display: block;
+  width: 100%;
+  height: 4px;
+}
+
+.cgv-media-status-ok {
+  color: #7fd18b;
+}
+
+.cgv-media-status-error {
+  color: var(--cgv-danger);
+}
+
+.cgv-media-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  padding: 0 6px;
+  opacity: 0;
+}
+
+.cgv-media-remove:focus-visible {
+  opacity: 1;
+}
+
+.cgv-dev-overlay {
+  position: fixed;
+  top: 44px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  font:
+    12px ui-monospace,
+    'Cascadia Code',
+    monospace;
+  background: rgb(10 11 14 / 0.85);
+  border: 1px solid var(--cgv-border);
+  border-radius: 6px;
+  pointer-events: none;
 }
 
 /* Letterboxes a 16:9 program monitor inside whatever space the stage leaves. */

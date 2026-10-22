@@ -4,27 +4,28 @@ import type { EngineApi, EngineEvent, FrameStats, InitOptions } from './types';
 export interface EngineClient {
   api: ReturnType<typeof wrap<EngineApi>>;
   init(canvas: OffscreenCanvas, options: InitOptions): ReturnType<EngineApi['init']>;
+  /** Receives frame stats from the worker's render loop (about ten times a second). */
+  onStats(listener: ((stats: FrameStats) => void) | null): void;
   /** Proves this page and the worker share memory (needs cross-origin isolation). */
   checkSharedMemory(): Promise<boolean>;
   dispose(): void;
 }
 
-export function createEngineClient(
-  onError: (message: string) => void,
-  onStats: (stats: FrameStats) => void,
-): EngineClient {
+/** Starts an engine worker. `onError` reports fatal errors (worker crash, GPU loss, Rust panic). */
+export function createEngineClient(onError: (message: string) => void): EngineClient {
   const worker = new Worker(new URL('./worker.ts', import.meta.url), {
     type: 'module',
     name: 'cgv-engine',
   });
   const api = wrap<EngineApi>(worker);
   let disposed = false;
+  let statsListener: ((stats: FrameStats) => void) | null = null;
   worker.addEventListener('message', (event: MessageEvent<EngineEvent | undefined>) => {
     if (disposed || !event.data || typeof event.data !== 'object') return;
     if (event.data.type === 'engine-fatal') onError(event.data.message);
     else if (event.data.type === 'engine-stats') {
       const { frames, presented, width, height } = event.data;
-      onStats({ frames, presented, width, height });
+      statsListener?.({ frames, presented, width, height });
     }
   });
   worker.addEventListener('error', (event) => {
@@ -39,6 +40,9 @@ export function createEngineClient(
     init(canvas, options) {
       return api.init(transfer(canvas, [canvas]), options);
     },
+    onStats(listener) {
+      statsListener = listener;
+    },
     async checkSharedMemory() {
       if (typeof SharedArrayBuffer !== 'function' || !crossOriginIsolated) return false;
       const buffer = new SharedArrayBuffer(4);
@@ -49,6 +53,7 @@ export function createEngineClient(
     dispose() {
       if (disposed) return;
       disposed = true;
+      statsListener = null;
       // A crashed WASM instance may never answer RPC. Always terminate its worker.
       const timer = setTimeout(() => worker.terminate(), 200);
       void api

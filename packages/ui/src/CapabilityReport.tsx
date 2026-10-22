@@ -1,12 +1,6 @@
 import type { CapabilityProbe, CapabilityReport as Report } from '@cgv/engine-client';
+import type { NativeInfo } from './platform';
 import type { MonitorState } from './ProgramMonitor';
-
-export interface NativeInfo {
-  product: string;
-  version: string;
-  os: string;
-  arch: string;
-}
 
 interface StripProps {
   engine: MonitorState;

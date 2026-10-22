@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "comlink": "^4.4.2"
+    "comlink": "^4.4.2",
+    "mediabunny": "1.61.3"
   }
 }

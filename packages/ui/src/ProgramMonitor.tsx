@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import {
   createEngineClient,
   type BackendPreference,
+  type EngineClient,
   type DiagnosticFault,
   type EngineInfo,
   type GpuFault,
@@ -25,12 +26,24 @@ interface Props {
   diagnostic: boolean;
   gpuFault?: GpuFault;
   onState: (state: MonitorState) => void;
+  /** The engine worker behind this monitor, for media and diagnostics; null once it is gone. */
+  onClient: (client: EngineClient | null) => void;
 }
 
 const startupTimeout = 30000;
 
-/** The program monitor: a canvas whose rendering lives entirely in the engine worker. */
-export function ProgramMonitor({ generation, backend, diagnostic, gpuFault, onState }: Props) {
+/**
+ * The program monitor: a canvas whose rendering lives entirely in the engine
+ * worker. Each mount owns one worker; Retry (a new `generation`) starts another.
+ */
+export function ProgramMonitor({
+  generation,
+  backend,
+  diagnostic,
+  gpuFault,
+  onState,
+  onClient,
+}: Props) {
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const container = host.current!;
@@ -50,14 +63,17 @@ export function ProgramMonitor({ generation, backend, diagnostic, gpuFault, onSt
       failed = true;
       clearTimeout(timeout);
       onState({ status: 'error', message, duringStartup: !ready });
+      onClient(null);
       client.dispose();
     };
-    const client = createEngineClient(fail, (stats) => {
+    const client = createEngineClient(fail);
+    client.onStats((stats) => {
       canvas.dataset.frames = String(stats.frames);
       canvas.dataset.presented = String(stats.presented);
       canvas.dataset.renderWidth = String(stats.width);
       canvas.dataset.renderHeight = String(stats.height);
     });
+    onClient(client);
     function measure(): PhysicalSize {
       const rect = container.getBoundingClientRect();
       const size = {
@@ -111,9 +127,10 @@ export function ProgramMonitor({ generation, backend, diagnostic, gpuFault, onSt
       clearTimeout(timeout);
       observer.disconnect();
       dprQuery?.removeEventListener('change', onDprChange);
+      onClient(null);
       client.dispose();
       canvas.remove();
     };
-  }, [generation, backend, diagnostic, gpuFault, onState]);
+  }, [generation, backend, diagnostic, gpuFault, onState, onClient]);
   return <div className="cgv-monitor" ref={host} />;
 }
