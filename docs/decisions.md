@@ -2,7 +2,45 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
-## 2026-10-22: Phase 0 answers
+## 2026-10-23: Phase 1 answers
+
+- **Demuxer:** Mediabunny (MPL-2.0), running in the engine worker. Our own WebCodecs decoder wrappers, decoder pool, frame-accurate seek and frame cache sit on top of its packet API.
+- **Proxy format:** 720p H.264 MP4 with a keyframe every 0.5 s and AAC audio.
+  - The encoder is the OS one where available: Media Foundation `h264_mf` on Windows, VideoToolbox on macOS. NVENC is used when the driver supports it.
+- **Web, undecodable codecs:** the import is rejected with a message that names the codec and points to the desktop app. Nothing is uploaded.
+- **Web storage:** File System Access handles where the browser has them (Chrome, Edge). Other browsers copy the file into OPFS.
+- **FFmpeg on desktop:** `ffmpeg` and `ffprobe` run as child processes of the native side. There are no in-process libav bindings.
+- **FFmpeg build:** a pinned BtbN LGPL shared release, fetched by `scripts/build-ffmpeg-lgpl.mjs`.
+  - The script verifies the SHA-256 and rejects builds configured with `--enable-gpl` or `--enable-nonfree`.
+  - The build is LGPL-3.0, because BtbN configures with `--enable-version3`.
+- **Test media:** synthetic clips generated locally by `scripts/make-test-media.mjs` with the LGPL FFmpeg.
+  - They are published once as a GitHub release asset, and `pnpm fetch-test-media` downloads them by SHA-256.
+
+## 2026-10-23: Phase 1 findings and defaults
+
+- **Dev machine:** FFmpeg 9.0.1 (`BtbN.FFmpeg.LGPL.Shared.9.0`) is installed with winget.
+  - NVENC fails with driver 457.51 ("Cannot load cuMemAllocAsync"). It needs a newer NVIDIA driver.
+  - `h264_mf`, `libopenh264`, `libkvazaar` (HEVC), `libvpx-vp9`, `prores_ks` and `libmp3lame` all work.
+- **Pinned FFmpeg release:** BtbN `autobuild-2026-08-31-13-27`, 9.0 LGPL shared. BtbN keeps the last build of each month for longer than its daily builds.
+- **Proxy encoder order:** `h264_nvenc`, then `h264_mf` (Windows) or `h264_videotoolbox` (macOS), then `libopenh264`.
+  - `libopenh264` is a fallback for CI and development only. Before release we check whether shipping it carries H.264 patent obligations.
+- **Proxies keep the original's frame grid:** `-fps_mode passthrough`, so frame N of the proxy is frame N of the source. They also keep its orientation (`-noautorotate`, so rotation stays metadata).
+- **Decoder surfaces:**
+  - The frame cache stores copies in the frame's own format (NV12 or I420), not decoder outputs.
+  - At most 5 outputs are held as look-ahead for sequential reads, and frames before the target are closed as they arrive.
+  - Holding more stalls hardware decoders: `flush()` never resolved before this change.
+- **Chrome colour conversion:**
+  - For CPU-backed YUV frames, Chrome's `drawImage` and `copyTo(RGBA)` use the BT.601 matrix even when the frame is tagged BT.709. That covers software-decoded I420 and NV12 copies.
+  - Hardware frames convert correctly.
+  - So seek tests compare raw I420 bytes with FFmpeg's decode, which is exact. Phase 3 converts YUV on the GPU with each frame's own matrix.
+  - Until then, thumbnails of software-decoded video can be slightly off in colour.
+- **Test media colour tags:** frames are tagged with `setparams` in the filter graph. FFmpeg encoders take colour metadata from frames, so `-color_*` output options alone left primaries and transfer "unknown".
+- **HEVC:**
+  - Chrome on this machine decodes HEVC in hardware.
+  - WebView2 on Windows 10 needs the HEVC Video Extensions, so the desktop app proxies HEVC there.
+  - CI's software Chrome cannot decode HEVC, so the web app refuses it with the codec-named message.
+- **Mediabunny pin:** 1.61.3 (released 2026-10-05). Newer releases were days old.
+- **Desktop file access:** the `cgv-media` protocol serves only registered ids. Responses are capped at 8 MiB per request, with CORS and `Cross-Origin-Resource-Policy: cross-origin` because the app is cross-origin isolated.
 
 - **Targets:** Windows 10/11 x64 first, macOS second. Chrome and Edge come first on the web; Safari and Firefox are best-effort. CI builds the desktop app on Windows only for now.
 - **Tooling:**

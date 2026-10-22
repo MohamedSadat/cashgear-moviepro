@@ -20,7 +20,7 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
 ## Hard limits
 
 - No GPL, AGPL or LGPL dependencies. `cargo deny check licenses` and `pnpm licenses:check` must pass, and `pnpm licenses:selftest` proves they fail on GPL.
-- FFmpeg (from Phase 1) is an LGPL build without `--enable-gpl` or `--enable-nonfree`, dynamically linked, and runs only on the desktop native side.
+- FFmpeg is the pinned LGPL build from `pnpm setup:ffmpeg`, without `--enable-gpl` or `--enable-nonfree`. It runs only as `ffmpeg` and `ffprobe` child processes of the desktop native side, never linked in.
 - The UI never touches media or GPU state. It sends engine commands and renders the snapshots that come back. Raw frames never cross to native code.
 
 ## Layout
@@ -32,6 +32,10 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `cgv-native`: desktop-only native side.
   - `cgv-time`, `cgv-model`, `cgv-media`, `cgv-audio`.
 - `packages/engine-client`: engine worker, comlink client, frame loop and capability probe. Generated bindings go in `src/pkg/` (gitignored).
+  - `media/`: Mediabunny demuxing, WebCodecs decoder sessions, the decoder pool, the frame cache, frame-accurate seeks and probes.
+  - `jobs/`: the thumbnail and waveform worker.
+  - `storage/`: the OPFS cache and the IndexedDB library store.
+- `crates/cgv-media`: the media library model (Rust, via WASM). `crates/cgv-native`: the cgv-media protocol registry, byte ranges, ffprobe, proxies and the cache folder.
 - `packages/ui`: React components.
 - `apps/web`: Vite app.
 - `apps/desktop/src-tauri`: Tauri 2 shell.
@@ -42,6 +46,8 @@ Browser-only Rust dependencies sit under `cfg(target_arch = "wasm32")`, so nativ
 
 ```bash
 pnpm install && pnpm setup:wasm   # first time: wasm32 target + wasm-bindgen-cli 0.2.129 in .tools/
+pnpm setup:ffmpeg                 # pinned LGPL FFmpeg into .tools/ffmpeg (hash and license checked)
+pnpm fetch-test-media             # test clips into tests/media (CI sets CGV_REQUIRE_FFMPEG=1)
 pnpm dev:web                      # engine (debug) + Vite on http://127.0.0.1:5173, rebuilds on .rs/.wgsl changes
 pnpm dev:desktop                  # the same UI in Tauri
 pnpm build                        # release WASM + web build (run before typecheck, clippy, e2e, desktop)
@@ -67,3 +73,6 @@ Gotchas:
 - Never set the canvas size by hand, because wgpu `configure` does it.
 - Use a fresh canvas and worker on every retry, because a transferred canvas cannot be transferred again.
 - Never report a software-GPU result as hardware performance.
+- Decoders have few output surfaces. Close or copy every VideoFrame promptly: the cache keeps sRGB RGBA copies, and at most 5 decoder outputs are held for look-ahead.
+- Chrome draws a VideoFrame built from an NV12 buffer with the BT.601 matrix whatever its colour space says. Copy with `copyTo({ format: 'RGBA', colorSpace: 'srgb' })` instead.
+- FFmpeg encoders take colour tags from the frames: use `setparams` in a filter graph, because `-color_*` output options are not enough.

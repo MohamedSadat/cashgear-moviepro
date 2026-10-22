@@ -34,13 +34,20 @@ The production host and domain are a Phase 11 decision.
 ## Desktop
 
 - `pnpm desktop:build` builds `target/release/cgv-desktop.exe`, with no installer yet.
-- The Tauri config sets the same three headers and a CSP that allows `'wasm-unsafe-eval'` and same-origin workers.
+- The Tauri config sets the same three headers and a CSP that allows `'wasm-unsafe-eval'` and same-origin workers. It also allows `connect-src` to the `cgv-media` protocol (`http://cgv-media.localhost` on Windows).
+- **FFmpeg:**
+  - The app runs `ffmpeg` and `ffprobe` as child processes. It looks for them in `CGV_FFMPEG_DIR`, then in an `ffmpeg` folder next to the executable, then on PATH.
+  - It refuses builds configured with `--enable-gpl` or `--enable-nonfree`.
+  - For development, `pnpm setup:ffmpeg` puts the pinned LGPL build in `.tools/ffmpeg`.
+  - The installer (Phase 11) ships that folder with its `LICENSE.txt` and a source offer.
+- **Cache:** proxies, thumbnails and waveform peaks live in the app cache folder: `%LOCALAPPDATA%\com.cashgear.video` on Windows.
 - Signed installers and the auto-updater come in Phase 11.
 
 ## Diagnostic URLs
 
-| URL                                             | Effect                                                                                        |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `?gpu=webgl2`                                   | Skip WebGPU and use the WebGL2 renderer.                                                      |
-| `?diagnostic=1`                                 | Show the "Simulate device loss" and "Simulate Rust panic" buttons.                            |
-| `?diagnostic=1&fault=adapter` or `fault=device` | Make the worker's WebGPU adapter or device request fail, which exercises the WebGL2 fallback. |
+| URL                                             | Effect                                                                                                                                          |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `?gpu=webgl2`                                   | Skip WebGPU and use the WebGL2 renderer.                                                                                                        |
+| `?diagnostic=1`                                 | Show the "Simulate device loss" and "Simulate Rust panic" buttons, and expose `window.__cgv` (engine client, media library, platform) to tests. |
+| `?dev=1` or Ctrl+Shift+D                        | Show the dev overlay: open VideoFrames, frame cache size, decoders.                                                                             |
+| `?diagnostic=1&fault=adapter` or `fault=device` | Make the worker's WebGPU adapter or device request fail, which exercises the WebGL2 fallback.                                                   |
