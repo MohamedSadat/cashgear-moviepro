@@ -11,6 +11,7 @@
   "scripts": {
     "setup:wasm": "node scripts/setup-wasm.mjs",
     "build:wasm": "node scripts/build-wasm.mjs",
+    "setup:ffmpeg": "node scripts/build-ffmpeg-lgpl.mjs",
     "dev:web": "node scripts/dev.mjs",
     "dev:desktop": "pnpm --filter @cgv/desktop dev",
     "build": "pnpm build:wasm --release && pnpm --filter @cgv/web build",
@@ -25,6 +26,7 @@
     "licenses:check": "node scripts/check-licenses.mjs",
     "licenses:selftest": "node scripts/license-selftest.mjs",
     "fetch-test-media": "node scripts/fetch-test-media.mjs",
+    "make-test-media": "node scripts/make-test-media.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,32 @@ export function bindgenPath() {
     Boolean,
   );
   return candidates.find(existsSync) ?? 'wasm-bindgen';
+}
+
+/** The folder holding ffmpeg and ffprobe: CGV_FFMPEG_DIR, then .tools/ffmpeg/bin, else PATH (''). */
+export function ffmpegDir() {
+  if (process.env.CGV_FFMPEG_DIR) return process.env.CGV_FFMPEG_DIR;
+  const tools = join(root, '.tools', 'ffmpeg', 'bin');
+  return existsSync(tools) ? tools : '';
+}
+export function ffmpegTool(name, dir = ffmpegDir()) {
+  const exe = process.platform === 'win32' ? name + '.exe' : name;
+  return dir ? join(dir, exe) : exe;
+}
+/** Reads `ffmpeg -version` and reports its license-relevant configure flags. */
+export function ffmpegBuildInfo(dir = ffmpegDir()) {
+  const result = spawnSync(ffmpegTool('ffmpeg', dir), ['-hide_banner', '-version'], {
+    encoding: 'utf8',
+  });
+  if (result.status !== 0)
+    throw new Error('ffmpeg is not runnable: ' + (result.stderr || result.error));
+  const configuration = result.stdout.match(/^configuration:(.*)$/m)?.[1] ?? '';
+  return {
+    version: result.stdout.split('\n')[0].trim(),
+    gpl: configuration.includes('--enable-gpl'),
+    nonfree: configuration.includes('--enable-nonfree'),
+    version3: configuration.includes('--enable-version3'),
+  };
 }
 
 export function run(command, args = [], options = {}) {
