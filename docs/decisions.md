@@ -2,6 +2,40 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-23: Phase 2 answers
+
+- **Track model:** free tracks, as in Filmora.
+  - Any clip type can go on any track. Higher tracks draw on top.
+  - A video clip keeps its own sound. "Detach audio" moves the sound to a linked audio clip on another track.
+- **Project defaults:** 1920×1080 at 30 fps with 48 kHz stereo audio.
+  - Presets: 16:9, 9:16 (1080×1920), 1:1 (1080×1080), 4K UHD and custom.
+  - Settings can be changed at any time.
+- **Project file:** one versioned JSON `.cgvproj` file that points to media by path.
+  - Thumbnails, waveforms and proxies stay in the app cache, linked to each media file, and are rebuilt when missing.
+- **Web projects:** stored in the browser's private storage (OPFS), with a recent-projects list.
+  - Autosave and recovery work in every browser.
+  - Export downloads a `.cgvproj` file and Open imports one; its media then needs relinking.
+
+## 2026-10-23: Phase 2 defaults
+
+Proposed alongside the questions; the user raised no objection.
+
+- **Media library per project:** each project has its own media bin. The Phase 1 library moves into the first project.
+- **Time and IDs:**
+  - Times are flicks, and every edit snaps to the project's frame boundaries.
+  - Tracks, clips and markers get counter IDs within the project, so replays and undo give exactly the same result.
+- **Undo history:** in memory only, not saved with the project. There is no small limit, because the exit test needs 1,000 undos.
+- **Autosave:**
+  - Every 30 s after a change, into app storage: OPFS on the web, the app data folder on desktop. It never overwrites the saved file.
+  - On startup the app offers to recover when an autosave is newer than the last save.
+- **Relink:**
+  - A project with missing media opens a relink dialog that matches files by name, size and duration.
+  - A source file that has changed (different size or modified time) drops its old proxy and caches. This closes the Phase 1 gap.
+- **UI this phase:**
+  - A project bar (New, Open, Save, Save As, Undo, Redo, Settings), the recovery prompt, the relink dialog and an "Add to timeline" action.
+  - A plain read-only list of tracks and clips. The canvas timeline comes in Phase 4.
+- **Pushing:** commits stay local, and every push needs the user's go-ahead, because each push to `main` redeploys video.cashgearerp.com. The plan is one push near the end of the phase.
+
 ## 2026-10-23: Azure Static Web Apps
 
 - **Early web deploy:** the user connected the repository to Azure Static Web Apps ahead of Phase 11. The production host and domain are still the Phase 11 question.
