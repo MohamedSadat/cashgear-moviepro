@@ -1,4 +1,8 @@
 //! The only JavaScript-facing engine API. It runs in the engine Web Worker.
+mod media_ref;
+
+pub use media_ref::media_ref;
+
 #[cfg(target_arch = "wasm32")]
 mod bridge {
     use std::cell::RefCell;
@@ -114,5 +118,125 @@ mod bridge {
         pub fn snapshot(&self) -> Result<String, JsValue> {
             serde_json::to_string(self.inner.items()).map_err(js_error)
         }
+    }
+
+    fn parse<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, JsValue> {
+        serde_json::from_str(text).map_err(js_error)
+    }
+
+    fn checked_id(id: &str) -> Result<&str, JsValue> {
+        if cgv_model::valid_project_id(id) {
+            Ok(id)
+        } else {
+            Err(js_error(format!("Invalid project id {id:?}")))
+        }
+    }
+
+    /// The open project and its undo history. Commands, snapshots and media
+    /// references cross the boundary as JSON matching `cgv_model`; times are flicks.
+    #[wasm_bindgen]
+    pub struct ProjectSession {
+        inner: cgv_model::Session,
+    }
+
+    #[wasm_bindgen]
+    impl ProjectSession {
+        /// A new project with the default settings.
+        #[wasm_bindgen(constructor)]
+        pub fn new(id: &str, name: &str) -> Result<ProjectSession, JsValue> {
+            let project = cgv_model::Project::new(checked_id(id)?, name.trim());
+            cgv_model::validate(&project).map_err(js_error)?;
+            Ok(Self {
+                inner: cgv_model::Session::new(project),
+            })
+        }
+        /// Opens `.cgvproj` text. `recovered` marks an autosave (unsaved changes);
+        /// `id` gives the project a new id (an imported copy).
+        pub fn open(
+            text: &str,
+            recovered: bool,
+            id: Option<String>,
+        ) -> Result<ProjectSession, JsValue> {
+            let mut project = cgv_model::file::from_json(text).map_err(js_error)?;
+            if let Some(id) = id {
+                project.id = checked_id(&id)?.to_string();
+            }
+            let inner = if recovered {
+                cgv_model::Session::recovered(project)
+            } else {
+                cgv_model::Session::new(project)
+            };
+            Ok(Self { inner })
+        }
+        /// The `.cgvproj` text of the current state.
+        pub fn save(&self) -> String {
+            cgv_model::file::to_json(self.inner.project())
+        }
+        pub fn generation(&self) -> f64 {
+            self.inner.generation() as f64
+        }
+        /// Records that the state with `generation` was written to the project file.
+        pub fn mark_saved(&mut self, generation: f64) {
+            self.inner.mark_saved_at(generation as u64);
+        }
+        pub fn mark_autosaved(&mut self, generation: f64) {
+            self.inner.mark_autosaved_at(generation as u64);
+        }
+        pub fn snapshot(&self) -> Result<String, JsValue> {
+            serde_json::to_string(&self.inner.snapshot()).map_err(js_error)
+        }
+        /// Runs a command and returns its outcome.
+        pub fn execute(&mut self, command: &str) -> Result<String, JsValue> {
+            let command: cgv_model::Command = parse(command)?;
+            let outcome = self.inner.execute(&command).map_err(js_error)?;
+            serde_json::to_string(&outcome).map_err(js_error)
+        }
+        pub fn undo(&mut self) -> bool {
+            self.inner.undo()
+        }
+        pub fn redo(&mut self) -> bool {
+            self.inner.redo()
+        }
+        pub fn begin_group(&mut self, label: &str) {
+            self.inner.begin_group(label);
+        }
+        pub fn end_group(&mut self) {
+            self.inner.end_group();
+        }
+        pub fn cancel_group(&mut self) {
+            self.inner.cancel_group();
+        }
+        /// Records a relinked or changed media file. Not an undo step.
+        pub fn update_media(&mut self, media: &str) -> Result<(), JsValue> {
+            self.inner.update_media(parse(media)?).map_err(js_error)
+        }
+        /// The clips at `time` (flicks), bottom track first.
+        pub fn clips_at(&self, time: f64) -> Result<String, JsValue> {
+            let time = cgv_time::Flicks(time as i64);
+            let clips = cgv_model::query::clips_at(self.inner.project(), time);
+            serde_json::to_string(&clips).map_err(js_error)
+        }
+        /// Snap targets. `exclude` is a JSON array of the clip ids being dragged.
+        pub fn snap_points(&self, playhead: Option<f64>, exclude: &str) -> Result<String, JsValue> {
+            let exclude: Vec<cgv_model::ClipId> = parse(exclude)?;
+            let points = cgv_model::query::snap_points(
+                self.inner.project(),
+                playhead.map(|time| cgv_time::Flicks(time as i64)),
+                &exclude,
+            );
+            serde_json::to_string(&points).map_err(js_error)
+        }
+        /// The resolution presets offered for new projects and in settings.
+        pub fn presets() -> Result<String, JsValue> {
+            serde_json::to_string(&cgv_model::PRESETS).map_err(js_error)
+        }
+    }
+
+    /// The project's reference to a library item: JSON `MediaItem` in, `MediaRef` out.
+    #[wasm_bindgen]
+    pub fn media_ref(item: &str, modified: Option<f64>) -> Result<String, JsValue> {
+        let item: cgv_media::MediaItem = parse(item)?;
+        let media = crate::media_ref(&item, modified.map(|ms| ms as i64));
+        serde_json::to_string(&media).map_err(js_error)
     }
 }

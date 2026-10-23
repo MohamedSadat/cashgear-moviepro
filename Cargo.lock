@@ -430,7 +430,10 @@ version = "0.1.0"
 dependencies = [
  "cgv-engine",
  "cgv-media",
+ "cgv-model",
+ "cgv-time",
  "js-sys",
+ "serde",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
