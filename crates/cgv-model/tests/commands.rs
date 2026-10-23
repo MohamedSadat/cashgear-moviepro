@@ -1451,6 +1451,21 @@ fn dirty_follows_the_saved_state_through_undo() {
 }
 
 #[test]
+fn a_save_that_ends_after_more_edits_marks_the_state_it_wrote() {
+    let mut s = session();
+    append(&mut s, 0, "v", 0, 30);
+    let written = s.generation();
+    append(&mut s, 0, "v", 0, 30);
+    s.mark_saved_at(written);
+    assert!(s.is_dirty() && s.needs_autosave());
+    s.undo();
+    assert!(!s.is_dirty(), "the written state is the saved one");
+    s.mark_autosaved_at(s.generation());
+    s.redo();
+    assert!(s.needs_autosave());
+}
+
+#[test]
 fn relinking_media_reaches_every_undo_step() {
     let mut s = session();
     append(&mut s, 0, "v", 0, 30);

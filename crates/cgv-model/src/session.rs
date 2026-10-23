@@ -218,13 +218,30 @@ impl Session {
         self.is_dirty() && self.autosaved != Some(self.generation)
     }
 
+    /// The current state's generation (see [`Snapshot::generation`]).
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
     pub fn mark_saved(&mut self) {
-        self.saved = Some(self.generation);
-        self.autosaved = Some(self.generation);
+        self.mark_saved_at(self.generation);
+    }
+
+    /// Records that the state with `generation` is what the file now holds. Saving
+    /// is asynchronous: the user may have edited further by the time the write ends.
+    pub fn mark_saved_at(&mut self, generation: u64) {
+        self.saved = Some(generation);
+        if generation == self.generation {
+            self.autosaved = Some(generation);
+        }
     }
 
     pub fn mark_autosaved(&mut self) {
-        self.autosaved = Some(self.generation);
+        self.mark_autosaved_at(self.generation);
+    }
+
+    pub fn mark_autosaved_at(&mut self, generation: u64) {
+        self.autosaved = Some(generation);
     }
 
     /// Records where a media file is now (relinking, or a file that changed on disk).
