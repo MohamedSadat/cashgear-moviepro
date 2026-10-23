@@ -7,4 +7,13 @@ export {
   type MediaLibraryState,
   type MediaVisuals,
 } from './media/useMediaLibrary';
-export { mediaAccept, newMediaId, type MediaPlatform, type NativeInfo } from './platform';
+export {
+  mediaAccept,
+  newMediaId,
+  type LocatedMedia,
+  type MediaPlatform,
+  type NativeInfo,
+  type ProjectStore,
+} from './platform';
+export { useProject, type ProjectState, type RecoveryPrompt } from './project/useProject';
+export { TimelineOutline } from './timeline/TimelineOutline';

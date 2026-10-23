@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createJobsClient,
+  fileChanged,
   type CacheStore,
   type EngineClient,
+  type ImportOutcome,
   type ImportRequest,
   type JobsClient,
   type MediaItem,
+  type MediaRef,
   type MediaSourceRef,
   type MediaStatus,
 } from '@cgv/engine-client';
@@ -17,25 +20,50 @@ export interface MediaVisuals {
   waveform?: { peaks: Int8Array; peaksPerSecond: number };
 }
 
+/** What loading a project's media found. */
+export interface LoadResult {
+  /** Media ids with no file to open. */
+  missing: string[];
+  /** Files that changed since the project last saw them, with their new details. */
+  changed: MediaRef[];
+}
+
 export interface MediaLibraryState {
+  /** Media open in the engine: the project's, plus removed items kept for undo. */
   items: MediaItem[];
   visuals: Record<string, MediaVisuals>;
   /** Import or proxy problems to show the user, newest last. */
   notices: string[];
-  /** Remembered files that need permission again (web). */
+  /** Files that need permission again (web). */
   waiting: number;
   busy: boolean;
-  pick(): Promise<void>;
-  importDrop(data: DataTransfer): Promise<void>;
-  importFiles(files: FileList | File[]): Promise<void>;
-  grantAccess(): Promise<void>;
-  remove(id: string): Promise<void>;
-  dismissNotice(index: number): void;
+  /** True once the engine's media library has started. */
+  ready: boolean;
+  /** Opens a project's media, closing whatever was open before. */
+  load(media: MediaRef[]): Promise<LoadResult>;
+  /** Imports new files; the project adds the references they return. */
+  pick(): Promise<MediaRef[]>;
+  importDrop(data: DataTransfer): Promise<MediaRef[]>;
+  importFiles(files: FileList | File[]): Promise<MediaRef[]>;
   /** Test support: imports requests directly. */
-  importRequests(requests: ImportRequest[]): Promise<void>;
+  importRequests(requests: ImportRequest[]): Promise<MediaRef[]>;
+  /** Opens a replacement for a missing or moved file under the media's id. */
+  relink(request: ImportRequest): Promise<MediaRef | null>;
+  /** Asks for access to remembered files again; returns any that changed meanwhile. */
+  grantAccess(): Promise<MediaRef[]>;
+  /** Imports what Phase 1 remembered, before projects existed. */
+  importLegacy(): Promise<MediaRef[]>;
+
+  /** The source of an open item. */
+  source(id: string): MediaSourceRef | null;
+  dismissNotice(index: number): void;
+  notice(message: string): void;
 }
 
-const setUpClients = new WeakMap<EngineClient, Promise<ImportRequest[]>>();
+/** Native drops arrive outside any UI action: the project adds what they import. */
+export interface MediaLibraryEvents {
+  imported(media: MediaRef[]): void;
+}
 
 const thumbsKey = (id: string) => `media/${id}/filmstrip.json`;
 const thumbKey = (id: string, index: number) => `media/${id}/thumb-${index}.jpg`;
@@ -105,19 +133,28 @@ async function loadVisuals(
   return visuals;
 }
 
-/** The media library as seen by the UI: engine snapshots plus thumbnails and waveforms. */
+type Success = Extract<ImportOutcome, { item: MediaItem }>;
+
+const configured = new WeakMap<EngineClient, Promise<void>>();
+
+/** The engine's open media as the UI sees it: items, thumbnails and waveforms. */
 export function useMediaLibrary(
   client: EngineClient | null,
   platform: MediaPlatform,
+  events: MediaLibraryEvents,
 ): MediaLibraryState {
   const [items, setItems] = useState<MediaItem[]>([]);
   const [visuals, setVisuals] = useState<Record<string, MediaVisuals>>({});
   const [notices, setNotices] = useState<string[]>([]);
   const [waiting, setWaiting] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [ready, setReady] = useState(false);
   const jobs = useRef<JobsClient | null>(null);
   const sources = useRef(new Map<string, { source: MediaSourceRef; proxy?: MediaSourceRef }>());
-  const shownClient = useRef<EngineClient | null>(null);
+  /** What the open project expects of each file, for change detection. */
+  const expected = useRef(new Map<string, MediaRef>());
+  const eventsRef = useRef(events);
+  eventsRef.current = events;
 
   const notice = useCallback((message: string) => setNotices((list) => [...list, message]), []);
 
@@ -136,6 +173,18 @@ export function useMediaLibrary(
       const next = [...list];
       next[index] = item;
       return next;
+    });
+  }, []);
+
+  const dropVisuals = useCallback((ids: string[] | null) => {
+    setVisuals((all) => {
+      const rest: Record<string, MediaVisuals> = {};
+      for (const [id, entry] of Object.entries(all)) {
+        if (ids === null || ids.includes(id))
+          for (const url of entry.thumbnails) URL.revokeObjectURL(url);
+        else rest[id] = entry;
+      }
+      return rest;
     });
   }, []);
 
@@ -183,117 +232,189 @@ export function useMediaLibrary(
     [platform, refreshVisuals, upsert],
   );
 
+  /**
+   * Imports `requests`. Files that differ from what the project expects (or are
+   * relinked, with `invalidate`) lose their cached thumbnails, waveform and proxy
+   * before anything is drawn from them.
+   */
   const importInto = useCallback(
-    async (engine: EngineClient, requests: ImportRequest[], remember: boolean) => {
-      if (!requests.length) return;
+    async (
+      engine: EngineClient,
+      requests: ImportRequest[],
+      options: { remember: boolean; invalidate?: boolean },
+    ) => {
+      const done: Success[] = [];
+      const failed: string[] = [];
+      const changed: MediaRef[] = [];
+      if (!requests.length) return { done, failed, changed };
       setBusy(true);
       try {
         const outcomes = await engine.api.importMedia(requests);
-        const remembered: { id: string; source: MediaSourceRef }[] = [];
         for (const outcome of outcomes) {
           if ('error' in outcome) {
             const request = requests.find((r) => r.id === outcome.id);
             notice(
-              `${request ? requestName(request) : 'A file'} could not be imported: ${outcome.error}`,
+              `${request ? requestName(request) : 'A file'} could not be opened: ${outcome.error}`,
             );
+            failed.push(outcome.id);
             continue;
           }
+          const before = expected.current.get(outcome.id);
+          const stale =
+            options.invalidate || (before && fileChanged(before, outcome.media, outcome.source));
+          if (stale) {
+            await platform.cache.remove(`media/${outcome.id}`);
+            await platform.dropProxy?.(outcome.id);
+            if (before && !options.invalidate) {
+              changed.push(outcome.media);
+              notice(`${outcome.item.name} changed since the project last used it.`);
+            }
+          }
+          expected.current.set(outcome.id, outcome.media);
           sources.current.set(outcome.id, { source: outcome.source });
-          remembered.push({ id: outcome.id, source: outcome.source });
           upsert(outcome.item);
           refreshVisuals(outcome.item);
           if (outcome.item.status.state === 'proxyNeeded') void runProxy(engine, outcome.item);
+          done.push(outcome);
         }
-        if (remember && remembered.length) await platform.remember(remembered);
+        if (options.remember && done.length)
+          await platform.remember(done.map(({ id, source }) => ({ id, source })));
       } finally {
         setBusy(false);
       }
+      return { done, failed, changed };
     },
     [notice, platform, refreshVisuals, runProxy, upsert],
   );
 
-  // Each engine worker gets its own library: restore the remembered media into it.
   useEffect(() => {
     if (!client) return;
-    if (shownClient.current !== client) {
-      // A new worker (first start or Retry) starts with an empty library.
-      shownClient.current = client;
-      setItems([]);
-      sources.current.clear();
-    }
-    let setup = setUpClients.get(client);
+    // A new worker (first start or Retry) starts with nothing open.
+    setReady(false);
+    setItems([]);
+    dropVisuals(null);
+    sources.current.clear();
+    let setup = configured.get(client);
     if (!setup) {
-      setup = client.api.configureMedia(platform.kind).then(async () => {
-        const { ready, waiting: pending } = await platform.restore();
-        setWaiting(pending);
-        return ready;
-      });
-      setUpClients.set(client, setup);
-      setup
-        .then((ready) => importInto(client, ready, false))
-        .catch((error) => notice(`The media library could not start: ${String(error)}`));
+      setup = client.api.configureMedia(platform.kind);
+      configured.set(client, setup);
     }
-  }, [client, importInto, notice, platform]);
-
-  useEffect(() => {
-    if (!client || !platform.onNativeDrop) return;
-    return platform.onNativeDrop((requests) => {
-      void setUpClients.get(client)?.then(() => importInto(client, requests, true));
-    });
-  }, [client, importInto, platform]);
+    let live = true;
+    setup
+      .then(() => live && setReady(true))
+      .catch((error) => notice(`The media library could not start: ${String(error)}`));
+    return () => {
+      live = false;
+    };
+  }, [client, dropVisuals, notice, platform.kind]);
 
   const withClient = useCallback(
-    async (run: (engine: EngineClient) => Promise<void>) => {
-      if (!client) return;
-      await setUpClients.get(client);
-      await run(client);
+    async <T>(run: (engine: EngineClient) => Promise<T>, fallback: T): Promise<T> => {
+      if (!client) return fallback;
+      await configured.get(client);
+      return run(client);
     },
     [client],
   );
 
-  return {
-    items,
-    visuals,
-    notices,
-    waiting,
-    busy,
-    pick: () => withClient(async (engine) => importInto(engine, await platform.pickFiles(), true)),
-    importDrop: (data) =>
+  const importNew = useCallback(
+    (requests: ImportRequest[]) =>
       withClient(async (engine) => {
-        if (platform.fromDrop) await importInto(engine, await platform.fromDrop(data), true);
-      }),
-    importFiles: (files) =>
-      withClient((engine) =>
-        importInto(
-          engine,
-          [...files].map((file) => ({ id: crypto.randomUUID(), source: { kind: 'file', file } })),
-          true,
+        const { done } = await importInto(engine, requests, { remember: true });
+        return done.map((outcome) => outcome.media);
+      }, [] as MediaRef[]),
+    [importInto, withClient],
+  );
+
+  useEffect(() => {
+    if (!client || !platform.onNativeDrop) return;
+    return platform.onNativeDrop((requests) => {
+      void importNew(requests).then((media) => media.length && eventsRef.current.imported(media));
+    });
+  }, [client, importNew, platform]);
+
+  return useMemo<MediaLibraryState>(
+    () => ({
+      items,
+      visuals,
+      notices,
+      waiting,
+      busy,
+      ready,
+      load: (media) =>
+        withClient(
+          async (engine) => {
+            await engine.api.clearMedia();
+            sources.current.clear();
+            setItems([]);
+            dropVisuals(null);
+            expected.current = new Map(media.map((ref) => [ref.id, ref]));
+            const located = await platform.locate(media);
+            setWaiting(located.waiting);
+            const { failed, changed } = await importInto(engine, located.ready, {
+              remember: false,
+            });
+            return { missing: [...located.missing, ...failed], changed };
+          },
+          { missing: [], changed: [] },
         ),
-      ),
-    grantAccess: () =>
-      withClient(async (engine) => {
-        if (!platform.grantAccess) return;
-        const granted = await platform.grantAccess();
-        setWaiting((count) => Math.max(0, count - granted.length));
-        await importInto(engine, granted, false);
-      }),
-    remove: (id) =>
-      withClient(async (engine) => {
-        await engine.api.removeMedia(id);
-        const entry = sources.current.get(id);
-        sources.current.delete(id);
-        if (entry) await platform.forget(id, entry.source);
-        setItems((list) => list.filter((item) => item.id !== id));
-        setVisuals((all) => {
-          for (const url of all[id]?.thumbnails ?? []) URL.revokeObjectURL(url);
-          const rest = { ...all };
-          delete rest[id];
-          return rest;
-        });
-      }),
-    dismissNotice: (index) => setNotices((list) => list.filter((_, i) => i !== index)),
-    importRequests: (requests) => withClient((engine) => importInto(engine, requests, true)),
-  };
+      pick: () => withClient(async () => importNew(await platform.pickFiles()), [] as MediaRef[]),
+      importDrop: (data) =>
+        withClient(
+          async () => (platform.fromDrop ? importNew(await platform.fromDrop(data)) : []),
+          [] as MediaRef[],
+        ),
+      importFiles: (files) =>
+        importNew(
+          [...files].map((file) => ({ id: crypto.randomUUID(), source: { kind: 'file', file } })),
+        ),
+      importRequests: importNew,
+      relink: (request) =>
+        withClient(async (engine) => {
+          if (sources.current.has(request.id)) {
+            await engine.api.removeMedia(request.id);
+            sources.current.delete(request.id);
+          }
+          const { done } = await importInto(engine, [request], {
+            remember: true,
+            invalidate: true,
+          });
+          return done[0]?.media ?? null;
+        }, null),
+      grantAccess: () =>
+        withClient(async (engine) => {
+          if (!platform.grantAccess) return [];
+          const granted = await platform.grantAccess();
+          setWaiting((count) => Math.max(0, count - granted.length));
+          return (await importInto(engine, granted, { remember: false })).changed;
+        }, [] as MediaRef[]),
+      importLegacy: () =>
+        withClient(async (engine) => {
+          const { done } = await importInto(engine, await platform.legacyMedia(), {
+            remember: true,
+          });
+          await platform.clearLegacy();
+          return done.map((outcome) => outcome.media);
+        }, [] as MediaRef[]),
+      source: (id) => sources.current.get(id)?.source ?? null,
+      dismissNotice: (index) => setNotices((list) => list.filter((_, i) => i !== index)),
+      notice,
+    }),
+    [
+      busy,
+      dropVisuals,
+      importInto,
+      importNew,
+      items,
+      notice,
+      notices,
+      platform,
+      ready,
+      visuals,
+      waiting,
+      withClient,
+    ],
+  );
 }
 
 function requestName(request: ImportRequest) {

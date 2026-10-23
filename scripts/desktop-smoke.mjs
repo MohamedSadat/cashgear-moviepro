@@ -1,8 +1,10 @@
 // Launches the release desktop build, attaches Playwright to its WebView2 over
 // CDP and checks the same things the browser specs check: the pattern on both
 // GPU backends, cross-origin isolation, shared memory and the native command.
+// Then media (native streaming, ffprobe, a ProRes proxy) and projects: a saved
+// .cgvproj that reopens, and an autosave that recovers after the app is killed.
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,6 +38,10 @@ const port = listener.address().port;
 await new Promise((resolve) => listener.close(resolve));
 const profilePrefix = join(tmpdir(), 'cgv-webview2-smoke-');
 const profile = await mkdtemp(profilePrefix);
+// Autosaves and the saved project stay out of the real app data folder.
+const dataPrefix = join(tmpdir(), 'cgv-data-smoke-');
+const dataDir = await mkdtemp(dataPrefix);
+const projectPath = join(dataDir, 'Smoke test.cgvproj');
 const software = process.env.GPU_TEST_SOFTWARE === '1';
 const softwareArgs = software
   ? ' --enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=d3d11-warp --use-webgpu-adapter=swiftshader'
@@ -75,23 +81,24 @@ if (hostedRunner) {
     throw new Error('Could not configure WebView2 test policy: ' + added.stderr);
 }
 
-const child = spawn(join(root, 'target/release/cgv-desktop.exe'), [], {
-  cwd: root,
-  windowsHide: true,
-  env: {
-    ...process.env,
-    CGV_FFMPEG_DIR: process.env.CGV_FFMPEG_DIR ?? join(root, '.tools/ffmpeg/bin'),
-    WEBVIEW2_USER_DATA_FOLDER: profile,
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: browserArguments,
-  },
-  stdio: 'inherit',
-});
-let launchError;
-child.on('error', (error) => {
-  launchError = error;
-});
-let browser;
-try {
+/** Starts the desktop app and attaches to its WebView2. Launches share the profile and data folder. */
+async function launch() {
+  const child = spawn(join(root, 'target/release/cgv-desktop.exe'), [], {
+    cwd: root,
+    windowsHide: true,
+    env: {
+      ...process.env,
+      CGV_FFMPEG_DIR: process.env.CGV_FFMPEG_DIR ?? join(root, '.tools/ffmpeg/bin'),
+      CGV_DATA_DIR: dataDir,
+      WEBVIEW2_USER_DATA_FOLDER: profile,
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: browserArguments,
+    },
+    stdio: 'inherit',
+  });
+  let launchError;
+  child.on('error', (error) => {
+    launchError = error;
+  });
   const endpoint = 'http://127.0.0.1:' + port;
   const deadline = Date.now() + 45000;
   while (true) {
@@ -109,9 +116,71 @@ try {
     if (Date.now() > deadline) throw new Error('WebView2 debugging endpoint timed out');
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  browser = await chromium.connectOverCDP(endpoint);
+  const browser = await chromium.connectOverCDP(endpoint);
   const context = browser.contexts()[0];
   const page = context.pages()[0] ?? (await context.waitForEvent('page'));
+  // Page errors show in the smoke's output, so a failure says what went wrong inside.
+  page.on('pageerror', (error) => console.error('Page error: ' + error.message));
+  page.on('console', (message) => {
+    if (message.type() === 'error') console.error('Console error: ' + message.text());
+  });
+  return { child, browser, page };
+}
+
+/** Kills the app the hard way (TerminateProcess): no unload handlers, no clean exit. */
+async function kill(app) {
+  const exited = new Promise((resolve) => app.child.once('exit', resolve));
+  app.child.kill();
+  await exited;
+  await app.browser.close().catch(() => {});
+  // WebView2's browser processes follow the host down; wait until they let go of the profile.
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    try {
+      await fetch('http://127.0.0.1:' + port + '/json/version', {
+        signal: AbortSignal.timeout(500),
+      });
+    } catch {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+/** The engine is up and the project (with its media) has opened. Says what it saw if not. */
+const waitForProject = (page) =>
+  page
+    .waitForFunction(
+      () =>
+        !!window.__cgv?.client &&
+        !['Opening…', undefined].includes(
+          document.querySelector('[data-testid="project-name"]')?.textContent ?? undefined,
+        ) &&
+        document.querySelector('[data-testid="project-bar"]')?.dataset.busy === 'false',
+      undefined,
+      { timeout: 60000 },
+    )
+    .catch(async (error) => {
+      const seen = await page
+        .evaluate(() => ({
+          name: document.querySelector('[data-testid="project-name"]')?.textContent,
+          busy: document.querySelector('[data-testid="project-bar"]')?.dataset.busy,
+          notices: [...document.querySelectorAll('[role="alert"]')].map((n) => n.textContent),
+          dialogs: [...document.querySelectorAll('[role="dialog"]')].map((d) => d.dataset.testid),
+          url: location.href,
+        }))
+        .catch(() => 'page unavailable');
+      await mkdir(join(root, 'bench/results'), { recursive: true });
+      await page
+        .screenshot({ path: join(root, 'bench/results/desktop-failure.png') })
+        .catch(() => {});
+      throw new Error('The project did not open: ' + JSON.stringify(seen), { cause: error });
+    });
+
+let app;
+try {
+  app = await launch();
+  let page = app.page;
   await expect(page.getByTestId('engine-status')).toHaveText('Engine ready', { timeout: 30000 });
   const origin = new URL(page.url()).origin;
   const results = [];
@@ -149,7 +218,7 @@ try {
       adapter: await page.getByTestId('gpu-backend').getAttribute('title'),
       native: await page.getByTestId('native-info').textContent(),
       status: await page.getByTestId('capability-strip').getAttribute('data-status'),
-      browser: browser.version(),
+      browser: app.browser.version(),
       origin,
       software,
     });
@@ -157,14 +226,13 @@ try {
   // Media: native registration, cgv-media streaming, ffprobe and a ProRes proxy.
   await page.goto(origin + '/?diagnostic=1');
   await expect(page.getByTestId('engine-status')).toHaveText('Engine ready', { timeout: 30000 });
-  const paths = ['h264-1080p30-aac.mp4', 'prores-720p2997-pcm.mov'].map((file) =>
-    join(root, 'tests/media', file),
-  );
+  await waitForProject(page);
+  const mediaNames = ['h264-1080p30-aac.mp4', 'prores-720p2997-pcm.mov'];
+  const paths = mediaNames.map((file) => join(root, 'tests/media', file));
   const media = await page.evaluate(async (paths) => {
     const hooks = window.__cgv;
     const api = hooks.client.api;
-    for (const item of await api.mediaSnapshot()) await hooks.library.remove(item.id);
-    await hooks.library.importRequests(await hooks.platform.registerPaths(paths));
+    await hooks.project.importRequests(await hooks.platform.registerPaths(paths));
     const deadline = Date.now() + 180000;
     let items = await api.mediaSnapshot();
     while (
@@ -203,6 +271,74 @@ try {
       if (frame !== barcode) throw new Error(`${name}: frame ${frame} decoded as ${barcode}`);
   results.push({ media });
 
+  // Projects: save to a real .cgvproj file and reopen it from the recent list.
+  const saved = await page.evaluate(async (path) => {
+    const hooks = window.__cgv;
+    if (!(await hooks.project.saveTo(path))) throw new Error('Saving the project failed');
+    return (await hooks.client.api.projectSnapshot()).project;
+  }, projectPath);
+  const file = JSON.parse(await readFile(projectPath, 'utf8'));
+  if (file.format !== 'cashgear-video-project' || file.version !== 1)
+    throw new Error('Unexpected project file: ' + JSON.stringify(file).slice(0, 200));
+  expect(file.project).toEqual(saved);
+  if (saved.media.length !== 2 || !saved.media.every((m) => m.location.kind === 'path'))
+    throw new Error('Desktop projects should record both files by path');
+  await expect(page.getByTestId('save-state')).toHaveAttribute('data-state', 'saved');
+  await page.goto(origin + '/?diagnostic=1&autosave=500');
+  await waitForProject(page);
+  const reopened = await page.evaluate(() => window.__cgv.client.api.projectSnapshot());
+  expect(reopened.project).toEqual(saved);
+  expect(reopened.dirty).toBe(false);
+  await expect(page.locator('[data-testid="media-item"][data-status="ready"]')).toHaveCount(1, {
+    timeout: 60000,
+  });
+  // The proxy made in the first pass is reused, not made again.
+  await expect(page.locator('[data-testid="media-item"][data-status="proxyReady"]')).toHaveCount(
+    1,
+    { timeout: 60000 },
+  );
+
+  // Edit, let the autosave run, then kill the app in the middle of a drag.
+  for (const name of mediaNames)
+    await page.getByRole('button', { name: `Add ${name} to the timeline` }).click();
+  await expect(page.getByTestId('clip')).toHaveCount(2);
+  await page.evaluate(async () => {
+    const hooks = window.__cgv;
+    const state = await hooks.client.api.projectSnapshot();
+    const first = state.project.tracks[0].clips[0];
+    await hooks.project.execute({ type: 'split', at: 705600000, clips: [first.id] });
+    await hooks.client.api.projectBeginGroup('Drag');
+    await hooks.project.execute({ type: 'move', clips: [first.id], delta: 0, tracks: 1 });
+  });
+  await expect(page.getByTestId('save-state')).toHaveText('Unsaved changes (autosaved)', {
+    timeout: 30000,
+  });
+  const autosaved = await page.evaluate(() => window.__cgv.client.api.projectSnapshot());
+  await kill(app);
+
+  // Relaunch: the recovery prompt brings back the autosaved project.
+  app = await launch();
+  page = app.page;
+  await expect(page.getByTestId('engine-status')).toHaveText('Engine ready', { timeout: 30000 });
+  await page.goto(origin + '/?diagnostic=1');
+  const recovery = page.getByTestId('recovery-dialog');
+  await expect(recovery).toBeVisible({ timeout: 60000 });
+  await expect(recovery).toContainText(saved.name);
+  await recovery.getByRole('button', { name: 'Recover' }).click();
+  await waitForProject(page);
+  const recovered = await page.evaluate(() => window.__cgv.client.api.projectSnapshot());
+  expect(recovered.project).toEqual(autosaved.project);
+  expect(recovered.dirty).toBe(true);
+  await expect(page.getByTestId('clip')).toHaveCount(3);
+  results.push({
+    project: {
+      file: projectPath,
+      savedMedia: saved.media.map((m) => m.name),
+      recoveredClips: recovered.project.tracks.flatMap((t) => t.clips).length,
+      recoveredEqualsAutosave: true,
+    },
+  });
+
   await page.screenshot({ path: join(root, 'bench/results/desktop.png') });
   await writeFile(
     join(root, 'bench/results/desktop-smoke.json'),
@@ -210,11 +346,11 @@ try {
   );
   console.log(JSON.stringify(results, null, 2));
 } finally {
-  await browser?.close().catch((error) => {
+  await app?.browser.close().catch((error) => {
     console.error('Could not close the desktop browser: ' + error.message);
     process.exitCode = 1;
   });
-  child.kill();
+  app?.child.kill();
   if (hostedRunner) {
     const restored = reg(
       previousPolicy === undefined
@@ -237,9 +373,13 @@ try {
       process.exitCode = 1;
     }
   }
-  if (profile.startsWith(profilePrefix)) {
-    await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }).catch(
-      (error) => console.warn('Temporary WebView2 profile cleanup: ' + error.message),
+  for (const [folder, prefix] of [
+    [profile, profilePrefix],
+    [dataDir, dataPrefix],
+  ]) {
+    if (!folder.startsWith(prefix)) continue;
+    await rm(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }).catch(
+      (error) => console.warn('Temporary folder cleanup: ' + error.message),
     );
   }
 }

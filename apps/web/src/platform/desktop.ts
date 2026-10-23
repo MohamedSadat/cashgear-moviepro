@@ -2,11 +2,13 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import {
   mediaStore,
+  projectIndex,
   type CacheStore,
   type ImportRequest,
   type NativeProbe,
+  type ProjectEntry,
 } from '@cgv/engine-client';
-import type { MediaPlatform, NativeInfo } from '@cgv/ui';
+import type { MediaPlatform, NativeInfo, ProjectStore } from '@cgv/ui';
 
 /** A file the native side has registered for streaming through `cgv-media`. */
 interface RegisteredMedia {
@@ -14,12 +16,20 @@ interface RegisteredMedia {
   path: string;
   name: string;
   size: number;
+  modified: number | null;
   url: string;
   /** ffprobe's view of the file; null if it could not read it. */
   probe?: NativeProbe | null;
   probeError?: string | null;
 }
 type ProxyEvent = { event: 'progress'; progress: number };
+interface ProjectFile {
+  path: string;
+  modified: number | null;
+}
+interface OpenedProject extends ProjectFile {
+  contents: string;
+}
 
 const toRequest = (media: RegisteredMedia): ImportRequest => ({
   id: media.id,
@@ -29,6 +39,7 @@ const toRequest = (media: RegisteredMedia): ImportRequest => ({
     path: media.path,
     name: media.name,
     size: media.size,
+    modified: media.modified,
     probe: media.probe ?? undefined,
   },
 });
@@ -48,13 +59,53 @@ const nativeCache: CacheStore = {
   },
 };
 
+/** Project files where the user saves them, autosaves in the app data folder, recents in IndexedDB. */
+const projects: ProjectStore = {
+  savesInPlace: false,
+  list: () => projectIndex.list(),
+  async read(entry) {
+    if (!entry.path) return null;
+    return (await invoke<OpenedProject>('project_read', { path: entry.path })).contents;
+  },
+  async save(entry, text, options) {
+    const file = await invoke<ProjectFile | null>('project_save', {
+      path: options?.saveAs ? null : (entry.path ?? null),
+      contents: text,
+      name: entry.name,
+    });
+    if (!file) return null;
+    const saved: ProjectEntry = { ...entry, path: file.path, savedAt: file.modified ?? Date.now() };
+    await projectIndex.put(saved);
+    return saved;
+  },
+  async readAutosave(id) {
+    const autosave = await invoke<{ contents: string; modified: number | null } | null>(
+      'autosave_read',
+      { id },
+    );
+    return autosave && { text: autosave.contents, modified: autosave.modified };
+  },
+  writeAutosave: (id, text) => invoke('autosave_write', { id, contents: text }),
+  removeAutosave: (id) => invoke('autosave_remove', { id }),
+  touch: (entry) => projectIndex.put({ ...entry, openedAt: Date.now() }),
+  async remove(id) {
+    await invoke('autosave_remove', { id });
+    await projectIndex.remove(id);
+  },
+  async openFile() {
+    const opened = await invoke<OpenedProject | null>('project_open');
+    return opened && { text: opened.contents, path: opened.path };
+  },
+};
+
 /**
  * The desktop app: native file dialog and drops give real paths, the native side
  * streams them to the engine through the `cgv-media` protocol, probes them with
- * ffprobe and makes proxies with ffmpeg.
+ * ffprobe and makes proxies with ffmpeg. Projects record media by path.
  */
 export const desktopPlatform: MediaPlatform = {
   kind: 'desktop',
+  projects,
 
   async pickFiles() {
     return (await invoke<RegisteredMedia[]>('media_pick')).map(toRequest);
@@ -78,26 +129,68 @@ export const desktopPlatform: MediaPlatform = {
     };
   },
 
-  async restore() {
+  async locate(media) {
+    const ready: ImportRequest[] = [];
+    const missing: string[] = [];
+    // The protocol's registry lives in the native process: register each path again.
+    for (const ref of media) {
+      if (ref.location.kind !== 'path') {
+        missing.push(ref.id);
+        continue;
+      }
+      try {
+        const [registered] = await invoke<RegisteredMedia[]>('media_register', {
+          files: [{ id: ref.id, path: ref.location.path }],
+        });
+        ready.push(toRequest(registered));
+      } catch {
+        missing.push(ref.id);
+      }
+    }
+    return { ready, waiting: 0, missing };
+  },
+
+  async legacyMedia() {
     const files = (await mediaStore.list())
       .filter((entry) => entry.source.kind === 'url')
       .map((entry) => ({ id: entry.id, path: (entry.source as { path: string }).path }));
-    if (!files.length) return { ready: [], waiting: 0 };
-    // The protocol's registry lives in the native process, so register the paths again.
-    const media = await invoke<RegisteredMedia[]>('media_register', { files });
-    return { ready: media.map(toRequest), waiting: 0 };
+    const requests: ImportRequest[] = [];
+    for (const file of files) {
+      try {
+        const [registered] = await invoke<RegisteredMedia[]>('media_register', { files: [file] });
+        requests.push(toRequest(registered));
+      } catch {
+        /* Gone since Phase 1. */
+      }
+    }
+    return requests;
   },
 
-  async remember(entries) {
-    const base = Date.now();
-    for (const [index, { id, source }] of entries.entries())
-      if (source.kind === 'url') await mediaStore.put({ id, order: base + index, source });
+  async clearLegacy() {
+    for (const entry of await mediaStore.list()) await mediaStore.remove(entry.id);
   },
+
+  // Projects record paths; nothing else needs remembering.
+  remember: async () => {},
 
   async forget(id) {
-    await mediaStore.remove(id);
     await nativeCache.remove(`media/${id}`);
     await invoke('media_forget', { id });
+  },
+
+  async pickReplacement(media) {
+    const located = await invoke<RegisteredMedia | null>('media_locate', {
+      id: media.id,
+      name: media.name,
+    });
+    return located && toRequest(located);
+  },
+
+  async searchFolder(media) {
+    const found = await invoke<RegisteredMedia[]>('media_search', {
+      wanted: media.map(({ id, name, size }) => ({ id, name, size })),
+    });
+    return found.map(toRequest);
   },
 
   async makeProxy(id, onProgress) {
@@ -107,6 +200,10 @@ export const desktopPlatform: MediaPlatform = {
     };
     const proxy = await invoke<RegisteredMedia>('media_make_proxy', { id, events });
     return toRequest(proxy).source;
+  },
+
+  async dropProxy(id) {
+    await invoke('media_drop_proxy', { id });
   },
 
   async registerPaths(paths) {

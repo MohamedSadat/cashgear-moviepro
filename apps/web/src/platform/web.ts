@@ -1,10 +1,14 @@
 import {
   mediaStore,
   opfsCacheStore,
+  opfsProjectFiles,
+  projectIndex,
   type ImportRequest,
+  type MediaRef,
   type MediaSourceRef,
+  type ProjectEntry,
 } from '@cgv/engine-client';
-import { mediaAccept, newMediaId, type MediaPlatform } from '@cgv/ui';
+import { mediaAccept, newMediaId, type MediaPlatform, type ProjectStore } from '@cgv/ui';
 
 type PermissionedHandle = FileSystemFileHandle & {
   queryPermission(options: { mode: 'read' }): Promise<PermissionState>;
@@ -20,16 +24,38 @@ const cache = opfsCacheStore();
 /** Remembered handles the browser wants permission for again, waiting for a click. */
 let waitingHandles: { id: string; handle: PermissionedHandle }[] = [];
 
-function pickWithInput(): Promise<File[]> {
+const filePicker = () => Reflect.get(window, 'showOpenFilePicker') as OpenFilePicker | undefined;
+
+function pickWithInput(accept: string, multiple: boolean): Promise<File[]> {
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.multiple = true;
-    input.accept = Object.values(mediaAccept).flat().join(',');
+    input.multiple = multiple;
+    input.accept = accept;
     input.addEventListener('change', () => resolve([...(input.files ?? [])]));
     input.addEventListener('cancel', () => resolve([]));
     input.click();
   });
+}
+
+/** Handles from the File System Access picker, or null where the browser has none. */
+async function pickHandles(
+  description: string,
+  accept: Record<string, string[]>,
+  multiple: boolean,
+): Promise<FileSystemFileHandle[] | null> {
+  const picker = filePicker();
+  if (!picker) return null;
+  try {
+    return await picker({ multiple, types: [{ description, accept }] });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') return [];
+    throw error;
+  }
+}
+
+async function permitted(handle: PermissionedHandle) {
+  return (await handle.queryPermission({ mode: 'read' }).catch(() => 'denied')) === 'granted';
 }
 
 async function removeOpfsCopy(path: string) {
@@ -44,28 +70,70 @@ async function removeOpfsCopy(path: string) {
   }
 }
 
+async function forget(id: string, source: MediaSourceRef | null) {
+  const stored = source ?? (await mediaStore.get(id))?.source ?? null;
+  await mediaStore.remove(id);
+  await cache.remove(`media/${id}`);
+  if (stored?.kind === 'opfs') await removeOpfsCopy(stored.path);
+}
+
+/** Projects in the origin-private file system, listed in IndexedDB. */
+const projects: ProjectStore = {
+  savesInPlace: true,
+  list: () => projectIndex.list(),
+  async read(entry) {
+    return (await opfsProjectFiles.read(entry.id, 'project'))?.text ?? null;
+  },
+  async save(entry, text) {
+    await opfsProjectFiles.write(entry.id, 'project', text);
+    const saved: ProjectEntry = {
+      id: entry.id,
+      name: entry.name,
+      savedAt: Date.now(),
+      openedAt: entry.openedAt,
+    };
+    await projectIndex.put(saved);
+    return saved;
+  },
+  readAutosave: (id) => opfsProjectFiles.read(id, 'autosave'),
+  writeAutosave: (id, text) => opfsProjectFiles.write(id, 'autosave', text),
+  removeAutosave: (id) => opfsProjectFiles.remove(id, 'autosave'),
+  touch: (entry) => projectIndex.put({ ...entry, openedAt: Date.now() }),
+  async remove(id) {
+    await opfsProjectFiles.removeAll(id);
+    await projectIndex.remove(id);
+  },
+  async openFile() {
+    const accept = { 'application/json': ['.cgvproj'] };
+    const handles = await pickHandles('CashGear Video project', accept, false);
+    const file = handles
+      ? await handles[0]?.getFile()
+      : (await pickWithInput('.cgvproj', false))[0];
+    return file ? { text: await file.text() } : null;
+  },
+  async exportFile(name, text) {
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    link.download = `${name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'Untitled project'}.cgvproj`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
+  },
+};
+
 /**
  * The browser: File System Access handles where available (Chrome, Edge), with
- * files copied into OPFS elsewhere. The library is remembered in IndexedDB.
+ * files copied into OPFS elsewhere, remembered by media id in IndexedDB. Projects
+ * live in browser storage.
  */
 export const webPlatform: MediaPlatform = {
   kind: 'web',
+  projects,
 
   async pickFiles() {
-    const picker = Reflect.get(window, 'showOpenFilePicker') as OpenFilePicker | undefined;
-    if (picker) {
-      try {
-        const handles = await picker({
-          multiple: true,
-          types: [{ description: 'Video, audio and images', accept: mediaAccept }],
-        });
-        return handles.map((handle) => ({ id: newMediaId(), source: { kind: 'handle', handle } }));
-      } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') return [];
-        throw error;
-      }
-    }
-    const files = await pickWithInput();
+    const handles = await pickHandles('Video, audio and images', mediaAccept, true);
+    if (handles)
+      return handles.map((handle) => ({ id: newMediaId(), source: { kind: 'handle', handle } }));
+    const files = await pickWithInput(Object.values(mediaAccept).flat().join(','), true);
     return files.map((file) => ({ id: newMediaId(), source: { kind: 'file', file } }));
   },
 
@@ -89,18 +157,21 @@ export const webPlatform: MediaPlatform = {
     return requests;
   },
 
-  async restore() {
+  async locate(media: MediaRef[]) {
     const ready: ImportRequest[] = [];
+    const missing: string[] = [];
     waitingHandles = [];
-    for (const entry of await mediaStore.list()) {
-      if (entry.source.kind === 'handle') {
+    for (const ref of media) {
+      const entry = await mediaStore.get(ref.id);
+      if (!entry || entry.source.kind === 'url') missing.push(ref.id);
+      else if (entry.source.kind === 'opfs') ready.push({ id: ref.id, source: entry.source });
+      else {
         const handle = entry.source.handle as PermissionedHandle;
-        const permission = await handle.queryPermission({ mode: 'read' }).catch(() => 'denied');
-        if (permission === 'granted') ready.push({ id: entry.id, source: entry.source });
-        else waitingHandles.push({ id: entry.id, handle });
-      } else if (entry.source.kind === 'opfs') ready.push({ id: entry.id, source: entry.source });
+        if (await permitted(handle)) ready.push({ id: ref.id, source: entry.source });
+        else waitingHandles.push({ id: ref.id, handle });
+      }
     }
-    return { ready, waiting: waitingHandles.length };
+    return { ready, waiting: waitingHandles.length, missing };
   },
 
   async grantAccess() {
@@ -118,6 +189,22 @@ export const webPlatform: MediaPlatform = {
     return granted;
   },
 
+  async legacyMedia() {
+    const ready: ImportRequest[] = [];
+    for (const entry of await mediaStore.list()) {
+      if (entry.source.kind === 'opfs') ready.push({ id: entry.id, source: entry.source });
+      else if (
+        entry.source.kind === 'handle' &&
+        (await permitted(entry.source.handle as PermissionedHandle))
+      )
+        ready.push({ id: entry.id, source: entry.source });
+    }
+    return ready;
+  },
+
+  // The Phase 1 records are the ones projects use now.
+  clearLegacy: async () => {},
+
   async remember(entries) {
     const base = Date.now();
     for (const [index, { id, source }] of entries.entries()) {
@@ -126,10 +213,25 @@ export const webPlatform: MediaPlatform = {
     }
   },
 
-  async forget(id: string, source: MediaSourceRef) {
-    await mediaStore.remove(id);
-    await cache.remove(`media/${id}`);
-    if (source.kind === 'opfs') await removeOpfsCopy(source.path);
+  forget,
+
+  async sweep(keep, rememberedBefore) {
+    for (const entry of await mediaStore.list())
+      if (!keep.has(entry.id) && entry.order < rememberedBefore)
+        await forget(entry.id, entry.source);
+  },
+
+  async pickReplacement(media) {
+    const accept = {
+      'video/*': mediaAccept['video/*'],
+      'audio/*': mediaAccept['audio/*'],
+      'image/*': mediaAccept['image/*'],
+    };
+    const handles = await pickHandles(`Locate ${media.name}`, accept, false);
+    if (handles)
+      return handles[0] ? { id: media.id, source: { kind: 'handle', handle: handles[0] } } : null;
+    const [file] = await pickWithInput(Object.values(mediaAccept).flat().join(','), false);
+    return file ? { id: media.id, source: { kind: 'file', file } } : null;
   },
 
   cache,

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react';
-import type { MediaItem } from '@cgv/engine-client';
+import type { MediaItem, MediaRef } from '@cgv/engine-client';
 import { mediaAccept } from '../platform';
-import type { MediaLibraryState, MediaVisuals } from './useMediaLibrary';
+import type { ProjectState } from '../project/useProject';
+import type { MediaVisuals } from './useMediaLibrary';
 
 const accept = Object.values(mediaAccept).flat().join(',');
 
@@ -140,13 +141,31 @@ function Status({ item }: { item: MediaItem }) {
   }
 }
 
-export function MediaLibraryPanel({ library }: { library: MediaLibraryState }) {
+/** A project's bin entry: the reference it keeps and, once opened, the engine's item. */
+interface BinEntry {
+  media: MediaRef;
+  item: MediaItem | null;
+  missing: boolean;
+}
+
+function playable(item: MediaItem) {
+  return item.status.state === 'ready' || item.status.state === 'proxyReady';
+}
+
+export function MediaLibraryPanel({ project }: { project: ProjectState }) {
+  const library = project.library;
   const input = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const missing = new Set(project.missing.map((media) => media.id));
+  const entries: BinEntry[] = (project.snapshot?.project.media ?? []).map((media) => ({
+    media,
+    item: library.items.find((item) => item.id === media.id) ?? null,
+    missing: missing.has(media.id),
+  }));
   const onDrop = (event: DragEvent) => {
     event.preventDefault();
     setDragging(false);
-    void library.importDrop(event.dataTransfer);
+    void project.importDrop(event.dataTransfer);
   };
   return (
     <aside
@@ -162,7 +181,11 @@ export function MediaLibraryPanel({ library }: { library: MediaLibraryState }) {
     >
       <header className="cgv-library-header">
         <h2>Media</h2>
-        <button type="button" onClick={() => void library.pick()} disabled={library.busy}>
+        <button
+          type="button"
+          onClick={() => void project.pick()}
+          disabled={library.busy || !project.snapshot}
+        >
           {library.busy ? 'Importing…' : 'Import'}
         </button>
         {/* Fallback picker for browsers without File System Access; tests also use it. */}
@@ -174,17 +197,25 @@ export function MediaLibraryPanel({ library }: { library: MediaLibraryState }) {
           hidden
           data-testid="media-file-input"
           onChange={(event) => {
-            if (event.target.files?.length) void library.importFiles([...event.target.files]);
+            if (event.target.files?.length) void project.importFiles([...event.target.files]);
             event.target.value = '';
           }}
         />
       </header>
       {library.waiting > 0 && (
         <div className="cgv-library-notice" role="status">
-          {library.waiting} file{library.waiting === 1 ? '' : 's'} from your last session need
-          access again.
-          <button type="button" onClick={() => void library.grantAccess()}>
+          {library.waiting} file{library.waiting === 1 ? '' : 's'} in this project need access
+          again.
+          <button type="button" onClick={() => void project.grantAccess()}>
             Allow access
+          </button>
+        </div>
+      )}
+      {project.missing.length > 0 && !project.relinking && (
+        <div className="cgv-library-notice" role="status">
+          {project.missing.length} file{project.missing.length === 1 ? ' is' : 's are'} missing.
+          <button type="button" onClick={() => project.showRelink(true)}>
+            Relink…
           </button>
         </div>
       )}
@@ -201,38 +232,62 @@ export function MediaLibraryPanel({ library }: { library: MediaLibraryState }) {
           </button>
         </div>
       ))}
-      {library.items.length === 0 ? (
+      {entries.length === 0 ? (
         <p className="cgv-library-empty">
           Drop video, audio or image files here, or choose Import.
         </p>
       ) : (
         <ul className="cgv-library-items">
-          {library.items.map((item) => (
+          {entries.map(({ media, item, missing: lost }) => (
             <li
-              key={item.id}
-              className="cgv-media-item"
+              key={media.id}
+              className={'cgv-media-item' + (lost ? ' cgv-media-item-missing' : '')}
               data-testid="media-item"
-              data-media-id={item.id}
-              data-name={item.name}
-              data-kind={item.kind}
-              data-status={item.status.state}
+              data-media-id={media.id}
+              data-name={item?.name ?? media.name}
+              data-kind={media.kind}
+              data-status={lost ? 'missing' : (item?.status.state ?? 'opening')}
             >
-              <Poster item={item} visuals={library.visuals[item.id]} />
+              {item ? (
+                <Poster item={item} visuals={library.visuals[media.id]} />
+              ) : (
+                <div className="cgv-media-poster cgv-media-poster-empty">{media.kind}</div>
+              )}
               <div className="cgv-media-text">
-                <p className="cgv-media-name" title={item.name}>
-                  {item.name}
+                <p className="cgv-media-name" title={item?.name ?? media.name}>
+                  {item?.name ?? media.name}
                 </p>
-                <p className="cgv-media-meta" data-testid="media-meta">
-                  {describe(item).join(' · ')}
-                </p>
-                <p className="cgv-media-size">{formatSize(item.size)}</p>
-                <Status item={item} />
+                {item && (
+                  <p className="cgv-media-meta" data-testid="media-meta">
+                    {describe(item).join(' · ')}
+                  </p>
+                )}
+                <p className="cgv-media-size">{formatSize(item?.size ?? media.size)}</p>
+                {item && <Status item={item} />}
+                {lost && (
+                  <p className="cgv-media-status cgv-media-status-error" data-testid="media-status">
+                    Missing{' '}
+                    <button type="button" onClick={() => void project.locate(media)}>
+                      Locate…
+                    </button>
+                  </p>
+                )}
+                {item && playable(item) && (
+                  <button
+                    type="button"
+                    className="cgv-media-add"
+                    onClick={() => void project.addToTimeline(media.id)}
+                    aria-label={`Add ${media.name} to the timeline`}
+                  >
+                    Add to timeline
+                  </button>
+                )}
               </div>
               <button
                 type="button"
                 className="cgv-media-remove"
-                aria-label={`Remove ${item.name}`}
-                onClick={() => void library.remove(item.id)}
+                aria-label={`Remove ${media.name}`}
+                onClick={() => void project.removeMedia(media.id)}
               >
                 ×
               </button>

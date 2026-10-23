@@ -50,10 +50,25 @@ interface Item {
 
 async function open(page: Page) {
   await page.goto('/?diagnostic=1');
-  await page.waitForFunction(() => {
-    const hooks = Reflect.get(window, '__cgv') as { client: unknown } | undefined;
-    return !!hooks?.client;
-  });
+  await waitForProject(page);
+}
+
+/** The engine is up and the project (with its media) has opened. */
+async function waitForProject(page: Page) {
+  await page.waitForFunction(
+    () =>
+      !!Reflect.get(window, '__cgv')?.client &&
+      !['Opening…', undefined].includes(
+        document.querySelector('[data-testid="project-name"]')?.textContent ?? undefined,
+      ) &&
+      document.querySelector<HTMLElement>('[data-testid="project-bar"]')?.dataset.busy === 'false',
+  );
+}
+
+/** Media is part of a project now: save it so a reload brings it back. */
+async function save(page: Page) {
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByTestId('save-state')).toHaveAttribute('data-state', 'saved');
 }
 
 async function snapshot(page: Page): Promise<Item[]> {
@@ -294,7 +309,9 @@ test('1,000 random seeks leave zero open VideoFrames and stable memory', async (
   expect(result.heapAfter - result.heapBefore).toBeLessThan(20 * 1024 * 1024);
 });
 
-test('remembers imported media across reloads and forgets removed items', async ({ page }) => {
+test('keeps the media of a saved project across reloads and forgets removed items', async ({
+  page,
+}) => {
   await open(page);
   const imported = await importFiles(page, [
     'vp9-720p25-opus.webm',
@@ -302,7 +319,9 @@ test('remembers imported media across reloads and forgets removed items', async 
     'still-1280x720.webp',
   ]);
   expect(imported.every((item) => item.source.kind === 'opfs')).toBe(true);
+  await save(page);
   await page.reload();
+  await waitForProject(page);
   await expect(page.getByTestId('media-item')).toHaveCount(3, { timeout: 30000 });
   const restored = await snapshot(page);
   expect(restored.map((item) => item.id).sort()).toEqual(imported.map((item) => item.id).sort());
@@ -312,9 +331,35 @@ test('remembers imported media across reloads and forgets removed items', async 
 
   await page.getByRole('button', { name: 'Remove tone-48k-stereo.wav' }).click();
   await expect(page.getByTestId('media-item')).toHaveCount(2);
+  await save(page);
   await page.reload();
+  await waitForProject(page);
   await expect(page.getByTestId('media-item')).toHaveCount(2, { timeout: 30000 });
   await expect(page.locator('[data-name="tone-48k-stereo.wav"]')).toHaveCount(0);
+  // No project uses the removed file now: its record and OPFS copy go.
+  const removed = imported.find((item) => item.name === 'tone-48k-stereo.wav')!;
+  await expect
+    .poll(() =>
+      page.evaluate(async (id) => {
+        const remembered = await new Promise<boolean>((resolve) => {
+          const request = indexedDB.open('cashgear-video');
+          request.onsuccess = () => {
+            const get = request.result.transaction('media').objectStore('media').get(id);
+            get.onsuccess = () => {
+              resolve(get.result !== undefined);
+              request.result.close();
+            };
+          };
+        });
+        const media = await (await navigator.storage.getDirectory()).getDirectoryHandle('media');
+        const copied = await media.getDirectoryHandle(id).then(
+          () => true,
+          () => false,
+        );
+        return { remembered, copied };
+      }, removed.id),
+    )
+    .toEqual({ remembered: false, copied: false });
 });
 
 test('imports File System Access handles without copying, and restores them', async ({ page }) => {
@@ -329,17 +374,19 @@ test('imports File System Access handles without copying, and restores them', as
     await writable.write(data);
     await writable.close();
     const hooks = Reflect.get(window, '__cgv') as {
-      library: { importRequests(requests: unknown[]): Promise<void> };
+      project: { importRequests(requests: unknown[]): Promise<void> };
       client: { api: { mediaSnapshot(): Promise<unknown[]> } };
     };
-    await hooks.library.importRequests([
+    await hooks.project.importRequests([
       { id: crypto.randomUUID(), source: { kind: 'handle', handle } },
     ]);
     return (await hooks.client.api.mediaSnapshot())[0];
   }, bytes);
   expect((item as Item).source.kind).toBe('handle');
   expect((item as Item).status.state).toBe('ready');
+  await save(page);
   await page.reload();
+  await waitForProject(page);
   await expect(page.locator('[data-name="picked.webm"]')).toHaveCount(1, { timeout: 30000 });
   expect((await snapshot(page))[0].source.kind).toBe('handle');
 });
