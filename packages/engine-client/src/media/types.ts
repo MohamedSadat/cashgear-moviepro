@@ -1,4 +1,5 @@
 // Mirrors the JSON of crates/cgv-media (MediaProbe, MediaItem, MediaStatus).
+import type { MediaRef } from '../project/types';
 
 export interface FrameRate {
   num: number;
@@ -101,7 +102,16 @@ export type MediaSourceRef =
    * Desktop: a local file streamed by the native `cgv-media` protocol. `probe` is
    * ffprobe's view, used when the engine's own demuxer cannot read the file.
    */
-  | { kind: 'url'; url: string; path: string; name: string; size: number; probe?: NativeProbe };
+  | {
+      kind: 'url';
+      url: string;
+      path: string;
+      name: string;
+      size: number;
+      /** Last-modified time in milliseconds, from the native side. */
+      modified?: number | null;
+      probe?: NativeProbe;
+    };
 
 /** ffprobe's description of a file, in MediaProbe terms (everything marked undecodable). */
 export type NativeProbe = Pick<MediaProbe, 'container' | 'durationSeconds' | 'video' | 'audio'>;
@@ -112,7 +122,14 @@ export interface ImportRequest {
   source: MediaSourceRef;
 }
 export type ImportOutcome =
-  { id: string; item: MediaItem; source: MediaSourceRef } | { id: string; error: string };
+  | {
+      id: string;
+      item: MediaItem;
+      source: MediaSourceRef;
+      /** What a project records about the file (`cgv_model::MediaRef`). */
+      media: MediaRef;
+    }
+  | { id: string; error: string };
 
 export interface MediaStats {
   openFrames: number;

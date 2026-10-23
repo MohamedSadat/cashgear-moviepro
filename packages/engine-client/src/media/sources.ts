@@ -104,6 +104,13 @@ export async function sourceBlob(ref: MediaSourceRef): Promise<Blob | null> {
   }
 }
 
+/** Last-modified time in milliseconds, when the source has one. */
+export async function sourceModified(ref: MediaSourceRef): Promise<number | null> {
+  if (ref.kind === 'url') return ref.modified ?? null;
+  const blob = await sourceBlob(ref);
+  return blob instanceof File ? blob.lastModified : null;
+}
+
 export async function sourceSize(ref: MediaSourceRef): Promise<number> {
   if (ref.kind === 'url') return ref.size;
   return (await sourceBlob(ref))!.size;

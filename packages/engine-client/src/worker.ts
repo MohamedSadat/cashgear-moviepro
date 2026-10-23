@@ -1,12 +1,14 @@
 import { expose } from 'comlink';
 import { FrameLoop, workerScheduler } from './frame-loop';
 import { MediaService } from './media/service';
+import { ProjectService } from './project/service';
 import type { EngineApi, EngineEvent, EngineInfo, GpuFault, InitOptions } from './types';
 import initWasm, { Engine, MediaLibrary } from './pkg/cgv_wasm';
 
 let engine: Engine | undefined;
 let loop: FrameLoop | undefined;
 let media: MediaService | undefined;
+const project = new ProjectService();
 let initializing = false;
 let disposed = false;
 let diagnostic = false;
@@ -97,6 +99,7 @@ const api: EngineApi = {
     loop?.stop();
     loop = undefined;
     media?.releaseFrames();
+    project.close();
     engine?.dispose();
     engine?.free();
     engine = undefined;
@@ -121,5 +124,34 @@ const api: EngineApi = {
   frameCount: (id) => requireMedia().frameCount(id),
   readFrame: (id, frame, crop) => requireMedia().readback(id, frame, crop),
   releaseFrames: () => requireMedia().releaseFrames(),
+  clearMedia: () => requireMedia().clear(),
+
+  async projectCreate(id, name) {
+    await ensureWasm();
+    return project.create(id, name);
+  },
+  async projectOpen(text, options) {
+    await ensureWasm();
+    return project.open(text, options);
+  },
+  projectClose: () => project.close(),
+  projectSnapshot: () => project.snapshot(),
+  projectExecute: (command) => project.execute(command),
+  projectExecuteGroup: (label, commands) => project.executeGroup(label, commands),
+  projectUndo: () => project.undo(),
+  projectRedo: () => project.redo(),
+  projectBeginGroup: (label) => project.beginGroup(label),
+  projectEndGroup: () => project.endGroup(),
+  projectCancelGroup: () => project.cancelGroup(),
+  projectSave: () => project.save(),
+  projectMarkSaved: (generation) => project.markSaved(generation),
+  projectMarkAutosaved: (generation) => project.markAutosaved(generation),
+  projectUpdateMedia: (ref) => project.updateMedia(ref),
+  projectClipsAt: (time) => project.clipsAt(time),
+  projectSnapPoints: (playhead, exclude) => project.snapPoints(playhead, exclude),
+  async projectPresets() {
+    await ensureWasm();
+    return ProjectService.presets();
+  },
 };
 expose(api);

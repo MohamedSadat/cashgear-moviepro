@@ -5,7 +5,8 @@ import { DecoderPool } from './decoder-pool';
 import { FrameCache } from './frame-cache';
 import { openFrameCount, readPlanes, type ManagedFrame } from './frames';
 import { probeMedia, probeVideo } from './probe';
-import { copyToOpfs, openInput } from './sources';
+import { ProjectService } from '../project/service';
+import { copyToOpfs, openInput, sourceModified } from './sources';
 import type {
   FrameReadback,
   ImportOutcome,
@@ -62,6 +63,7 @@ export class MediaService {
   private async importOne({ id, source }: ImportRequest): Promise<ImportOutcome> {
     if (this.media.has(id)) throw new Error('This file is already in the library');
     let ref = source;
+    const modified = await sourceModified(ref);
     if (ref.kind === 'file') ref = { kind: 'opfs', path: await copyToOpfs(id, ref.file) };
     const probed = await probeMedia(id, ref, () => openInput(ref));
     let item: MediaItem;
@@ -77,7 +79,7 @@ export class MediaService {
         ? new VideoReader(id, video.sink, video.index, video.config, this.pool, this.cache)
         : null;
     this.media.set(id, { source: ref, input: probed.input, reader, proxy: null });
-    return { id, item, source: ref };
+    return { id, item, source: ref, media: ProjectService.mediaRef(item, modified) };
   }
 
   setStatus(id: string, status: MediaStatus): MediaItem {
@@ -120,6 +122,11 @@ export class MediaService {
     media.proxy?.input.dispose();
     this.media.delete(id);
     return this.library.remove(id);
+  }
+
+  /** Closes every item (switching projects). */
+  clear() {
+    for (const id of [...this.media.keys()]) this.remove(id);
   }
 
   /** The exact frame `frame` of a video item. The caller closes it. */
