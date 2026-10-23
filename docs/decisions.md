@@ -2,6 +2,38 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-23: Phase 2 findings and defaults
+
+Small choices made while building the model and the project UI.
+
+- **Ripple scope:** ripple delete, ripple trim and insert shift later clips only on the tracks being edited.
+  - Linked partners are always part of the edit, so a clip and its detached sound close their gaps together.
+  - Clips on other tracks stay put. Phase 4's magnetic-track answer may add ripple across tracks.
+- **Links:**
+  - Delete, split, trim, roll, move, slip, slide and speed act on a clip's linked partners too.
+  - Linked clips that touch on one track slide as one block. A property test found that sliding them one by one trimmed each other.
+  - A link left with one clip is cleared.
+  - Overwrite and insert never split a linked partner on another track. A clip they cut into two keeps its link on the left part only.
+- **Detach audio:** without a target track, the sound goes on a new track directly below the clip's track, so the picture stays above it.
+- **Frame rate changes:** clips keep their times; later edits snap to the new rate. Only the 10 standard rates are allowed, because their frame boundaries are exact in flicks.
+- **Numbers:** clip properties are `f64`. `serde_json` uses `float_roundtrip`, so files reload bit for bit. Times stay below 2^53 flicks (about 147 days) to remain exact in JavaScript.
+- **Speed:** a reduced fraction from 0.1× to 100×. Changing it keeps the clip's start and source in point; its length follows, rounded down to whole frames. Stills have no speed and cannot be slipped.
+- **Undo history:**
+  - At most 10,000 steps.
+  - Snapshots share unchanged tracks (`Arc`), so a step costs about the tracks it touched.
+  - A command that changes nothing leaves no step. A group that ends where it started leaves no step and no unsaved changes.
+- **Media bin edits are undoable:** import and remove are commands.
+  - Removed files stay open in the engine, so undo brings them back at once.
+  - Files no project uses are forgotten when a project opens: their IndexedDB record, OPFS copy and caches. Files remembered after that pass started are kept.
+- **Relinking** updates the media in the current state and in every undo step. It is not an undo step itself, but it leaves unsaved changes.
+- **Saving** records the generation that was written. A save that finishes after further edits marks the right state as saved.
+- **New projects:** two empty tracks.
+  - On the web, a new project is saved at once, so it is listed.
+  - On desktop, a new project stays in memory until its first save or autosave.
+- **Switching projects** with unsaved changes writes an autosave first. The changes are offered as a recovery when that project opens again.
+- **Changed files:** a different size, or a different modified time, means a file changed. Browser copies in OPFS compare size only.
+- **Phase 1 library:** on first start, remembered media goes into an "Untitled project". The web saves it at once; desktop leaves it for the first save or autosave.
+
 ## 2026-10-23: Phase 2 answers
 
 - **Track model:** free tracks, as in Filmora.

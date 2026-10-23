@@ -34,7 +34,9 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
 - `packages/engine-client`: engine worker, comlink client, frame loop and capability probe. Generated bindings go in `src/pkg/` (gitignored).
   - `media/`: Mediabunny demuxing, WebCodecs decoder sessions, the decoder pool, the frame cache, frame-accurate seeks and probes.
   - `jobs/`: the thumbnail and waveform worker.
-  - `storage/`: the OPFS cache and the IndexedDB library store.
+  - `storage/`: the OPFS cache, the IndexedDB media and project lists, and web project files in OPFS.
+  - `project/`: the worker's project session (WASM), autosave timing and recovery decisions.
+- `crates/cgv-model`: the project, every edit command, undo/redo and the `.cgvproj` format. `packages/ui/src/project`: opening, saving, autosave, recovery and relinking.
 - `crates/cgv-media`: the media library model (Rust, via WASM). `crates/cgv-native`: the cgv-media protocol registry, byte ranges, ffprobe, proxies and the cache folder.
 - `packages/ui`: React components.
 - `apps/web`: Vite app.
