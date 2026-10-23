@@ -12,6 +12,7 @@ Small choices made while building the model and the project UI.
 - **Links:**
   - Delete, split, trim, roll, move, slip, slide and speed act on a clip's linked partners too.
   - Linked clips that touch on one track slide as one block. A property test found that sliding them one by one trimmed each other.
+  - A slide finds neighbours where the clips stood before it, never among the clips that slide. In CI, the property test found a block that slid up against another linked clip and trimmed it.
   - A link left with one clip is cleared.
   - Overwrite and insert never split a linked partner on another track. A clip they cut into two keeps its link on the left part only.
 - **Detach audio:** without a target track, the sound goes on a new track directly below the clip's track, so the picture stays above it.

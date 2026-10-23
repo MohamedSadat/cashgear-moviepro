@@ -777,21 +777,30 @@ impl Edit {
                 }
                 block_end = Some(clip.end());
             }
-            for block in blocks {
-                let first = self.find(block[0])?.1.start;
-                let last = self.find(*block.last().expect("block"))?.1.end();
-                let neighbours = &self.project.tracks[index].clips;
-                let outside = |c: &&Clip| !block.contains(&c.id);
-                let previous = neighbours
-                    .iter()
-                    .filter(outside)
-                    .find(|c| c.end() == first)
-                    .map(|c| c.id);
-                let next = neighbours
-                    .iter()
-                    .filter(outside)
-                    .find(|c| c.start == last)
-                    .map(|c| c.id);
+            // Neighbours come from where the clips are now, and are never clips that
+            // slide themselves: a block that moves next to another is not its neighbour.
+            let neighbours = &self.project.tracks[index].clips;
+            let still = |c: &&Clip| !clips.iter().any(|target| target.id == c.id);
+            let plan: Vec<(Vec<ClipId>, Option<ClipId>, Option<ClipId>)> = blocks
+                .into_iter()
+                .map(|block| {
+                    let first = clips
+                        .iter()
+                        .find(|c| c.id == block[0])
+                        .expect("member")
+                        .start;
+                    let last_id = *block.last().expect("block");
+                    let last = clips
+                        .iter()
+                        .find(|c| c.id == last_id)
+                        .expect("member")
+                        .end();
+                    let previous = neighbours.iter().filter(still).find(|c| c.end() == first);
+                    let next = neighbours.iter().filter(still).find(|c| c.start == last);
+                    (block, previous.map(|c| c.id), next.map(|c| c.id))
+                })
+                .collect();
+            for (block, previous, next) in plan {
                 if let Some(previous) = previous {
                     self.clip_mut(index, previous).duration += delta;
                     self.check_clip_id(previous)?;

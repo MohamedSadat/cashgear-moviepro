@@ -884,6 +884,34 @@ fn slide_moves_a_clip_and_its_neighbours_follow() {
 }
 
 #[test]
+fn linked_clips_on_one_track_slide_together_without_trimming_each_other() {
+    let mut s = session();
+    let track = track_id(&s, 0);
+    let a = append(&mut s, 0, "v", 0, 30);
+    let b = ClipId(
+        run(
+            &mut s,
+            Command::Overwrite {
+                track,
+                at: f(35),
+                clip: spec("v", 100, 30),
+            },
+        )
+        .created[0],
+    );
+    run(&mut s, Command::Link { clips: vec![a, b] });
+    // Sliding by the gap's width brings `a` up against where `b` started.
+    run(
+        &mut s,
+        Command::Slide {
+            clip: a,
+            delta: f(5),
+        },
+    );
+    assert_eq!(layout(&s, 0), [(5, 30, 0), (40, 30, 100)]);
+}
+
+#[test]
 fn slide_into_a_gap_needs_room() {
     let mut s = session();
     let track = track_id(&s, 0);
