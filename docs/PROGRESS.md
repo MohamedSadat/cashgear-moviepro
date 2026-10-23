@@ -2,6 +2,91 @@
 
 Newest phase first. Each phase lists the evidence for every exit criterion.
 
+## Phase 2: Project model, timeline core, undo/redo (complete)
+
+- **Completed:** 2026-10-23, tag `phase-2`.
+- **CI:** [run 39933600959](https://github.com/MohamedSadat/cashgear-moviepro/actions/runs/39933600959) on commit `bc2df0c`, green (License gates 37 s; Windows build and test 9 min 7 s).
+  - It ran 105 Rust tests, including the property tests, and 28 software-GPU browser tests, 8 of them project specs.
+  - The desktop smoke saved, reopened, hard-killed and recovered a project.
+  - The first run, [run 39905306624](https://github.com/MohamedSadat/cashgear-moviepro/actions/runs/39905306624) on `7c7212c`, failed: its property test found the slide bug that `bc2df0c` fixes.
+- **Reference machine:** as in Phase 0: GTX 1650, driver 457.51, Chrome 156, Edge and WebView2 155.
+
+### Shipped
+
+- **Model (`cgv-model`, pure Rust):**
+  - A project holds settings, a media bin, free tracks (any clip on any track, the bottom track drawn first) and markers.
+  - Settings default to 1080p30 with 48 kHz stereo. Presets: 16:9, 9:16, 1:1 and 4K UHD.
+  - Clips carry media, timeline start and duration, source in point, speed, picture and sound switches, link, transform, crop, opacity, volume, effects and keyframes. Effects and keyframes are stored now; Phase 6 gives them commands.
+- **30 commands, each applied whole or not at all:**
+  - Edits: insert, overwrite, append, delete, ripple delete, split, trim (plain and ripple), roll, move (across tracks, optionally overwriting), slip and slide.
+  - Clips: link, unlink, detach audio, speed and properties.
+  - Tracks: add, remove, move, rename, lock, mute and hide.
+  - Markers, media, rename and settings.
+  - Times snap to project frames. Locked tracks refuse edits, and linked partners follow.
+  - The rules are checked after every edit, so a bug fails the command instead of corrupting the project.
+- **Undo and redo:**
+  - Groups make one drag or one multi-clip action a single step, and a group can be cancelled.
+  - A command that changes nothing leaves no step.
+  - Snapshots share unchanged tracks; the history keeps 10,000 steps.
+  - Unsaved changes are tracked per state, so undoing back to the saved state is clean.
+- **Queries:** `clips_at`, track ranges, and snap points (clip edges, the playhead and markers) with nearest-point snapping.
+- **The `.cgvproj` file:**
+  - Pretty-printed JSON with a format name and version, and a migration chain for later versions.
+  - It is validated on open, refuses newer versions, and reloads floats bit for bit.
+- **Engine:**
+  - `cgv-wasm` exposes `ProjectSession`; the engine worker runs it behind `projectExecute`, `projectUndo` and the other project calls.
+  - Imports report each file's modified time and its `MediaRef`.
+- **Saving and recovery:**
+  - Web: projects live in OPFS and are listed in IndexedDB. Export downloads a `.cgvproj` file, and Import opens one as a copy.
+  - Desktop: native save and open dialogs; the file goes where the user saves it.
+  - Autosave every 30 s, into OPFS on the web or the app data folder on desktop (`CGV_DATA_DIR` for tests). It never touches the saved file.
+  - At startup, an autosave that differs from the saved file offers Recover or Discard.
+  - Switching projects keeps unsaved changes as an autosave. The web warns before leaving with unsaved changes.
+- **Relinking:**
+  - Missing files open a relink dialog: Locate on both platforms, and Search a folder on desktop (by name and size).
+  - Clips of missing media stay in place and show as offline.
+  - A file whose size or modified time changed drops its cached thumbnails, waveform and proxy. This closes the Phase 1 gap.
+  - On the web, files no project uses are forgotten.
+- **UI:**
+  - A project bar: name, save state, New, Open, Save, Save as or Export, Undo, Redo and Settings.
+  - Projects, settings, recovery and relink dialogs.
+  - A per-project media bin with Add to timeline and a Missing status.
+  - A read-only timeline outline with lock, mute and hide.
+  - Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z, Ctrl+S and Ctrl+Shift+S.
+- **Phase 1 library:** on first start, remembered media moves into an "Untitled project".
+
+### Exit criteria
+
+| Criterion                                                                          | Result | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------------------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Every edit command has unit tests and passes the property tests                    | Passed | `crates/cgv-model/tests/commands.rs` has 41 tests covering every command's effect and refusals, plus the session, queries and files. `random_edits_keep_every_rule_and_undo_exactly` (proptest, 128 cases of up to 120 commands per run; more than 44,000 cases run locally) checks after every applied command: the structural rules, whole frames, sources inside their media, untouched locked tracks, each command's own promise (split keeps coverage, ripple delete closes exactly the removed lengths, insert grows its track, slip leaves the timeline alone, a move keeps content), and an exact undo then redo. It found two bugs, both in sliding linked clips on one track. Touching clips trimmed each other, so they now slide as one block. On the CI runner, a block that slid up against another linked clip was taken for that clip's neighbour; neighbours now come from the positions before the slide, and the seed is kept as a proptest regression. |
+| Save then load produces an identical project                                       | Passed | Every property case and every 1,000-command run ends with save then load equal to the project and a byte-identical second save. In the browser, `save then reload gives an identical project` passes on Chrome, Edge and software Chrome: after a reload, the project equals the saved one and the file text is identical. The edits include split, detach, speed, a move across tracks, fractional transforms, a Unicode marker and 9:16 settings. `an exported project file imports as a copy with the same edit` also passes. The desktop smoke writes a `.cgvproj` equal to the open project, then reopens it from the recent list unchanged and clean.                                                                                                                                                                                                                                                                                                                |
+| 1,000 random commands followed by 1,000 undos restore the original project exactly | Passed | `a_thousand_random_commands_then_a_thousand_undos_restore_the_original_exactly` runs 4 seeds (1, 2, 3 and 0xC0FFEE). Each applies 1,000 changing commands; another 322 to 804 are refused and must change nothing. The ends hold 27 to 41 tracks and 169 to 350 clips. 1,000 undos match every intermediate state and end equal to the original, with the same file bytes and no unsaved changes. 1,000 redos return to the end state.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Autosave recovers a project after the app is killed mid-edit                       | Passed | `autosave recovers the project after the tab is killed mid-edit` (Chrome, Edge, software Chrome): after a save, more edits including an open drag, the autosave runs (400 ms in tests) and the browser's renderer processes are terminated. A new tab offers recovery, and Recover gives exactly the autosaved project, with unsaved changes. `discarding a recovery opens the last saved version` covers the other choice. In the desktop smoke, `cgv-desktop.exe` is hard-killed mid-drag and relaunched with the same profile; Recover gives exactly the autosaved project (WebView2 155, hardware and software).                                                                                                                                                                                                                                                                                                                                                       |
+
+### Local verification
+
+| Check                                                          | Result                                                                                                                                                       |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| fmt, clippy `-D warnings` (native and wasm32)                  | Clean                                                                                                                                                        |
+| `cargo test --workspace` (`CGV_REQUIRE_FFMPEG=1`)              | 105 passed: model 53 (10 unit, 41 command, 2 property), native 17, desktop 1, wasm 1, plus the Phase 1 suites. The property tests take 4 s in a debug build. |
+| Vitest                                                         | 43 passed, including recovery decisions, referenced media, changed-file detection and autosave timing                                                        |
+| Playwright, hardware: Chrome 156, Edge 155                     | 48 passed, 8 of them project specs per browser                                                                                                               |
+| Playwright, software (`GPU_TEST_SOFTWARE=1`, installed Chrome) | 28 passed                                                                                                                                                    |
+| Desktop smoke, WebView2 155                                    | Passed on hardware and software: media, a saved `.cgvproj` that reopens, and recovery after a hard kill                                                      |
+| Licenses                                                       | cargo-deny ok (proptest 1.11.0 is MIT or Apache-2.0, dev only); npm 154 packages; the GPL self-test rejects both fixtures                                    |
+| Release WASM                                                   | 3,284,072 bytes in CI; gzip 1,209,250, within the 1,500,000 budget (Phase 1: 1,041,193)                                                                      |
+
+### Known gaps
+
+- The timeline is a read-only outline. Phase 4 builds the editing timeline; until then, only Add to timeline and the track switches send edits from the UI. Tests drive the rest through the engine API.
+- Ripple edits move later clips only on the edited tracks and their linked partners. Ripple across tracks waits for Phase 4's magnetic-track answer.
+- Effects and keyframes are saved and reloaded, but no command creates them before Phase 6.
+- Desktop has no "save changes?" prompt when the window closes. Autosave and recovery cover it.
+- The desktop cache folder (thumbnails, waveforms, proxies) is not pruned for media no project uses. The web forgets such files.
+- A web project imported from another browser always needs relinking. Folder search is desktop-only.
+- Undo history is not saved with the project, as agreed.
+
 ## Phase 1: Media import, decoding, proxies, thumbnails (complete)
 
 - **Completed:** 2026-10-23, tag `phase-1`.
