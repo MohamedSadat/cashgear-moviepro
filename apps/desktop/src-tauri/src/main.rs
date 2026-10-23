@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod media;
+mod project;
 
 use tauri::Manager;
 
@@ -15,6 +16,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             app.manage(media::MediaState::new(app.handle()));
+            app.manage(project::ProjectState::new(app.handle()));
             Ok(())
         })
         .register_asynchronous_uri_scheme_protocol("cgv-media", |context, request, responder| {
@@ -31,9 +33,18 @@ fn main() {
             media::media_register,
             media::media_forget,
             media::media_make_proxy,
+            media::media_drop_proxy,
             media::cache_read,
             media::cache_write,
             media::cache_remove,
+            project::project_save,
+            project::project_open,
+            project::project_read,
+            project::autosave_read,
+            project::autosave_write,
+            project::autosave_remove,
+            project::media_locate,
+            project::media_search,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run CashGear Video");

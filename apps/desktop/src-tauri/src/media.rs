@@ -72,7 +72,7 @@ pub struct FileRequest {
     path: String,
 }
 
-fn register(state: &MediaState, id: String, path: &Path) -> Result<MediaFile, String> {
+pub(crate) fn register(state: &MediaState, id: String, path: &Path) -> Result<MediaFile, String> {
     let media = state.registry.register(&id, path)?;
     let (probe, probe_error) = match state.tools().and_then(|tools| probe::probe(tools, path)) {
         Ok(probe) => (Some(probe), None),
@@ -153,6 +153,20 @@ pub fn media_forget(state: State<'_, MediaState>, id: String) -> Result<(), Stri
     state.probes.lock().expect("probes").remove(&id);
     let _ = std::fs::remove_file(proxy_path(&state, &id)?);
     Ok(())
+}
+
+/// Drops the proxy of a file that changed on disk, so the next one is made from the new file.
+#[tauri::command]
+pub fn media_drop_proxy(state: State<'_, MediaState>, id: String) -> Result<(), String> {
+    if let Some(cancel) = state.proxies.lock().expect("proxies").remove(&id) {
+        cancel.store(true, Ordering::Relaxed);
+    }
+    state.registry.forget(&format!("{id}.proxy"));
+    match std::fs::remove_file(proxy_path(&state, &id)?) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("Could not remove the old proxy: {error}")),
+    }
 }
 
 fn proxy_path(state: &MediaState, id: &str) -> Result<PathBuf, String> {

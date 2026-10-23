@@ -1,9 +1,10 @@
 //! Desktop-only native side: the media registry behind the `cgv-media://`
-//! protocol, FFmpeg probes and proxies (run as child processes), and the
-//! cache folder for thumbnails and waveforms.
+//! protocol, FFmpeg probes and proxies (run as child processes), the cache
+//! folder for thumbnails and waveforms, and project files and autosaves.
 pub mod cache;
 pub mod ffmpeg;
 pub mod probe;
+pub mod project;
 pub mod proxy;
 pub mod range;
 pub mod registry;

@@ -13,6 +13,8 @@ pub struct RegisteredMedia {
     pub path: String,
     pub name: String,
     pub size: u64,
+    /// Last-modified time in milliseconds since 1970, for change detection.
+    pub modified: Option<i64>,
     pub url: String,
 }
 
@@ -67,6 +69,7 @@ impl Registry {
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_default(),
             size: metadata.len(),
+            modified: crate::project::modified_ms(path),
             url: media_url(id),
         })
     }
@@ -97,6 +100,7 @@ mod tests {
         let registry = Registry::default();
         let media = registry.register("abc-1", &file).unwrap();
         assert_eq!(media.size, 5);
+        assert!(media.modified.is_some());
         assert_eq!(media.name, "cgv-registry-test.bin");
         assert!(media.url.ends_with("/abc-1"));
         assert_eq!(registry.path("abc-1"), Some(file.canonicalize().unwrap()));
