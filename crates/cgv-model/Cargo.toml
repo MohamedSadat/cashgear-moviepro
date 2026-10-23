@@ -5,3 +5,13 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 rust-version.workspace = true
+
+[dependencies]
+cgv-time.workspace = true
+# rc: tracks are Arc-shared between undo snapshots.
+serde = { workspace = true, features = ["rc"] }
+# float_roundtrip: clip values read back bit for bit, so saved projects reload identically.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+
+[dev-dependencies]
+proptest = { version = "=1.11.0", default-features = false, features = ["std"] }
