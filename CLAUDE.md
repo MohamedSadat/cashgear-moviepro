@@ -38,13 +38,15 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `project/`: the worker's project session (WASM), autosave timing and recovery decisions.
   - `playback/`: the playback controller (the one `renderFrame(t)` path, pre-roll, J/K/L, Auto quality) and the worker's sound player.
   - `audio/`: the SharedArrayBuffer ring, its AudioWorklet and the page's AudioContext.
+  - `export/`: the export worker (its own engine and copy of the project), encoders, Mediabunny muxing, targets, and pure settings (formats, presets, codec levels, bitrates).
 - `crates/cgv-model`: the project, every edit command, undo/redo and the `.cgvproj` format. `packages/ui/src/project`: opening, saving, autosave, recovery and relinking.
 - `crates/cgv-engine`: `plan_frame` (what a frame shows), the audio clip plan, transport, Auto quality and playback stats. `crates/cgv-audio`: the block mixer. `crates/cgv-render`: the compositor and WGSL.
-- `crates/cgv-media`: the media library model (Rust, via WASM). `crates/cgv-native`: the cgv-media protocol registry, byte ranges, ffprobe, proxies and the cache folder.
+- `crates/cgv-media`: the media library model (Rust, via WASM). `crates/cgv-native`: the cgv-media protocol registry, byte ranges, ffprobe, proxies, export files and their GIF and MP3 conversions, and the cache folder.
 - `packages/ui`: React components, on the CG component library (`@cashgear/ui`).
   - `timeline/`: the canvas timeline. `controller.ts` owns the view, drawing and gestures outside React; `geometry.ts` and `draw.ts` are pure.
   - `editing/`: selection, tools, the clipboard and every editing action (`useEditor`), and drag gestures (`Gesture`, one undo step each).
   - `inspector/`, `shortcuts/` (the key map, presets and settings dialog), `workspace/` (resizable panels) and `settings/` (per-user settings in `localStorage`).
+  - `export/`: the export dialog, its form rules and `useExport`.
 - `apps/web`: Vite app.
 - `apps/desktop/src-tauri`: Tauri 2 shell.
 
@@ -92,3 +94,8 @@ Gotchas:
 - Keys go through the shortcut map (`shortcuts/keymap.ts`); add an action there rather than a `keydown` listener.
 - The CG library's overlays copy `data-cg-theme` from `<html>`; some of its styles read `--cg-color-*` tokens that only `styles.css` defines.
 - The sound card is the playback clock. Keep the worker's ticks short, or raise the mix-ahead lead, because starved sound stalls the picture too.
+- Exports read the composition back as NV12 (`Engine.read_nv12`), packed four bytes a texel so WebGL2 can read it. Never give the encoder RGB frames: the browser would pick the matrix.
+- A hardware encoder `isConfigSupported` accepts may still fail to start (CI's WARP GPU process, where even "no preference" means hardware). `chooseVideoConfig` tries each on one frame; keep `prefer-software` last.
+- Windows' AAC encoder refuses more than 192 kbit/s.
+- Export PSNR is measured on Y'CbCr 4:2:0 planes with FFmpeg's `psnr` filter. RGB PSNR cannot reach 40 dB at sharp saturated edges in any 4:2:0 file.
+- Every Playwright run empties `test-results/`. Copy exports you want to keep (player checks) elsewhere, such as `bench/results/`.
