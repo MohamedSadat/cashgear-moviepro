@@ -23,7 +23,14 @@ export interface Comparison {
   worst: number;
 }
 
-export function compare(actual: PNG, expected: PNG): Comparison {
+/** RGBA pixels, as a PNG or a read-back composition holds them. */
+export interface Pixels {
+  width: number;
+  height: number;
+  data: Uint8Array;
+}
+
+export function compare(actual: Pixels, expected: Pixels): Comparison {
   expect([actual.width, actual.height]).toEqual([expected.width, expected.height]);
   const bands = [0, 0, 0];
   let worst = 0;

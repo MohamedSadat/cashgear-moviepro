@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { compare, passes, type Pixels } from './golden-tools';
 
 // Phase 3: one renderFrame(t) for preview and export, real-time multitrack
 // playback with the sound card as master clock, seeks, shuttle and frame steps.
@@ -42,11 +43,6 @@ interface State {
   time: number;
   frame: number;
   clock: string | null;
-}
-interface Pixels {
-  width: number;
-  height: number;
-  data: Uint8Array;
 }
 interface Api {
   projectSnapshot(): {
@@ -388,6 +384,73 @@ test('five stacked effects on a 1080p30 clip play in real time at full resolutio
     expect(stats.presented).toBeGreaterThanOrEqual(3);
     return;
   }
+  expect(advanced).toBeGreaterThan(wall * 0.9);
+  expect(stats.dropped).toBe(0);
+  expect(stats.presented).toBeGreaterThanOrEqual(Math.floor(advanced * 30) - 1);
+});
+
+test('a keyframed transform plays smoothly and as drawn when paused', async ({
+  page,
+}, testInfo) => {
+  const seconds = 10;
+  test.setTimeout((seconds + 120) * 1000);
+  await open(page);
+  const [h264] = await importFiles(page, ['h264-1080p30-aac.mp4']);
+  const [track] = await tracks(page, 1);
+  const clips = await fill(page, track, h264, Math.ceil((seconds + 5) / 10));
+  // Each clip moves across, grows and turns, and its vignette fades in.
+  const keys: [string, number, number, string][] = [
+    ['transform.x', 0, -480, 'easeInOut'],
+    ['transform.x', 300, 480, 'linear'],
+    ['transform.scaleX', 0, 0.5, 'easeOut'],
+    ['transform.scaleX', 300, 1, 'linear'],
+    ['transform.scaleY', 0, 0.5, 'easeOut'],
+    ['transform.scaleY', 300, 1, 'linear'],
+    ['transform.rotation', 0, -20, 'linear'],
+    ['transform.rotation', 300, 20, 'linear'],
+  ];
+  for (const clip of clips) {
+    const [vignette] = await run(page, {
+      type: 'addEffect',
+      clip,
+      effect: { kind: 'vignette' },
+    });
+    for (const [property, frame, value, kind] of [
+      ...keys,
+      [`effects.${vignette}.amount`, 0, 0, 'linear'],
+      [`effects.${vignette}.amount`, 300, 1, 'linear'],
+    ] as const)
+      await run(page, {
+        type: 'setKeyframe',
+        clip,
+        property,
+        time: frame * FRAME,
+        value,
+        interpolation: { kind },
+      });
+  }
+  await call(page, 'setQuality', 'full');
+  const { stats, wall, advanced } = await playFor(page, seconds);
+  // Pausing at full quality keeps the frame playback drew.
+  const { frame, time } = await call(page, 'playbackState');
+  const playing = await pixels(page, 'readComposition');
+  const paused = await pixels(page, 'renderPixels', time);
+  // Golden tolerance: paused frames are converted from their planes, whose last
+  // row differs a little, which shows along the clip's turned bottom edge.
+  const difference = compare(playing, paused);
+  await record(testInfo, 'keyframed-transform', {
+    seconds,
+    wall,
+    advanced,
+    frame,
+    difference,
+    stats,
+    software,
+  });
+  expect(frame).toBeGreaterThan(30);
+  expect(passes(difference), JSON.stringify(difference)).toBe(true);
+  if (software) return;
+  expect(stats.level).toBe(0);
   expect(advanced).toBeGreaterThan(wall * 0.9);
   expect(stats.dropped).toBe(0);
   expect(stats.presented).toBeGreaterThanOrEqual(Math.floor(advanced * 30) - 1);
