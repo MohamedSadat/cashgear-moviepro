@@ -83,6 +83,8 @@ export class PlaybackController {
   private lastTick = 0;
   /** Milliseconds since the tick before this one. */
   private interval = 0;
+  /** The longest recent gap between ticks, decaying slowly (ms). */
+  private intervalPeak = 0;
   private vsyncMs = 1000 / 60;
   private dirty = true;
   private rendering = false;
@@ -317,6 +319,7 @@ export class PlaybackController {
   tick(now: number): boolean {
     const engine = this.deps.engine;
     this.interval = this.lastTick > 0 ? now - this.lastTick : 0;
+    this.intervalPeak = Math.max(this.interval, this.intervalPeak * 0.99);
     if (this.interval > 2 && this.interval < 100)
       this.vsyncMs += (this.interval - this.vsyncMs) * 0.05;
     this.lastTick = now;
@@ -429,7 +432,9 @@ export class PlaybackController {
       if (unusable) this.fallBackToWall(now, unusable);
       else if (silent > audioClockTimeoutMs)
         this.fallBackToWall(now, 'the sound device reported no output time');
-      else audio!.fill(session);
+      // Mix far enough ahead to outlast the slowest recent ticks: a busy machine
+      // drops frames, but its sound and clock keep going.
+      else audio!.fill(session, (2.5 * this.intervalPeak) / 1000);
     }
     // The frame drawn now is seen on the next refresh: pick it for that moment.
     const seconds = this.readClock(nowAbs + this.vsyncMs);

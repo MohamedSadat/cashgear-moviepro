@@ -12,8 +12,9 @@ import {
 import type { AudioBlocks } from '../media/audio-blocks';
 import { Mixer, type ProjectSession } from '../pkg/cgv_wasm';
 
-/** Seconds of mixed sound kept ahead of the device. */
-const aheadSeconds = 0.25;
+/** Seconds of mixed sound kept ahead of the device, at least and at most. */
+const minAheadSeconds = 0.25;
+const maxAheadSeconds = 1.5;
 /** Seconds of source audio decoded ahead of the mix. */
 const prefetchSeconds = 3;
 /** Frames mixed per call. */
@@ -103,12 +104,17 @@ export class AudioPlayer {
     return this.session !== null;
   }
 
-  /** Tops the ring up with mixed sound, as far as decoded audio allows. */
-  fill(project: ProjectSession) {
+  /**
+   * Tops the ring up with mixed sound, as far as decoded audio allows, to
+   * `aheadSeconds` (clamped) ahead of the device. Sound must outlast the longest
+   * pause between two fills, or the clock it drives would stall with it.
+   */
+  fill(project: ProjectSession, aheadSeconds = minAheadSeconds) {
     const session = this.session;
     if (!session) return;
     this.request(project, session.next, Math.round(prefetchSeconds * this.sampleRate));
-    const target = Math.round(aheadSeconds * this.sampleRate);
+    const ahead = Math.min(maxAheadSeconds, Math.max(minAheadSeconds, aheadSeconds));
+    const target = Math.round(ahead * this.sampleRate);
     let queued = buffered(this.ring);
     while (queued < target) {
       if (!this.mixer.ready(project, session.next, chunkFrames)) break;
