@@ -1,10 +1,8 @@
-use cgv_model::Project;
 use cgv_render::geometry::{output_size, CropRect, LayerTransform, Picture};
 use cgv_render::{FrameSource, LayerDraw, Readback, Renderer};
-use cgv_time::Flicks;
 use web_sys::OffscreenCanvas;
 
-use crate::plan::{plan_frame, FramePlan};
+use crate::plan::FramePlan;
 use crate::PatternClock;
 
 /// The engine's GPU side: the program monitor's renderer and the frame being
@@ -62,12 +60,12 @@ impl Engine {
         Ok(presented)
     }
 
-    /// Plans the frame showing at `time` and starts building it.
-    pub fn plan(&mut self, project: &Project, time: Flicks) -> &FramePlan {
-        let plan = plan_frame(project, time);
+    /// Starts building the frame `plan` describes (from `plan::plan_frame`). Sources
+    /// may take a while to gather; start the frame once they are all at hand.
+    pub fn begin(&mut self, plan: FramePlan) {
         self.renderer.begin_frame(plan.layers.len());
         self.pictures = vec![None; plan.layers.len()];
-        self.plan.insert(plan)
+        self.plan = Some(plan);
     }
 
     /// Gives layer `index` of the planned frame its picture. `width` and `height`
@@ -152,6 +150,9 @@ impl Engine {
 
     pub fn gpu_ms(&self) -> f64 {
         self.renderer.gpu_ms()
+    }
+    pub fn gpu_busy(&self) -> bool {
+        self.renderer.gpu_busy()
     }
     pub fn composition_format(&self) -> String {
         self.renderer.composition_format()

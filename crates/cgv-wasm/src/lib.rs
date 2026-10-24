@@ -67,13 +67,21 @@ mod bridge {
             self.pattern_frame(now_ms)
         }
 
-        /// Plans the frame showing at `time` (flicks) and starts building it.
-        /// Returns the plan as JSON (`cgv_engine::plan::FramePlan`).
-        pub fn plan(&mut self, session: &ProjectSession, time: f64) -> Result<String, JsValue> {
-            let plan = self
-                .inner
-                .plan(session.inner.project(), cgv_time::Flicks(time as i64));
-            serde_json::to_string(plan).map_err(js_error)
+        /// Starts building the frame a `ProjectSession::plan_frame` plan describes.
+        pub fn begin(&mut self, plan: &str) -> Result<(), JsValue> {
+            self.inner.begin(parse(plan)?);
+            Ok(())
+        }
+        /// Clears the monitor to black (no project open).
+        pub fn clear(&mut self) -> Result<bool, JsValue> {
+            self.inner.begin(cgv_engine::plan::FramePlan {
+                frame: 0,
+                time: cgv_time::Flicks::ZERO,
+                width: 16,
+                height: 9,
+                layers: Vec::new(),
+            });
+            self.inner.compose(1.0, true).map_err(js_error)
         }
         /// A GPU-backed decoder output for layer `index`; the browser converts it.
         /// The frame can be closed as soon as this returns.
@@ -196,6 +204,10 @@ mod bridge {
         /// Milliseconds the GPU took for the latest finished frame.
         pub fn gpu_ms(&self) -> f64 {
             self.inner.gpu_ms()
+        }
+        /// True while the GPU still works on a composed frame.
+        pub fn gpu_busy(&self) -> bool {
+            self.inner.gpu_busy()
         }
         pub fn composition_format(&self) -> String {
             self.inner.composition_format()
@@ -369,6 +381,23 @@ mod bridge {
         /// The resolution presets offered for new projects and in settings.
         pub fn presets() -> Result<String, JsValue> {
             serde_json::to_string(&cgv_model::PRESETS).map_err(js_error)
+        }
+        /// The plan of the frame showing at `time` (flicks), as JSON
+        /// (`cgv_engine::plan::FramePlan`): the pure half of `renderFrame(t)`.
+        pub fn plan_frame(&self, time: f64) -> Result<String, JsValue> {
+            let time = cgv_time::Flicks(time as i64);
+            let plan = cgv_engine::plan::plan_frame(self.inner.project(), time);
+            serde_json::to_string(&plan).map_err(js_error)
+        }
+        pub fn sample_rate(&self) -> u32 {
+            self.inner.project().settings.sample_rate
+        }
+        pub fn channels(&self) -> u16 {
+            self.inner.project().settings.channels
+        }
+        /// One project frame, in flicks.
+        pub fn frame_duration(&self) -> f64 {
+            self.inner.project().settings.frame_duration().0 as f64
         }
         /// The end of the last clip, in flicks.
         pub fn duration(&self) -> f64 {
@@ -574,21 +603,26 @@ mod bridge {
         pub fn quality_scale(&self) -> f64 {
             self.governor.scale(self.transport.is_playing())
         }
-        /// Records a frame shown while playing. Returns true when Auto changed the level.
-        #[allow(clippy::too_many_arguments)]
+        /// Records a frame shown while playing, after `missed` skipped frames, of
+        /// which `drawing_missed` were decoded in time. `gpu_ms` is the latency from
+        /// submitting a frame to the GPU finishing it. Returns true when Auto
+        /// changed the level.
         pub fn record_frame(
             &mut self,
             now_ms: f64,
-            budget_ms: f64,
             render_ms: f64,
             gpu_ms: f64,
             missed: u32,
-            offset_ms: Option<f64>,
+            drawing_missed: u32,
             late: bool,
         ) -> bool {
-            self.stats.presented(render_ms, gpu_ms, offset_ms, late);
+            self.stats.presented(render_ms, gpu_ms, late);
             self.stats.dropped(missed as u64);
-            self.governor.record(now_ms, budget_ms, gpu_ms, missed)
+            self.governor.record(now_ms, missed, drawing_missed)
+        }
+        /// Records the A/V offset at one display refresh (frame on screen minus sound heard).
+        pub fn record_offset(&mut self, offset_ms: f64) {
+            self.stats.offset(offset_ms);
         }
         /// JSON `cgv_engine::stats::StatsSummary`.
         pub fn stats(&self) -> Result<String, JsValue> {

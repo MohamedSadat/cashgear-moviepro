@@ -101,18 +101,23 @@ impl Default for PlaybackStats {
 
 impl PlaybackStats {
     /// A frame was shown. `late` marks one shown after it was first due.
-    pub fn presented(&mut self, render_ms: f64, gpu_ms: f64, offset_ms: Option<f64>, late: bool) {
+    pub fn presented(&mut self, render_ms: f64, gpu_ms: f64, late: bool) {
         self.presented += 1;
         self.late += late as u64;
         self.render.add(render_ms);
         self.gpu.add(gpu_ms);
-        if let Some(offset) = offset_ms.filter(|value| value.is_finite()) {
-            self.offset.add(offset);
-            self.offset_abs_max = self.offset_abs_max.max(offset.abs());
-            self.last_offset = Some(offset);
-            let bin = ((offset.abs() / BIN_MS) as usize).min(BINS);
-            self.histogram[bin] += 1;
+    }
+
+    /// The A/V offset at one display refresh: the frame on screen minus the sound heard.
+    pub fn offset(&mut self, offset_ms: f64) {
+        if !offset_ms.is_finite() {
+            return;
         }
+        self.offset.add(offset_ms);
+        self.offset_abs_max = self.offset_abs_max.max(offset_ms.abs());
+        self.last_offset = Some(offset_ms);
+        let bin = ((offset_ms.abs() / BIN_MS) as usize).min(BINS);
+        self.histogram[bin] += 1;
     }
 
     /// Frames that were due but never shown.
@@ -170,10 +175,11 @@ mod tests {
         let mut stats = PlaybackStats::default();
         assert_eq!(stats.summary().offset.p95_abs_ms, 0.0);
         for i in 0..100 {
-            let offset = if i < 90 { 1.1 } else { -12.0 };
-            stats.presented(2.0, 4.0 + i as f64 * 0.01, Some(offset), i == 5);
+            stats.presented(2.0, 4.0 + i as f64 * 0.01, i == 5);
+            stats.offset(if i < 90 { 1.1 } else { -12.0 });
         }
-        stats.presented(1.0, f64::NAN, None, false);
+        stats.presented(1.0, f64::NAN, false);
+        stats.offset(f64::NAN);
         stats.dropped(3);
         let summary = stats.summary();
         assert_eq!(
@@ -190,7 +196,7 @@ mod tests {
         assert_eq!(summary.offset.p50_abs_ms, 1.25);
         assert_eq!(summary.offset.p95_abs_ms, 12.25);
         // Offsets beyond the histogram report the true maximum.
-        stats.presented(1.0, 1.0, Some(250.0), false);
+        stats.offset(250.0);
         assert_eq!(stats.summary().offset.max_abs_ms, 250.0);
     }
 }

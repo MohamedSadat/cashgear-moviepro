@@ -3,10 +3,10 @@
 use cgv_audio::{db_to_gain, AudioClip};
 use cgv_model::{Clip, ClipId, Crop, Project, Speed, TrackId, Transform};
 use cgv_time::Flicks;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// One picture to draw.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LayerPlan {
     pub clip: ClipId,
@@ -26,7 +26,7 @@ pub struct LayerPlan {
 }
 
 /// Everything one project frame shows, bottom layer first.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FramePlan {
     /// Project frame number and its start time.
