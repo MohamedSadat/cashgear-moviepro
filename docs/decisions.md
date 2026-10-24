@@ -14,10 +14,11 @@ Choices made while building the export pipeline.
   - The target packs four bytes a texel (RGBA8), luma rows then chroma rows. One readback is then an NV12 frame on WebGPU and WebGL2 alike; WebGL2 cannot reliably read single- and two-channel targets back.
 - **Measuring PSNR:** on the Y'CbCr 4:2:0 planes, as codecs report it. FFmpeg converts the preview frame to the export's own format, and its `psnr` filter compares the planes.
   - RGB PSNR cannot reach 40 dB on frames with sharp edges between saturated colours, in any 4:2:0 file. A lossless 4:2:0 copy of the fixture frames reaches only 34.4 to 45.4 dB, and the exports come within 0.1 to 1.7 dB of that.
-  - So the test also requires RGB PSNR within 3 dB of that ceiling, which catches a wrong matrix or a shifted picture.
+  - So the test also requires RGB PSNR within 6 dB of that ceiling, which catches a wrong matrix or a shifted picture (both cost well over 10 dB). The hardware encoders come within 1.7 dB; CI's software encoder (OpenH264) within 5 dB.
   - Comparing with the next frame of the moving clip, a control, gives 22.4 dB and must fail.
 - **Encoding:**
-  - The hardware encoder is used first (`prefer-hardware`), then whatever the browser offers. VBR, `latencyMode: 'quality'`, a key frame every 2 s.
+  - The hardware encoder is used first (`prefer-hardware`), then the browser's choice, then software. VBR, `latencyMode: 'quality'`, a key frame every 2 s.
+  - Each is tried on one black frame before the export starts. In CI's software GPU process (WARP), Chrome offers its hardware H.264 encoder, and picks it for "no preference", but it fails to start; only `prefer-software` (OpenH264) encodes there.
   - H.264 is High profile, HEVC Main, VP9 profile 0 and AV1 Main, all 8-bit, each at the lowest level that holds the frame size, rate and bitrate.
   - Exports decode in hardware where they can.
 - **Quality and bitrates:**
