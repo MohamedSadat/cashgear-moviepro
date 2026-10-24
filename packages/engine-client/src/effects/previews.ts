@@ -18,6 +18,7 @@ export interface PreviewWorkerApi {
   render(
     requests: PreviewRequest[],
     size: { width: number; height: number },
+    backend: 'auto' | 'webgl2',
   ): Promise<(Blob | null)[]>;
 }
 
@@ -28,6 +29,7 @@ export interface PreviewWorkerApi {
 export async function renderPreviews(
   requests: PreviewRequest[],
   size: { width: number; height: number } = { width: 160, height: 90 },
+  backend: 'auto' | 'webgl2' = 'auto',
 ): Promise<(Blob | null)[]> {
   const worker = new Worker(new URL('./preview-worker.ts', import.meta.url), {
     type: 'module',
@@ -41,7 +43,7 @@ export async function renderPreviews(
     }),
   );
   try {
-    return await Promise.race([api.render(requests, size), crashed]);
+    return await Promise.race([api.render(requests, size, backend), crashed]);
   } finally {
     api[releaseProxy]();
     worker.terminate();

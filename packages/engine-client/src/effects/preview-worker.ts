@@ -94,9 +94,13 @@ function layer(clip: number, media: string): LayerPlan {
 }
 
 const api: PreviewWorkerApi = {
-  async render(requests: PreviewRequest[], size: { width: number; height: number }) {
+  async render(
+    requests: PreviewRequest[],
+    size: { width: number; height: number },
+    backend: 'auto' | 'webgl2',
+  ) {
     await initWasm({ module_or_path: new URL('../pkg/cgv_wasm_bg.wasm', import.meta.url) });
-    const engine = await Engine.create(new OffscreenCanvas(16, 16), 'auto', () => {});
+    const engine = await Engine.create(new OffscreenCanvas(16, 16), backend, () => {});
     const session = new ProjectSession('previews', 'Previews');
     try {
       await loadPackImages(engine);

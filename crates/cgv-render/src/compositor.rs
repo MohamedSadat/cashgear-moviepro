@@ -1855,6 +1855,8 @@ impl Compositor {
                 depth_or_array_layers: 1,
             },
         );
+        // WebGL2 copies at the next submission: do it now, while the bitmap is open.
+        queue.submit([]);
         let view = texture.create_view(&TextureViewDescriptor::default());
         if let Some((old, _)) = self.images.insert(key.to_string(), (texture, view)) {
             old.destroy();
