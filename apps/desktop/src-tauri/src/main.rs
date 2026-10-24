@@ -16,10 +16,17 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            app.manage(media::MediaState::new(app.handle()));
+            let media = media::MediaState::new(app.handle());
+            export::clear_leftovers(&media);
+            app.manage(media);
             app.manage(project::ProjectState::new(app.handle()));
             app.manage(export::ExportState::default());
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                export::confirm_close(window, api);
+            }
         })
         .register_asynchronous_uri_scheme_protocol("cgv-media", |context, request, responder| {
             let app = context.app_handle().clone();

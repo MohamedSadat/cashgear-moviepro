@@ -10,7 +10,7 @@ use cgv_native::export::{part_path, Conversion, ExportWriter};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeBody};
 use tauri::{AppHandle, Manager, State};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 use crate::media::MediaState;
 
@@ -37,6 +37,56 @@ impl ExportState {
             .cloned()
             .ok_or_else(|| format!("No export with id {id}"))
     }
+
+    /// True while an export is being written or converted.
+    pub fn running(&self) -> bool {
+        !self.jobs.lock().expect("export jobs").is_empty()
+    }
+
+    /// Stops every export and removes what they wrote (the app is closing).
+    pub fn cancel_all(&self) {
+        let jobs: Vec<Arc<Job>> = self
+            .jobs
+            .lock()
+            .expect("export jobs")
+            .drain()
+            .map(|(_, job)| job)
+            .collect();
+        for job in jobs {
+            job.cancel.store(true, Ordering::Relaxed);
+            remove_partial(&job);
+        }
+    }
+}
+
+/// Asks before closing the window while an export runs: closing stops it.
+pub fn confirm_close(window: &tauri::Window, api: &tauri::CloseRequestApi) {
+    if !window.state::<ExportState>().running() {
+        return;
+    }
+    api.prevent_close();
+    let window = window.clone();
+    window
+        .dialog()
+        .message(
+            "An export is still running. Closing CashGear Video stops it and removes its file.",
+        )
+        .title("Export running")
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Stop and close".into(),
+            "Keep exporting".into(),
+        ))
+        .show(move |stop| {
+            if stop {
+                window.state::<ExportState>().cancel_all();
+                let _ = window.destroy();
+            }
+        });
+}
+
+/// Removes intermediates a crash or a hard kill left in the cache folder.
+pub fn clear_leftovers(media: &MediaState) {
+    let _ = std::fs::remove_dir_all(media.cache_root().join("exports"));
 }
 
 #[derive(Serialize)]

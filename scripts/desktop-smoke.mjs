@@ -1,8 +1,9 @@
 // Launches the release desktop build, attaches Playwright to its WebView2 over
 // CDP and checks the same things the browser specs check: the pattern on both
 // GPU backends, cross-origin isolation, shared memory and the native command.
-// Then media (native streaming, ffprobe, a ProRes proxy) and projects: a saved
-// .cgvproj that reopens, and an autosave that recovers after the app is killed.
+// Then media (native streaming, ffprobe, a ProRes proxy), projects (a saved
+// .cgvproj that reopens, and an autosave that recovers after the app is killed),
+// playback, and exports: MP4 written natively, GIF and MP3 converted by FFmpeg.
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -367,6 +368,89 @@ try {
       reachedFrame: playback.state.frame,
     },
   });
+
+  // Export: the recovered timeline (the ProRes clip through its proxy) muxed in
+  // WebView2 and written by the native side, then GIF and MP3 made by FFmpeg.
+  const ffprobe = join(
+    process.env.CGV_FFMPEG_DIR ?? join(root, '.tools/ffmpeg/bin'),
+    'ffprobe.exe',
+  );
+  const exportDir = join(dataDir, 'exports');
+  await mkdir(exportDir, { recursive: true });
+  const exports = [
+    {
+      format: 'mp4',
+      width: 1280,
+      height: 720,
+      frameRate: { num: 30, den: 1 },
+      video: { codec: 'avc', bitrate: 4e6 },
+      audio: { codec: 'aac', bitrate: 192000 },
+    },
+    {
+      format: 'gif',
+      width: 320,
+      height: 180,
+      frameRate: { num: 10, den: 1 },
+      video: { codec: 'avc', bitrate: 2e6 },
+      audio: null,
+    },
+    {
+      format: 'mp3',
+      width: 1280,
+      height: 720,
+      frameRate: { num: 30, den: 1 },
+      video: null,
+      audio: { codec: 'pcm-s16', bitrate: 192000 },
+    },
+  ];
+  const exported = {};
+  for (const settings of exports) {
+    const path = join(exportDir, 'Smoke export.' + settings.format);
+    const status = await page.evaluate(
+      async ({ settings, path }) => {
+        const exporter = window.__cgv.exporter;
+        if (!(await exporter.start(settings, { path })))
+          throw new Error('The export did not start');
+        const status = await exporter.settled();
+        exporter.dismiss();
+        return status;
+      },
+      { settings, path },
+    );
+    if (status.state !== 'done')
+      throw new Error(`${settings.format} export failed: ` + JSON.stringify(status));
+    const probed = JSON.parse(
+      spawnSync(
+        ffprobe,
+        [
+          '-v',
+          'error',
+          '-show_entries',
+          'stream=codec_name,width,height,nb_frames:format=duration',
+          '-of',
+          'json',
+          path,
+        ],
+        { encoding: 'utf8', windowsHide: true },
+      ).stdout,
+    );
+    const codecs = probed.streams.map((stream) => stream.codec_name);
+    const expected = { mp4: ['h264', 'aac'], gif: ['gif'], mp3: ['mp3'] }[settings.format];
+    if (JSON.stringify(codecs) !== JSON.stringify(expected))
+      throw new Error(
+        `${settings.format} export has ${codecs.join(', ')}: ` + JSON.stringify(probed),
+      );
+    if (Math.abs(Number(probed.format.duration) - status.result.durationSeconds) > 0.15)
+      throw new Error(`${settings.format} export lasts ${probed.format.duration} s`);
+    exported[settings.format] = {
+      location: status.location,
+      bytes: status.result.bytes,
+      elapsedMs: Math.round(status.result.elapsedMs),
+      durationSeconds: status.result.durationSeconds,
+      streams: probed.streams,
+    };
+  }
+  results.push({ exported });
 
   await page.screenshot({ path: join(root, 'bench/results/desktop.png') });
   await writeFile(
