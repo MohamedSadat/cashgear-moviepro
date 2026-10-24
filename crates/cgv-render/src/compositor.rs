@@ -8,8 +8,10 @@ use std::rc::Rc;
 
 use wgpu::*;
 
-use crate::color::{yuv_to_rgb, FrameColor, Matrix, Transfer};
-use crate::geometry::{layer_geometry, CropRect, LayerTransform, Picture};
+use crate::color::{rgb_to_yuv, yuv_to_rgb, FrameColor, Matrix, Transfer};
+use crate::geometry::{
+    export_picture, layer_geometry, nv12_texels, CropRect, LayerTransform, Picture,
+};
 
 /// Layers sample sRGB-encoded storage, which the GPU decodes to linear light.
 const LAYER_FORMAT: TextureFormat = TextureFormat::Rgba8UnormSrgb;
@@ -17,6 +19,7 @@ const LAYER_FORMAT: TextureFormat = TextureFormat::Rgba8UnormSrgb;
 const READBACK_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
 const LAYER_UNIFORM_SIZE: u64 = 96;
 const CONVERT_UNIFORM_SIZE: u64 = 64;
+const EXPORT_UNIFORM_SIZE: u64 = 80;
 /// Uniform slots per frame: one per layer and one per frame conversion.
 const UNIFORM_SLOTS: u64 = 256;
 /// Free textures kept per size and format.
@@ -164,19 +167,29 @@ struct CompTarget {
     present: [BindGroup; 2],
 }
 
-/// A readback in flight. `wait` resolves with tightly packed RGBA rows.
+/// A readback in flight. `wait` resolves with tightly packed RGBA rows, or with
+/// an NV12 frame whose rows are `stride` bytes apart.
 pub struct Readback {
     device: Device,
     buffer: Buffer,
+    /// The frame's size in pixels.
     width: u32,
     height: u32,
+    /// Bytes per row in the buffer.
     padded_row: u32,
+    /// RGBA readbacks drop the row padding: the bytes a row keeps.
+    tight_row: Option<u32>,
     mapped: Rc<Cell<Option<bool>>>,
 }
 
 impl Readback {
     pub fn size(&self) -> (u32, u32) {
         (self.width, self.height)
+    }
+
+    /// Bytes from one row to the next in what `wait` returns.
+    pub fn stride(&self) -> u32 {
+        self.tight_row.unwrap_or(self.padded_row)
     }
 
     pub async fn wait(self) -> Result<Vec<u8>, String> {
@@ -194,12 +207,18 @@ impl Readback {
             .slice(..)
             .get_mapped_range()
             .map_err(|error| format!("Could not read the frame back: {error}"))?;
-        let row = self.width as usize * 4;
-        let mut pixels = Vec::with_capacity(row * self.height as usize);
-        for y in 0..self.height as usize {
-            let start = y * self.padded_row as usize;
-            pixels.extend_from_slice(&data[start..start + row]);
-        }
+        let pixels = match self.tight_row {
+            Some(row) => {
+                let (row, padded) = (row as usize, self.padded_row as usize);
+                let rows = data.len() / padded;
+                let mut pixels = Vec::with_capacity(row * rows);
+                for y in 0..rows {
+                    pixels.extend_from_slice(&data[y * padded..y * padded + row]);
+                }
+                pixels
+            }
+            None => data.to_vec(),
+        };
         drop(data);
         self.buffer.unmap();
         self.buffer.destroy();
@@ -216,6 +235,13 @@ async fn sleep_ms(ms: i32) {
     let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
 }
 
+/// The packed NV12 target of an export frame size.
+struct ExportTarget {
+    frame: (u32, u32),
+    texture: Texture,
+    view: TextureView,
+}
+
 pub struct Compositor {
     comp_format: TextureFormat,
     webgl: bool,
@@ -224,19 +250,24 @@ pub struct Compositor {
     texture_layout: BindGroupLayout,
     convert_layout: BindGroupLayout,
     present_layout: BindGroupLayout,
+    export_layout: BindGroupLayout,
     layer_pipeline: RenderPipeline,
     nv12_pipeline: RenderPipeline,
     i420_pipeline: RenderPipeline,
     premultiply_pipeline: RenderPipeline,
     blit_pipeline: RenderPipeline,
     present_pipelines: HashMap<TextureFormat, RenderPipeline>,
+    /// Made on the first export frame.
+    export_pipeline: Option<RenderPipeline>,
     shader: ShaderModule,
     uniforms: Buffer,
     layer_uniforms: BindGroup,
     present_uniforms: Buffer,
+    export_uniforms: Buffer,
     pool: TexturePool,
     stills: HashMap<String, Still>,
     comp: Option<CompTarget>,
+    export: Option<ExportTarget>,
     frame: Option<FrameBuild>,
     project: (u32, u32),
 }
@@ -339,6 +370,14 @@ impl Compositor {
                 sampler_entry(22),
             ],
         });
+        let export_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Export"),
+            entries: &[
+                uniform_entry(30, false, EXPORT_UNIFORM_SIZE),
+                texture_entry(31),
+                sampler_entry(32),
+            ],
+        });
         let layer_pipeline = Self::pipeline(
             device,
             &shader,
@@ -384,6 +423,12 @@ impl Compositor {
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let export_uniforms = device.create_buffer(&BufferDescriptor {
+            label: Some("Export uniforms"),
+            size: EXPORT_UNIFORM_SIZE,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         Compositor {
             comp_format,
             webgl: adapter.get_info().backend == Backend::Gl,
@@ -397,15 +442,19 @@ impl Compositor {
             texture_layout,
             convert_layout,
             present_layout,
+            export_layout,
             layer_pipeline,
             present_pipelines: HashMap::new(),
+            export_pipeline: None,
             shader,
             uniforms,
             layer_uniforms,
             present_uniforms,
+            export_uniforms,
             pool: TexturePool::default(),
             stills: HashMap::new(),
             comp: None,
+            export: None,
             frame: None,
             project: (16, 16),
         }
@@ -1264,18 +1313,173 @@ impl Compositor {
         );
         queue.submit([encoder.finish()]);
         texture.destroy();
-        let mapped = Rc::new(Cell::new(None));
-        let done = mapped.clone();
-        buffer
-            .slice(..)
-            .map_async(MapMode::Read, move |result| done.set(Some(result.is_ok())));
         Ok(Readback {
             device: device.clone(),
+            mapped: map(&buffer),
             buffer,
             width,
             height,
             padded_row,
-            mapped,
+            tight_row: Some(width * 4),
+        })
+    }
+
+    /// Reads the last composition back as an NV12 frame of `frame` pixels, BT.709
+    /// limited range: the composition centred over black. `frame` must have even sides.
+    pub fn start_nv12_readback(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        frame: (u32, u32),
+    ) -> Result<Readback, String> {
+        if frame.0 < 2 || frame.1 < 2 || frame.0 % 2 == 1 || frame.1 % 2 == 1 {
+            return Err(format!(
+                "An export frame of {}×{} needs even sides",
+                frame.0, frame.1
+            ));
+        }
+        let (comp_width, comp_height) = self
+            .comp
+            .as_ref()
+            .map(|comp| (comp.width, comp.height))
+            .ok_or("Nothing has been composed yet")?;
+        let texels = nv12_texels(frame);
+        let limit = device.limits().max_texture_dimension_2d;
+        if texels.0 > limit || texels.1 > limit {
+            return Err(format!(
+                "A {}×{} export does not fit on this GPU",
+                frame.0, frame.1
+            ));
+        }
+        if self
+            .export
+            .as_ref()
+            .is_none_or(|target| target.frame != frame)
+        {
+            if let Some(old) = self.export.take() {
+                old.texture.destroy();
+            }
+            let texture = device.create_texture(&TextureDescriptor {
+                label: Some("Export frame"),
+                size: Extent3d {
+                    width: texels.0,
+                    height: texels.1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: READBACK_FORMAT,
+                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&TextureViewDescriptor::default());
+            self.export = Some(ExportTarget {
+                frame,
+                texture,
+                view,
+            });
+        }
+        if self.export_pipeline.is_none() {
+            self.export_pipeline = Some(Self::pipeline(
+                device,
+                &self.shader,
+                &[&self.export_layout],
+                ("vs_full", "fs_export"),
+                READBACK_FORMAT,
+                None,
+                PrimitiveTopology::TriangleList,
+            ));
+        }
+        let picture = export_picture(frame, (comp_width, comp_height));
+        let mut values: Vec<f32> = rgb_to_yuv(Matrix::Bt709, false)
+            .iter()
+            .flatten()
+            .copied()
+            .collect();
+        values.extend(picture.map(|value| value as f32));
+        values.extend([frame.0 as f32, frame.1 as f32, 0.0, 0.0]);
+        queue.write_buffer(&self.export_uniforms, 0, &floats(&values));
+
+        let comp = self.comp.as_ref().unwrap();
+        let target = self.export.as_ref().unwrap();
+        let binding = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Export"),
+            layout: &self.export_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 30,
+                    resource: self.export_uniforms.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 31,
+                    resource: BindingResource::TextureView(&comp.view),
+                },
+                BindGroupEntry {
+                    binding: 32,
+                    resource: BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        });
+        let padded_row =
+            (texels.0 * 4).div_ceil(COPY_BYTES_PER_ROW_ALIGNMENT) * COPY_BYTES_PER_ROW_ALIGNMENT;
+        let buffer = device.create_buffer(&BufferDescriptor {
+            label: Some("Export readback"),
+            size: padded_row as u64 * texels.1 as u64,
+            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+            label: Some("Export frame"),
+        });
+        {
+            let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
+                label: Some("Export frame"),
+                color_attachments: &[Some(RenderPassColorAttachment {
+                    view: &target.view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: Operations {
+                        load: LoadOp::Clear(Color::BLACK),
+                        store: StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(self.export_pipeline.as_ref().unwrap());
+            pass.set_bind_group(0, &binding, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        encoder.copy_texture_to_buffer(
+            TexelCopyTextureInfo {
+                texture: &target.texture,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_row),
+                    rows_per_image: None,
+                },
+            },
+            Extent3d {
+                width: texels.0,
+                height: texels.1,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit([encoder.finish()]);
+        Ok(Readback {
+            device: device.clone(),
+            mapped: map(&buffer),
+            buffer,
+            width: frame.0,
+            height: frame.1,
+            padded_row,
+            tight_row: None,
         })
     }
 
@@ -1290,5 +1494,18 @@ impl Compositor {
         if let Some(comp) = self.comp.take() {
             comp.texture.destroy();
         }
+        if let Some(export) = self.export.take() {
+            export.texture.destroy();
+        }
     }
+}
+
+/// Starts mapping a readback buffer; the cell says how it went once it has.
+fn map(buffer: &Buffer) -> Rc<Cell<Option<bool>>> {
+    let mapped = Rc::new(Cell::new(None));
+    let done = mapped.clone();
+    buffer
+        .slice(..)
+        .map_async(MapMode::Read, move |result| done.set(Some(result.is_ok())));
+    mapped
 }

@@ -96,6 +96,44 @@ pub fn yuv_to_rgb(matrix: Matrix, full_range: bool) -> [[f32; 4]; 3] {
     [row(0.0, cr_r), row(cb_g, cr_g), row(cb_b, 0.0)]
 }
 
+/// Rows of the 3×4 matrix that takes `(R', G', B', 1)` (0 to 1) to Y, Cb and Cr
+/// code values (0 to 1): the inverse of `yuv_to_rgb`. Exports use BT.709 limited range.
+pub fn rgb_to_yuv(matrix: Matrix, full_range: bool) -> [[f32; 4]; 3] {
+    let (kr, kb) = match matrix {
+        Matrix::Bt709 => (0.2126, 0.0722),
+        Matrix::Bt601 => (0.299, 0.114),
+        Matrix::Bt2020 => (0.2627, 0.0593),
+        Matrix::Rgb => {
+            return [
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0],
+            ]
+        }
+    };
+    let kg: f64 = 1.0 - kr - kb;
+    let (y_scale, y_offset, c_scale, c_offset): (f64, f64, f64, f64) = if full_range {
+        (1.0, 0.0, 1.0, 128.0 / 255.0)
+    } else {
+        (219.0 / 255.0, 16.0 / 255.0, 224.0 / 255.0, 128.0 / 255.0)
+    };
+    let cb = 0.5 / (1.0 - kb);
+    let cr = 0.5 / (1.0 - kr);
+    let row = |values: [f64; 3], scale: f64, offset: f64| {
+        [
+            (values[0] * scale) as f32,
+            (values[1] * scale) as f32,
+            (values[2] * scale) as f32,
+            offset as f32,
+        ]
+    };
+    [
+        row([kr, kg, kb], y_scale, y_offset),
+        row([-kr * cb, -kg * cb, (1.0 - kb) * cb], c_scale, c_offset),
+        row([(1.0 - kr) * cr, -kg * cr, -kb * cr], c_scale, c_offset),
+    ]
+}
+
 /// The sRGB decoding curve (EOTF), 0 to 1.
 pub fn srgb_to_linear(value: f64) -> f64 {
     if value <= 0.04045 {
@@ -206,6 +244,46 @@ mod tests {
         // BT.709 codes decoded with the BT.601 matrix go wrong: Chrome's CPU-frame bug.
         let wrong = apply(m601, 63.0, 102.0, 240.0);
         assert!(wrong[1].abs() > 0.05, "{wrong:?}");
+    }
+
+    fn encode(m: [[f32; 4]; 3], rgb: [f64; 3]) -> [f64; 3] {
+        m.map(|row| {
+            (row[0] as f64 * rgb[0]
+                + row[1] as f64 * rgb[1]
+                + row[2] as f64 * rgb[2]
+                + row[3] as f64)
+                * 255.0
+        })
+    }
+
+    #[test]
+    fn export_codes_match_the_standards() {
+        let m = rgb_to_yuv(Matrix::Bt709, false);
+        near(encode(m, [0.0; 3]), [16.0, 128.0, 128.0]);
+        near(encode(m, [1.0; 3]), [235.0, 128.0, 128.0]);
+        // The same full red and green as above, before rounding.
+        within(encode(m, [1.0, 0.0, 0.0]), [63.0, 102.0, 240.0], 0.5);
+        within(encode(m, [0.0, 1.0, 0.0]), [173.0, 42.0, 26.0], 0.5);
+        near(
+            encode(rgb_to_yuv(Matrix::Bt601, true), [1.0; 3]),
+            [255.0, 128.0, 128.0],
+        );
+    }
+
+    #[test]
+    fn export_matrices_invert_the_decoding_ones() {
+        for matrix in [Matrix::Bt709, Matrix::Bt601, Matrix::Bt2020, Matrix::Rgb] {
+            for full_range in [false, true] {
+                let (forward, back) = (
+                    rgb_to_yuv(matrix, full_range),
+                    yuv_to_rgb(matrix, full_range),
+                );
+                for rgb in [[0.25, 0.5, 0.75], [1.0, 0.0, 0.5], [0.1, 0.9, 0.3]] {
+                    let [y, cb, cr] = encode(forward, rgb);
+                    near(apply(back, y, cb, cr), rgb);
+                }
+            }
+        }
     }
 
     #[test]

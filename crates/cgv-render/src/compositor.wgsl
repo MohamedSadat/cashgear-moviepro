@@ -214,3 +214,58 @@ fn fs_present(in: FullOut) -> @location(0) vec4<f32> {
     }
     return vec4<f32>(rgb, 1.0);
 }
+
+// ---- Export: the composition over black as Y'CbCr 4:2:0 (NV12) ----
+// The target packs four bytes a texel: the luma rows, then the chroma rows with
+// two Cb, Cr pairs a texel. Read back, its bytes are an NV12 frame.
+
+struct Export {
+    // Rows of the matrix from (R', G', B', 1) to Y, Cb and Cr code values (0 to 1).
+    y: vec4<f32>,
+    cb: vec4<f32>,
+    cr: vec4<f32>,
+    // The composition in frame pixels: x, y, width, height.
+    picture: vec4<f32>,
+    // x, y: the frame's size in pixels.
+    size: vec4<f32>,
+}
+
+@group(0) @binding(30) var<uniform> export_info: Export;
+@group(0) @binding(31) var export_texture: texture_2d<f32>;
+@group(0) @binding(32) var export_sampler: sampler;
+
+// R'G'B' (sRGB-encoded, as the preview shows it) at frame pixel centre `p`;
+// black outside the composition.
+fn export_rgb(p: vec2<f32>) -> vec4<f32> {
+    let uv = (p - export_info.picture.xy) / export_info.picture.zw;
+    let inside = all(uv >= vec2<f32>(0.0)) && all(uv < vec2<f32>(1.0));
+    let c = textureSampleLevel(export_texture, export_sampler, clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0);
+    return vec4<f32>(select(vec3<f32>(0.0), linear_to_srgb(c.rgb), inside), 1.0);
+}
+
+// Cb and Cr of chroma sample `c`: the mean of its 2×2 block of pixels.
+fn export_chroma(c: vec2<f32>) -> vec2<f32> {
+    let p = c * 2.0 + vec2<f32>(0.5);
+    let rgb = (export_rgb(p) + export_rgb(p + vec2<f32>(1.0, 0.0)) + export_rgb(p + vec2<f32>(0.0, 1.0))
+        + export_rgb(p + vec2<f32>(1.0, 1.0))) * 0.25;
+    return vec2<f32>(dot(export_info.cb, rgb), dot(export_info.cr, rgb));
+}
+
+@fragment
+fn fs_export(in: FullOut) -> @location(0) vec4<f32> {
+    let texel = floor(in.position.xy);
+    if (texel.y < export_info.size.y) {
+        let p = vec2<f32>(texel.x * 4.0 + 0.5, texel.y + 0.5);
+        return vec4<f32>(
+            dot(export_info.y, export_rgb(p)),
+            dot(export_info.y, export_rgb(p + vec2<f32>(1.0, 0.0))),
+            dot(export_info.y, export_rgb(p + vec2<f32>(2.0, 0.0))),
+            dot(export_info.y, export_rgb(p + vec2<f32>(3.0, 0.0))),
+        );
+    }
+    let row = texel.y - export_info.size.y;
+    return vec4<f32>(
+        export_chroma(vec2<f32>(texel.x * 2.0, row)),
+        export_chroma(vec2<f32>(texel.x * 2.0 + 1.0, row)),
+    );
+}

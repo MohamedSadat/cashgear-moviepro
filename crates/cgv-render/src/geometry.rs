@@ -240,6 +240,24 @@ pub fn letterbox(monitor: (u32, u32), project: (u32, u32)) -> [f32; 4] {
     [x as f32, y as f32, w as f32, h as f32]
 }
 
+/// The scale that fits a project into an export frame, keeping its aspect ratio.
+pub fn export_scale(frame: (u32, u32), project: (u32, u32)) -> f64 {
+    (frame.0 as f64 / project.0 as f64).min(frame.1 as f64 / project.1 as f64)
+}
+
+/// Where a composition of `picture` pixels sits in an export frame: centred on
+/// whole pixels (`x, y, width, height`), so each frame pixel samples one texel.
+pub fn export_picture(frame: (u32, u32), picture: (u32, u32)) -> [u32; 4] {
+    let (width, height) = (picture.0.min(frame.0), picture.1.min(frame.1));
+    [(frame.0 - width) / 2, (frame.1 - height) / 2, width, height]
+}
+
+/// The size of the packed NV12 readback of a frame: four bytes a texel, the luma
+/// rows and then the interleaved chroma rows (a frame's height must be even).
+pub fn nv12_texels(frame: (u32, u32)) -> (u32, u32) {
+    (frame.0.div_ceil(4), frame.1 + frame.1 / 2)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,5 +464,35 @@ mod tests {
             letterbox((800, 400), (1080, 1920)),
             [287.0, 0.0, 225.0, 400.0]
         );
+    }
+
+    #[test]
+    fn export_frames_fit_the_project() {
+        // Same shape: the composition fills the frame.
+        let scale = export_scale((1280, 720), (1920, 1080));
+        assert_eq!(output_size(1920, 1080, scale), (1280, 720));
+        assert_eq!(export_picture((1280, 720), (1280, 720)), [0, 0, 1280, 720]);
+        let scale = export_scale((3840, 2160), (1920, 1080));
+        assert_eq!(output_size(1920, 1080, scale), (3840, 2160));
+        // 16:9 into 9:16 and 1:1: black bars above and below.
+        let scale = export_scale((1080, 1920), (1920, 1080));
+        let picture = output_size(1920, 1080, scale);
+        assert_eq!(picture, (1080, 608));
+        assert_eq!(export_picture((1080, 1920), picture), [0, 656, 1080, 608]);
+        let picture = output_size(1920, 1080, export_scale((1080, 1080), (1920, 1080)));
+        assert_eq!(export_picture((1080, 1080), picture), [0, 236, 1080, 608]);
+        // 9:16 into 16:9: bars at the sides.
+        let picture = output_size(1080, 1920, export_scale((1920, 1080), (1080, 1920)));
+        assert_eq!(export_picture((1920, 1080), picture), [656, 0, 608, 1080]);
+        // A picture larger than the frame is cut to it.
+        assert_eq!(export_picture((20, 16), (16, 30)), [2, 0, 16, 16]);
+    }
+
+    #[test]
+    fn nv12_readbacks_pack_four_bytes_a_texel() {
+        assert_eq!(nv12_texels((1920, 1080)), (480, 1620));
+        assert_eq!(nv12_texels((1080, 1920)), (270, 2880));
+        // Widths that are not a multiple of four leave padding in the last texel.
+        assert_eq!(nv12_texels((1282, 720)), (321, 1080));
     }
 }

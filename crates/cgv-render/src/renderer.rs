@@ -445,6 +445,12 @@ impl Renderer {
         self.compositor.start_readback(&self.device, &self.queue)
     }
 
+    /// Reads the latest composition back as a BT.709 NV12 frame of `frame` pixels.
+    pub fn start_nv12_readback(&mut self, frame: (u32, u32)) -> Result<Readback, String> {
+        self.compositor
+            .start_nv12_readback(&self.device, &self.queue, frame)
+    }
+
     pub fn dispose(&mut self) {
         self.compositor.dispose();
         self.device.destroy();

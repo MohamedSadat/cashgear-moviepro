@@ -182,6 +182,37 @@ mod bridge {
                 Ok(result.into())
             }))
         }
+        /// Export: resolves with `{ width, height, stride, data }`, the latest
+        /// composition centred over black in a `width` × `height` frame as BT.709
+        /// limited-range NV12: luma rows, then interleaved Cb and Cr rows, `stride`
+        /// bytes apart. Compose with the scale that fits the frame (`export_scale`).
+        pub fn read_nv12(&mut self, width: u32, height: u32) -> Result<js_sys::Promise, JsValue> {
+            let readback = self
+                .inner
+                .start_nv12_readback(width, height)
+                .map_err(js_error)?;
+            Ok(wasm_bindgen_futures::future_to_promise(async move {
+                let stride = readback.stride();
+                let data = readback.wait().await.map_err(js_error)?;
+                let result = js_sys::Object::new();
+                js_sys::Reflect::set(&result, &"width".into(), &width.into())?;
+                js_sys::Reflect::set(&result, &"height".into(), &height.into())?;
+                js_sys::Reflect::set(&result, &"stride".into(), &stride.into())?;
+                let data = js_sys::Uint8Array::from(data.as_slice());
+                js_sys::Reflect::set(&result, &"data".into(), &data)?;
+                Ok(result.into())
+            }))
+        }
+        /// The scale that fits a project of `project_width` × `project_height` in an
+        /// export frame, keeping its shape.
+        pub fn export_scale(
+            width: u32,
+            height: u32,
+            project_width: u32,
+            project_height: u32,
+        ) -> f64 {
+            cgv_render::geometry::export_scale((width, height), (project_width, project_height))
+        }
         /// Uploads a still image once. The bitmap can be closed afterwards.
         pub fn upload_still(
             &mut self,

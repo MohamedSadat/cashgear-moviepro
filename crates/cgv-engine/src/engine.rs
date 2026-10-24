@@ -134,6 +134,11 @@ impl Engine {
         self.renderer.start_readback()
     }
 
+    /// Export: the latest composition as an NV12 frame of `width` × `height`.
+    pub fn start_nv12_readback(&mut self, width: u32, height: u32) -> Result<Readback, String> {
+        self.renderer.start_nv12_readback((width, height))
+    }
+
     pub fn upload_still(
         &mut self,
         key: &str,
