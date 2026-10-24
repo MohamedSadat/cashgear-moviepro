@@ -1,0 +1,78 @@
+{
+  "comment": "Export round-trip fixtures (tests/e2e/export.spec.ts). Each builds a project from test media, exports it at the project's size and compares the decoded frames with the preview's renderFrame(t) of the same frames. Lengths and frames are at 30 fps; transforms use project pixels.",
+  "media": [
+    "h264-1080p30-aac.mp4",
+    "vp9-720p25-opus.webm",
+    "still-1920x1080.png",
+    "still-1280x720.jpg",
+    "still-1280x720.webp",
+    "tone-48k-stereo.wav"
+  ],
+  "fixtures": [
+    {
+      "name": "youtube-1080p",
+      "about": "A 1080p30 clip as YouTube 1080p: H.264 at 8 Mbit/s with AAC.",
+      "size": [1920, 1080],
+      "frames": [0, 1, 29, 30, 59],
+      "export": { "format": "mp4", "video": "avc", "bitrate": 8000000, "audio": "aac" },
+      "layers": [{ "media": "h264-1080p30-aac.mp4", "length": 60 }]
+    },
+    {
+      "name": "layers-720p",
+      "about": "A 25 fps clip on a 30 fps timeline, cropped, under a scaled, rotated, half-transparent clip and a still.",
+      "size": [1280, 720],
+      "frames": [0, 17, 45, 59],
+      "export": { "format": "mp4", "video": "avc", "bitrate": 5000000, "audio": "aac" },
+      "layers": [
+        {
+          "media": "vp9-720p25-opus.webm",
+          "length": 60,
+          "crop": { "left": 0.05, "top": 0.1, "right": 0.05, "bottom": 0 }
+        },
+        {
+          "media": "h264-1080p30-aac.mp4",
+          "length": 60,
+          "transform": { "x": 200, "y": -80, "scaleX": 0.45, "scaleY": 0.45, "rotation": 20 },
+          "opacity": 0.75
+        },
+        {
+          "media": "still-1280x720.webp",
+          "length": 60,
+          "transform": { "x": -380, "y": 200, "scaleX": 0.25, "scaleY": 0.25 }
+        }
+      ]
+    },
+    {
+      "name": "tiktok-vertical",
+      "about": "A 9:16 project: a 16:9 clip fitted with bars inside it, and a still over it, as TikTok 1080×1920.",
+      "size": [1080, 1920],
+      "frames": [0, 40],
+      "export": { "format": "mp4", "video": "avc", "bitrate": 8000000, "audio": "aac" },
+      "layers": [
+        { "media": "h264-1080p30-aac.mp4", "length": 45 },
+        {
+          "media": "still-1280x720.jpg",
+          "length": 45,
+          "transform": { "y": 600, "scaleX": 0.8, "scaleY": 0.8 }
+        }
+      ]
+    },
+    {
+      "name": "webm-stills",
+      "about": "Stills and sound in a 1:1 project, as VP9 and Opus in WebM.",
+      "size": [1080, 1080],
+      "frames": [0, 44],
+      "export": { "format": "webm", "video": "vp9", "bitrate": 4000000, "audio": "opus" },
+      "layers": [
+        { "media": "still-1920x1080.png", "length": 45 },
+        { "media": "tone-48k-stereo.wav", "length": 45 },
+        {
+          "media": "still-1280x720.jpg",
+          "length": 45,
+          "transform": { "rotation": -12, "scaleX": 0.5, "scaleY": 0.5 },
+          "opacity": 0.6
+        }
+      ]
+    }
+  ]
+}
