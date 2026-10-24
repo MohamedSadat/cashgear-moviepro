@@ -2,6 +2,51 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-24: Phase 5 answers
+
+- **Codecs:** MP4 with H.264 and AAC is the default.
+  - HEVC, VP9 and AV1 are offered only where the browser can encode them (`VideoEncoder.isConfigSupported`). WebM pairs VP9 or AV1 with Opus.
+  - Opus replaces AAC where AAC encoding is missing.
+  - On the reference machine, Chrome 156 and Edge 156 encode H.264 in hardware (1080p and 4K), AAC and Opus. They encode VP9 and AV1 in software only. Only Chrome encodes HEVC, in hardware.
+- **Formats:** MP4 and WebM, plus MOV, MKV and WAV on web and desktop, and GIF and MP3 on desktop only.
+  - Mediabunny already muxes MOV, MKV and WAV in the worker, so no FFmpeg is needed for them.
+  - GIF and MP3 need FFmpeg, which only the desktop app has.
+- **Free tier:** no limits in the MVP: no watermark and no resolution cap. Phase 11 adds the limits with licensing.
+- **Desktop muxing:** Mediabunny in the export worker on both platforms. This replaces PLAN task 5's FFmpeg muxing.
+  - The worker streams the muxed bytes to a native file writer over a Tauri channel. They are encoded packets in a container, never raw frames.
+  - FFmpeg only converts the finished file to GIF or MP3.
+
+## 2026-10-24: Phase 5 defaults
+
+These were proposed alongside the questions, and the user raised no objection.
+
+- **Export worker:** export runs in its own worker. A second engine instance, with its own WASM, GPU device and decoders, gets a copy of the project when the export starts.
+  - Editing and preview carry on during an export. Later edits do not change an export that is running.
+  - One export runs at a time.
+- **Frame path:** `renderFrame(t)` at full quality for every frame. Every source is awaited and no frame is dropped.
+  - Export decodes in hardware where it can, because the clip-end stall only hurts real-time playback.
+- **Colour:** the compositor converts to BT.709 limited-range 4:2:0 on the GPU. The encoder gets I420 frames tagged BT.709, so the browser never chooses a matrix.
+- **Audio:**
+  - The `cgv-audio` mixer runs offline at the project rate.
+  - AAC-LC, 48 kHz stereo at 256 kbps, or Opus in WebM.
+  - The encoder's start-up delay is removed with an edit list, so sound starts at 0.
+- **Presets:** YouTube 1080p (8 Mbps), YouTube 4K (40 Mbps), TikTok 1080×1920 and Instagram 1080×1080.
+  - Custom settings: resolution, frame rate, quality or a bitrate, and format.
+  - A preset with a different shape from the project fits the picture with black bars and says so.
+- **Saving:**
+  - Web: Chrome and Edge write straight into the file picked in the save dialog. Other browsers write to OPFS and download the file at the end.
+  - Desktop: the native save dialog, opening in the Videos folder.
+  - MP4 files keep their index at the front, which YouTube prefers.
+- **Progress:** time remaining and Cancel, which removes the partial file.
+  - The dialog can be closed while the export continues, with a progress chip in the project bar.
+  - Leaving the page during an export asks first.
+- **Tests:**
+  - Fixture projects are exported in Playwright and decoded with the pinned FFmpeg. Each compared frame must be above 40 dB PSNR against the preview's render of the same frame.
+  - A flash-and-click fixture measures the A/V offset.
+  - Speed is measured on the GTX 1650 in Chrome, Edge and WebView2. CI checks function only.
+- **Player checks:** Chrome playback is checked automatically. Windows Media Player is installed. VLC is not, and installing it needs the user's go-ahead. The YouTube upload needs the user's account, so the user uploads the files, unlisted.
+- **Pushing:** one push near the end of the phase, after the user's go-ahead.
+
 ## 2026-10-24: Phase 4 findings and defaults
 
 Choices made while building the timeline, the editing tools and the workspace.
