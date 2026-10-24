@@ -10,6 +10,8 @@ rust-version.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+cgv-audio.workspace = true
+cgv-engine.workspace = true
 cgv-media.workspace = true
 cgv-model.workspace = true
 cgv-time.workspace = true
@@ -17,8 +19,9 @@ serde.workspace = true
 serde_json.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-cgv-engine.workspace = true
+cgv-render.workspace = true
+wgpu.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 js-sys.workspace = true
-web-sys = { workspace = true, features = ["OffscreenCanvas"] }
+web-sys = { workspace = true, features = ["ImageBitmap", "OffscreenCanvas", "VideoFrame"] }

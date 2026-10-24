@@ -453,7 +453,10 @@ dependencies = [
 name = "cgv-render"
 version = "0.1.0"
 dependencies = [
+ "js-sys",
  "naga",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
  "wgpu",
 ]
@@ -469,9 +472,11 @@ dependencies = [
 name = "cgv-wasm"
 version = "0.1.0"
 dependencies = [
+ "cgv-audio",
  "cgv-engine",
  "cgv-media",
  "cgv-model",
+ "cgv-render",
  "cgv-time",
  "js-sys",
  "serde",
@@ -479,6 +484,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "wgpu",
 ]
 
 [[package]]
