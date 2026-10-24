@@ -42,8 +42,13 @@ type Snapshot = {
         volumeDb: number;
         transform: { scaleX: number; x: number };
         crop: { left: number };
+        kind?: 'adjustment';
+        effects?: { id: number; kind: string; enabled: boolean; params: Record<string, unknown> }[];
+        keyframes?: Record<string, { time: number; value: number }[]>;
       }[];
+      transitions?: { id: number; kind: string; duration: number }[];
     }[];
+    luts: { id: number; name: string }[];
   };
   undoLabel: string | null;
 };
@@ -594,4 +599,220 @@ test('a five-minute edit with 30 clips is built with the mouse and keyboard alon
     expect(clip.start).toBe(at);
     return at + clip.duration;
   }, 0);
+});
+
+// ---- Phase 6: effects, transitions and keyframes ----
+
+/** The top and height on screen of track `id`'s row, from its header. */
+async function rowBox(page: Page, track: number) {
+  const box = await page.locator(`[data-testid="track"][data-track-id="${track}"]`).boundingBox();
+  expect(box, `track ${track} has a header`).not.toBeNull();
+  return box!;
+}
+
+/** Drags a library item (effect, transition or adjustment layer) onto the canvas at (`x`, `y`). */
+async function dragItem(page: Page, key: string, x: number, y: number) {
+  const canvas = page.getByTestId('timeline-canvas');
+  const box = (await canvas.boundingBox())!;
+  await page
+    .locator(`[data-key="${key}"]`)
+    .dragTo(canvas, { targetPosition: { x: x - box.x, y: y - box.y } });
+}
+
+/** Clicks the ruler at `time`, which moves the playhead there. */
+async function seekTo(page: Page, time: number) {
+  const ruler = (await page.getByTestId('timeline-canvas').boundingBox())!.y + 14;
+  await page.mouse.click((await xAt(page, time)) | 0, ruler);
+}
+
+/** Leaves any inspector field, so keys reach the shortcut map. */
+async function blur(page: Page) {
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+}
+
+async function clipOf(page: Page, id: number) {
+  const { project } = await snapshot(page);
+  return project.tracks.flatMap((track) => track.clips).find((clip) => clip.id === id)!;
+}
+
+test('effects drop onto clips, stack in the inspector and animate with the stopwatch', async ({
+  page,
+}) => {
+  await open(page);
+  await importFiles(page, ['h264-1080p30-aac.mp4']);
+  await addToTimeline(page, 'h264-1080p30-aac.mp4');
+  await fit(page);
+  const [row] = await clips(page);
+  await page.getByTestId('library-tab-effects').click();
+  await expect(page.getByTestId('effect-browser').getByTestId('effect-item')).not.toHaveCount(0);
+  const kinds = async () => ((await clipOf(page, row.id)).effects ?? []).map((e) => e.kind);
+
+  // Dropped on the clip, then double-clicked with the clip selected.
+  const middle = await xAt(page, row.start + row.duration / 2);
+  await dragItem(page, 'builtin/vignette', middle, await yAt(page, row.track));
+  await expect.poll(kinds).toEqual(['vignette']);
+  await clickClip(page, row);
+  await page.locator('[data-key="builtin/sepia"]').dblclick();
+  await expect.poll(kinds).toEqual(['vignette', 'sepia']);
+
+  // The inspector stacks them: a setting changes, and one turns off.
+  const inspector = page.getByTestId('inspector');
+  const panels = inspector.getByTestId('effect-panel');
+  await expect(panels).toHaveCount(2);
+  const amount = panels.first().getByTestId('param-amount').locator('input');
+  await amount.fill('80');
+  await amount.press('Enter');
+  // The switch shows the project, so it turns off once the command lands.
+  const sepia = inspector.getByRole('checkbox', { name: 'Sepia on' });
+  await sepia.click();
+  await expect(sepia).not.toBeChecked();
+  const effects = (await clipOf(page, row.id)).effects!;
+  expect(effects.map((e) => [e.kind, e.enabled])).toEqual([
+    ['vignette', true],
+    ['sepia', false],
+  ]);
+  expect(effects[0].params.amount).toBeCloseTo(0.8);
+
+  // The stopwatch keys Position X at the playhead; a change later adds a key.
+  await blur(page);
+  await press(page, 'Home');
+  await inspector.getByRole('button', { name: 'Animate Position X' }).click();
+  await blur(page);
+  for (let i = 0; i < 3; i++) await press(page, 'Shift+ArrowRight');
+  await expect(page.getByTestId('timecode')).toHaveText(/^00:00:01:00/);
+  const x = inspector.getByTestId('field-x').locator('input');
+  await x.fill('200');
+  await x.press('Enter');
+  let keys = (await clipOf(page, row.id)).keyframes?.['transform.x'];
+  expect(keys?.map((key) => [key.time, key.value])).toEqual([
+    [0, 0],
+    [30 * FRAME, 200],
+  ]);
+
+  // The selected clip shows its keys on the canvas; dragging one moves it in time.
+  const top = (await rowBox(page, row.track)).y;
+  const from = (await xAt(page, 30 * FRAME)) | 0;
+  await drag(page, [from, top + 9], [((await xAt(page, 60 * FRAME)) | 0) + 1, top + 9]);
+  keys = (await clipOf(page, row.id)).keyframes?.['transform.x'];
+  expect(keys?.map((key) => key.value)).toEqual([0, 200]);
+  expect(keys![1].time).toBeGreaterThan(45 * FRAME);
+
+  // Each step undoes: the move, the key, the stopwatch, the switch, the amount, both effects.
+  for (let i = 0; i < 7; i++) await press(page, 'Control+z');
+  const clip = await clipOf(page, row.id);
+  expect(clip.effects ?? []).toEqual([]);
+  expect(clip.keyframes ?? {}).toEqual({});
+});
+
+test('transitions drop on cuts, change length at their edges, and Ctrl+D adds the default', async ({
+  page,
+}) => {
+  await open(page);
+  await importFiles(page, ['h264-1080p30-aac.mp4']);
+  await addToTimeline(page, 'h264-1080p30-aac.mp4', 3);
+  await fit(page);
+  const [a, b, c] = await clips(page);
+  await page.getByTestId('library-tab-transitions').click();
+  const transitions = page.getByTestId('transition');
+
+  // A wipe dropped on the first cut: one second, centred on it.
+  await dragItem(
+    page,
+    'builtin/wipe:wipe-left',
+    await xAt(page, b.start),
+    await yAt(page, a.track),
+  );
+  await expect(transitions).toHaveCount(1);
+  const first = transitions.first();
+  await expect(first).toHaveAttribute('data-kind', 'wipe');
+  await expect(first).toHaveAttribute('data-from', String(a.id));
+  await expect(first).toHaveAttribute('data-to', String(b.id));
+  await expect(first).toHaveAttribute('data-duration', String(SECOND));
+  await expect(first).toHaveAttribute('data-alignment', 'center');
+
+  // Its inspector changes the type and where it sits.
+  const inspector = page.getByTestId('transition-inspector');
+  await expect(inspector).toBeVisible();
+  await inspector.getByLabel('Transition type').selectOption('builtin/cross-dissolve');
+  await expect(first).toHaveAttribute('data-kind', 'cross-dissolve');
+  await inspector.getByLabel('Alignment').selectOption('end');
+  await expect(first).toHaveAttribute('data-alignment', 'end');
+
+  // Ending at the cut, its start edge drags earlier: one undo step.
+  const box = await rowBox(page, a.track);
+  const band = box.y + box.height - 8;
+  const start = (await xAt(page, b.start - SECOND)) | 0;
+  await drag(page, [start + 2, band], [start - 60, band]);
+  expect(Number(await first.getAttribute('data-duration'))).toBeGreaterThan(SECOND);
+  expect((await snapshot(page)).undoLabel).toMatch(/transition/i);
+
+  // Delete removes the selected transition; undo brings it back.
+  await blur(page);
+  await press(page, 'Delete');
+  await expect(transitions).toHaveCount(0);
+  await press(page, 'Control+z');
+  await expect(transitions).toHaveCount(1);
+
+  // Ctrl+D puts the default transition on the cut nearest the playhead.
+  await seekTo(page, c.start + 5 * FRAME);
+  await expect(page.getByTestId('timecode')).toHaveText(/^00:00:20:0/);
+  await press(page, 'Control+d');
+  await expect(transitions).toHaveCount(2);
+  const added = page.locator(`[data-testid="transition"][data-to="${c.id}"]`);
+  await expect(added).toHaveAttribute('data-kind', 'cross-dissolve');
+  await expect(added).toHaveAttribute('data-from', String(b.id));
+  // Clips keep their places: a transition never changes the edit's length.
+  expect((await clips(page)).map((clip) => [clip.start, clip.duration])).toEqual(
+    [a, b, c].map((clip) => [clip.start, clip.duration]),
+  );
+});
+
+test('an adjustment layer grades the tracks below through an imported LUT', async ({ page }) => {
+  await open(page);
+  await importFiles(page, ['h264-1080p30-aac.mp4']);
+  await addToTimeline(page, 'h264-1080p30-aac.mp4');
+  await fit(page);
+  /** The mean red level of the frame at one second, read in the page. */
+  const red = () =>
+    page.evaluate(async (time) => {
+      const api = Reflect.get(window, '__cgv').client.api;
+      const pixels = (await api.renderPixels(time)) as { data: Uint8Array };
+      let total = 0;
+      for (let i = 0; i < pixels.data.length; i += 4) total += pixels.data[i];
+      return total / (pixels.data.length / 4);
+    }, SECOND);
+  const plain = await red();
+  const [video] = await clips(page);
+
+  // Double-clicking the adjustment layer puts five seconds of it above the clip,
+  // at the playhead.
+  await blur(page);
+  await press(page, 'Home');
+  await expect(page.getByTestId('timecode')).toHaveText(/^00:00:00:00/);
+  await page.getByTestId('library-tab-effects').click();
+  await page.locator('[data-testid="effect-item"][data-key="adjustment"]').dblclick();
+  await expect(page.getByTestId('clip')).toHaveCount(2);
+  const layer = (await clips(page)).find((clip) => clip.track !== video.track)!;
+  expect([layer.start, layer.duration]).toEqual([0, 5 * SECOND]);
+  expect((await clipOf(page, layer.id)).kind).toBe('adjustment');
+
+  // A LUT effect on it, graded by an inverting .cube file imported in the inspector.
+  await clickClip(page, layer);
+  await page.locator('[data-key="builtin/lut"]').dblclick();
+  await expect(page.getByTestId('inspector').getByTestId('effect-panel')).toHaveCount(1);
+  const cube = ['TITLE "Invert"', 'LUT_3D_SIZE 2'];
+  for (let i = 0; i < 8; i++)
+    cube.push([i & 1, (i >> 1) & 1, (i >> 2) & 1].map((v) => 1 - v).join(' '));
+  await page.getByTestId('lut-file-input').setInputFiles({
+    name: 'invert.cube',
+    mimeType: 'text/plain',
+    buffer: Buffer.from(cube.join('\n') + '\n'),
+  });
+  await expect
+    .poll(async () => (await snapshot(page)).project.luts.map((lut) => lut.name))
+    .toEqual(['invert.cube']);
+  const { luts } = (await snapshot(page)).project;
+  expect((await clipOf(page, layer.id)).effects?.[0].params.lut).toBe(`lut-${luts[0].id}`);
+  // The picture below is inverted: its mean red turns around.
+  expect(Math.abs((await red()) - (255 - plain))).toBeLessThan(3);
 });
