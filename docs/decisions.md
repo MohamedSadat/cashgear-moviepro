@@ -2,6 +2,42 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-24: Phase 4 answers
+
+- **Main track:** magnetic, as in Filmora.
+  - The bottom track is the main track. Its clips always butt together from 0, so delete, trim, move and insert close gaps automatically.
+  - Other tracks place clips freely, and a main-track edit does not move them.
+  - A toolbar toggle turns magnetism off per project. The flag is saved in `.cgvproj` (format version 2, with a migration from version 1).
+- **Shortcuts:** both presets, with Filmora as the default.
+  - Filmora-like keys are active at first. A Premiere-like preset can be chosen in settings.
+  - Every key can be changed. The map is a per-user setting, not part of the project.
+- **UI components:** the CG component library, `@cashgear/ui`.
+  - It is pinned to a commit of its public GitHub repository, as ERPClient and ShippingApp do.
+  - It is re-skinned through its tokens. The canvas timeline and the inspector's scrub fields are custom.
+  - The license gate allows this first-party `UNLICENSED` package by name.
+- **Theme:** dark only for now. Every colour is a token, the canvas timeline's included, so a light theme can be added later.
+
+## 2026-10-24: Phase 4 defaults
+
+These were proposed alongside the questions, and the user raised no objection.
+
+- **Timeline drawing:** Canvas 2D on the page, drawn from engine snapshots.
+  - Thumbnails and waveform peaks come from the jobs worker.
+  - React draws only the headers, menus and overlays. Scrolling and zooming redraw the canvas without re-rendering React.
+- **Selection, playhead and zoom** are UI state, never undo steps. Every edit is an engine command. A drag, or one gesture on an inspector control, is one undo group.
+- **Dropping from the library:**
+  - On the main track, a drop inserts.
+  - On another track, it overwrites at the drop point.
+  - Pasted clips land at the playhead on their own tracks. The clipboard holds only clips inside the app.
+- **Snapping:** on by default, to clip edges, the playhead and markers, within 8 px.
+  - A guide line shows the snap, and a toolbar toggle turns snapping off.
+  - Tools are Select and Blade, as in Filmora.
+- **Layout:** the library on the left, the monitor in the centre, the inspector on the right and the timeline at the bottom. Panel sizes are a per-user setting.
+- **Inspector:** transform, crop, opacity and volume, and speed presets from 0.25× to 4× plus a custom value. Clips at other speeds stay silent until Phase 9.
+- **Measurements:**
+  - "60 fps with 500 clips" is measured from `requestAnimationFrame` frame times during scripted scrolling and zooming, on the reference machine's GTX 1650 in Chrome and Edge. CI checks function only.
+  - "Built without code" is shown by a Playwright flow that builds a 5-minute, 30-clip edit with mouse and keyboard alone, never calling the `__cgv` test hooks.
+
 ## 2026-10-24: Phase 3 findings and defaults
 
 Choices made while building the compositor, the audio engine and playback.
