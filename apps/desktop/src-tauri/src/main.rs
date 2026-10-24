@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod export;
 mod media;
 mod project;
 
@@ -17,6 +18,7 @@ fn main() {
         .setup(|app| {
             app.manage(media::MediaState::new(app.handle()));
             app.manage(project::ProjectState::new(app.handle()));
+            app.manage(export::ExportState::default());
             Ok(())
         })
         .register_asynchronous_uri_scheme_protocol("cgv-media", |context, request, responder| {
@@ -29,6 +31,10 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             native_info,
+            export::export_open,
+            export::export_write,
+            export::export_finish,
+            export::export_cancel,
             media::media_pick,
             media::media_register,
             media::media_forget,

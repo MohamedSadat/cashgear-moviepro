@@ -1,7 +1,9 @@
 //! Finds the LGPL FFmpeg build. The app runs `ffmpeg` and `ffprobe` as child
 //! processes; it never links libav* into its own process.
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -142,6 +144,58 @@ impl Tools {
     }
 }
 
+/// Progress from one `-progress` line (`out_time_us=…`), as a fraction of the duration.
+pub fn progress_from_line(line: &str, duration_seconds: f64) -> Option<f32> {
+    let micros: f64 = line.strip_prefix("out_time_us=")?.trim().parse().ok()?;
+    if duration_seconds <= 0.0 {
+        return None;
+    }
+    Some((micros / 1e6 / duration_seconds).clamp(0.0, 1.0) as f32)
+}
+
+/// Runs one FFmpeg job whose arguments end with `-progress pipe:1` and the
+/// output, reporting progress against `duration_seconds`. `cancel` kills it.
+/// `what` names the job in errors ("make the proxy").
+pub fn run_job(
+    tools: &Tools,
+    args: &[String],
+    duration_seconds: f64,
+    cancel: &AtomicBool,
+    mut on_progress: impl FnMut(f32),
+    what: &str,
+) -> Result<(), String> {
+    let mut child = command(&tools.ffmpeg)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("ffmpeg could not start: {error}"))?;
+    let stdout = child.stdout.take().expect("piped stdout");
+    for line in BufReader::new(stdout).lines() {
+        if cancel.load(Ordering::Relaxed) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("Cancelled".into());
+        }
+        if let Some(progress) = line
+            .ok()
+            .and_then(|l| progress_from_line(&l, duration_seconds))
+        {
+            on_progress(progress);
+        }
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("ffmpeg failed: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "ffmpeg could not {what}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +205,14 @@ mod tests {
         let tools = Tools::in_dir(Path::new("bin"));
         assert_eq!(tools.ffmpeg, Path::new("bin").join(exe("ffmpeg")));
         assert_eq!(tools.ffprobe, Path::new("bin").join(exe("ffprobe")));
+    }
+
+    #[test]
+    fn progress_lines() {
+        assert_eq!(progress_from_line("out_time_us=1501500", 3.003), Some(0.5));
+        assert_eq!(progress_from_line("out_time_us=9000000", 3.003), Some(1.0));
+        assert_eq!(progress_from_line("frame=10", 3.003), None);
+        assert_eq!(progress_from_line("out_time_us=N/A", 3.003), None);
+        assert_eq!(progress_from_line("out_time_us=10", 0.0), None);
     }
 }

@@ -1,12 +1,10 @@
 //! Proxies for media WebCodecs cannot decode: 720p H.264 MP4, a key frame every
 //! 0.5 s, AAC audio, same frame timing and orientation as the original so
 //! frame N of the proxy is frame N of the source.
-use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
-use crate::ffmpeg::{command, Tools};
+use crate::ffmpeg::{run_job, Tools};
 
 pub struct ProxyRequest<'a> {
     pub input: &'a Path,
@@ -83,15 +81,6 @@ pub fn arguments(request: &ProxyRequest) -> Vec<String> {
     args
 }
 
-/// Progress from one `-progress` line (`out_time_us=…`), as a fraction of the duration.
-pub fn progress_from_line(line: &str, duration_seconds: f64) -> Option<f32> {
-    let micros: f64 = line.strip_prefix("out_time_us=")?.trim().parse().ok()?;
-    if duration_seconds <= 0.0 {
-        return None;
-    }
-    Some((micros / 1e6 / duration_seconds).clamp(0.0, 1.0) as f32)
-}
-
 /// Transcodes a proxy, calling `on_progress` as it goes. Writes to a `.part`
 /// file and renames it only when FFmpeg succeeds; `cancel` stops it.
 pub fn run(
@@ -108,36 +97,20 @@ pub fn run(
     if let Some(parent) = request.output.parent() {
         std::fs::create_dir_all(parent).map_err(|error| format!("Proxy folder: {error}"))?;
     }
-    let mut child = command(&tools.ffmpeg)
-        .args(arguments(&job))
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("ffmpeg could not start: {error}"))?;
-    let stdout = child.stdout.take().expect("piped stdout");
-    for line in BufReader::new(stdout).lines() {
-        if cancel.load(Ordering::Relaxed) {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = std::fs::remove_file(&partial);
-            return Err("The proxy was cancelled".into());
-        }
-        if let Some(progress) = line
-            .ok()
-            .and_then(|l| progress_from_line(&l, request.duration_seconds))
-        {
-            on_progress(progress);
-        }
-    }
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("ffmpeg failed: {error}"))?;
-    if !output.status.success() {
+    if let Err(error) = run_job(
+        tools,
+        &arguments(&job),
+        request.duration_seconds,
+        cancel,
+        &mut on_progress,
+        "make the proxy",
+    ) {
         let _ = std::fs::remove_file(&partial);
-        return Err(format!(
-            "ffmpeg could not make the proxy: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+        return Err(if error == "Cancelled" {
+            "The proxy was cancelled".into()
+        } else {
+            error
+        });
     }
     std::fs::rename(&partial, request.output).map_err(|error| format!("Proxy file: {error}"))?;
     on_progress(1.0);
@@ -176,14 +149,5 @@ mod tests {
         let mut silent = request(&input, &output, "h264_mf");
         silent.has_audio = false;
         assert!(!arguments(&silent).join(" ").contains("0:a:0"));
-    }
-
-    #[test]
-    fn progress_lines() {
-        assert_eq!(progress_from_line("out_time_us=1501500", 3.003), Some(0.5));
-        assert_eq!(progress_from_line("out_time_us=9000000", 3.003), Some(1.0));
-        assert_eq!(progress_from_line("frame=10", 3.003), None);
-        assert_eq!(progress_from_line("out_time_us=N/A", 3.003), None);
-        assert_eq!(progress_from_line("out_time_us=10", 0.0), None);
     }
 }

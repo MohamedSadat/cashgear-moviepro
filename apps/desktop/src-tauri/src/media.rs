@@ -51,8 +51,13 @@ impl MediaState {
         }
     }
 
-    fn tools(&self) -> Result<&Tools, String> {
+    pub(crate) fn tools(&self) -> Result<&Tools, String> {
         self.tools.as_ref().map_err(Clone::clone)
+    }
+
+    /// The app cache folder (thumbnails, waveforms, proxies, export intermediates).
+    pub(crate) fn cache_root(&self) -> &Path {
+        &self.cache_root
     }
 }
 
