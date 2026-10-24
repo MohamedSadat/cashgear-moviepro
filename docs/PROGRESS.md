@@ -2,6 +2,84 @@
 
 Newest phase first. Each phase lists the evidence for every exit criterion.
 
+## Phase 4: Timeline UI and editing tools (complete)
+
+- **Completed:** 2026-10-24, tag `phase-4`.
+- **CI:** [run 40101632403](https://github.com/MohamedSadat/cashgear-moviepro/actions/runs/40101632403) on commit `8e299fe`, green (License gates 1 min 8 s; Windows build and test 19 min 46 s).
+  - It ran 153 Rust tests and 48 software-GPU browser tests, the eight timeline flows and the 500-clip test among them.
+  - One Phase 3 test passed on retry (see Known gaps).
+  - The desktop smoke played the recovered project in WebView2 on software rendering: frame 86 reached on the audio clock, Auto at 1/4.
+  - The Azure Static Web Apps deploy of the same commit succeeded.
+- **Reference machine:** as in Phase 0: Xeon E5-2680 v3, GTX 1650 (driver 457.51), Chrome 156, Edge 156 and WebView2 155. Every performance number below comes from it; CI's software GPUs give functional results only.
+
+### Shipped
+
+- **Magnetic main track (`cgv-model`, `.cgvproj` format 2):**
+  - New projects have a main track (the bottom track, kept by id, never deleted) that is magnetic. Its clips butt together from 0.
+  - Inserts, overwrites and moves onto it land at the nearest cut. Trims ripple, gaps close as each edit settles, and clips linked to its clips follow. Other tracks stay put.
+  - Magnetism can be switched off per project. Format 1 projects open with it off, so their edits do not change.
+  - Moving clips across tracks takes their linked partners along in time only.
+  - Clip specs carry speed and properties, for pasting. Property changes are patches of the values that change.
+  - `Session::preview` lets a drag show each step from where it began, as one undo step.
+- **Workspace (`@cashgear/ui`):**
+  - Library, monitor and inspector sit above the timeline in resizable CG splitters, with sizes kept per user.
+  - Dark and compact throughout, CG menus included.
+- **Canvas timeline:**
+  - One Canvas 2D draws the ruler, tracks and clips: names, filmstrips decoded off the main thread, waveforms from halving peak pyramids, speed, offline media.
+  - It also draws markers, snapping guides and drop previews, and only what is in view.
+  - The playhead is an element over the canvas, so playing never redraws it.
+  - The view fits the whole edit until the user zooms or scrolls along it.
+  - Track headers lock, mute, hide, rename, reorder and delete, and mark the main track.
+  - A hidden list names every clip and marker for screen readers.
+- **Editing:**
+  - Select, Ctrl- and Shift-click, and rectangle selection; linked clips select together.
+  - Moves across tracks and onto the main track, edge trims, the blade, split at the playhead, delete and ripple delete.
+  - Copy, cut and paste with links, markers that drag and snap, detach audio, link and unlink.
+  - Media dragged from the library onto any track or a new one.
+  - Snapping to edges, the playhead and markers within 8 px, with a guide.
+  - Each drag or slider gesture is one undo step, previewed live by the engine.
+- **Inspector:** position, scale, rotation, opacity, crop, volume and speed (presets and a value), typed or scrubbed by dragging a label.
+- **Shortcuts:** every key goes through one map, with Filmora-like (default) and Premiere-like presets and a settings dialog to change keys. Settings, snapping and panel sizes are per user.
+- **Tests:**
+  - Model: magnetic rules, previews and patches. The property tests now run with and without magnetism and check that linked clips stay in step with the main track.
+  - Unit tests for the key map, geometry, waveform pyramids and paste planning.
+  - Eight Playwright editing flows, and the 500-clip scroll and zoom measurement.
+
+### Exit criteria
+
+| Criterion                                                                     | Result | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A 5-minute edit with 30 clips can be built without touching code or dev tools | Passed | `a five-minute edit with 30 clips is built with the mouse and keyboard alone` opens the app without `?diagnostic=1`, so no test hooks exist, and reads only the page. Files come in through the Import picker. 24 clips are added with Add to timeline. Two stills are dragged onto the end of the main track and stretched to 32 s by dragging their ends. Two titles go on a new track by dropping above the tracks, and two music clips on another. One clip is reordered by dragging. Two markers are added with the ruler and M, and the music is turned down to −12 dB in the inspector. Result: 30 clips, 5:04, and a main track of 26 clips without gaps. Passes on Chrome 156 and Edge 156 (hardware) and in CI (software).                                  |
+| The timeline scrolls and zooms at 60 fps with 500 clips                       | Passed | `the timeline scrolls and zooms at 60 fps with 500 clips`: four tracks of 125 two-second clips (video, stills and sound, each with a filmstrip or waveform), one wheel event per display frame. Zoom: 240 frames from the whole edit (all 500 clips on screen) to close up and back. Scroll: 300 frames across the edit. Chrome 156: zoom frame interval p95 16.7 ms, 1 frame of 240 at 33 ms, draw mean 2.1 ms, p95 5.2 ms, max 10.5 ms; scroll every frame on time (max 16.8 ms), draw p95 3.1 ms. Edge 156: zoom and scroll every frame on time (max 16.8 ms), draw p95 4.7 and 3.2 ms. The first pass over a new project, which decodes each thumbnail and uploads it to the GPU, is recorded too: Chrome lost 4 of 240 frames there (max 50 ms), Edge 1 (33 ms). |
+| Every action can be undone and redone                                         | Passed | Every edit in the UI is an engine command, and each drag or slider gesture is one undo step (`Session::preview`). Selection, zoom, scrolling, the playhead, tools, snapping, panel sizes and shortcut settings are not edits (decisions). `random_edits_keep_every_rule_and_undo_exactly` (with and without magnetism; 7,680 extra cases run locally) and the 1,000-command runs (8 seeds, 4 magnetic) undo and redo every command exactly. In the browser, `clips move, trim, split and delete with the mouse and keys, and each step undoes` walks Ctrl+Z back through every state and Ctrl+Y forward again. The paste, track header and inspector flows undo their steps too.                                                                                      |
+| Playwright flows pass in CI                                                   | Passed | [Run 40101632403](https://github.com/MohamedSadat/cashgear-moviepro/actions/runs/40101632403) ran all eight timeline flows and the 500-clip test on the runner's software GPU (SwiftShader WebGPU). All passed first time, the five-minute edit included. The 500-clip timings there (zoom frame interval p95 44 ms, scroll 17 ms) check function only. 47 of 48 browser tests passed first time; a Phase 3 test passed on retry (Known gaps).                                                                                                                                                                                                                                                                                                                        |
+
+### Local verification
+
+| Check                                             | Result                                                                                                                                                                                                                                            |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| fmt, clippy `-D warnings` (native and wasm32)     | Clean                                                                                                                                                                                                                                             |
+| `cargo test --workspace` (`CGV_REQUIRE_FFMPEG=1`) | 153 passed. New: 10 magnetic main track tests, gesture previews, property patches, format 1 migration; property tests in both modes.                                                                                                              |
+| Vitest                                            | 75 passed; 26 new: key map 9, geometry 9, paste 4 and copy 2, waveform pyramid 2                                                                                                                                                                  |
+| Playwright, hardware: Chrome 156, Edge 156        | 84 passed, among them the eight timeline flows and the 500-clip measurement on each browser. Real-time playback (Phase 3) still holds: three 1080p30 layers for 60 s with 0 dropped frames, worst A/V offset 15.5 ms (Chrome) and 18.0 ms (Edge). |
+| Desktop smoke, WebView2 155                       | Passed on hardware: media, a saved project that reopens, recovery after a hard kill, and playback (92 frames in 3 s, 0 dropped)                                                                                                                   |
+| Licenses                                          | cargo-deny ok. npm 155 packages: `@cashgear/ui` is allowed by name as first-party (`UNLICENSED`), and its bundled PDF.js, Leaflet, Tiptap and DOMPurify are permissive. The GPL self-test rejects both fixtures.                                  |
+| Release WASM                                      | 3,541,365 bytes; gzip 1,311,461, within the 1,500,000 budget (Phase 3: 1,295,298)                                                                                                                                                                 |
+
+### Known gaps
+
+- The first time a thumbnail is drawn, the browser uploads it to the GPU. The first zoom across a new project can lose a few frames.
+- While playing, a page turn redraws the timeline. A view zoomed in closely can then cost a frame near a cut on a busy machine.
+- There are no slip, slide or roll tools with the mouse yet; the model has those commands. Trims to the playhead and edge trims cover common work.
+- Markers cannot be renamed from the UI yet: they can be added, dragged, recoloured and deleted.
+- Tracks are named by position ("Track 2") unless renamed. There are no video and audio track kinds.
+- Dragging does not scroll the timeline when the pointer reaches its edge.
+- Only the dark theme exists, as agreed.
+- The Phase 2 dialogs still use the app's own dialog, not the CG window.
+- The CG library reads some tokens no theme defines (`--cg-color-text` and others); the app defines them. Worth fixing upstream.
+- Clips at other speeds stay silent until Phase 9.
+- In CI, the Phase 3 test `picture and sound stay within one frame while playing` passed on retry. Its timeline is only 5 s longer than the 60 s it plays. On the slow software runner, the Pause click came after playback had ended, so the click started playback again. The test needs a longer timeline.
+
 ## Phase 3: GPU compositor, audio engine, real-time playback (complete)
 
 - **Completed:** 2026-10-24, tag `phase-3`.
