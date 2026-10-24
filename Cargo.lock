@@ -413,8 +413,13 @@ dependencies = [
 name = "cgv-engine"
 version = "0.1.0"
 dependencies = [
+ "cgv-audio",
+ "cgv-model",
  "cgv-render",
+ "cgv-time",
+ "serde",
  "web-sys",
+ "wgpu",
 ]
 
 [[package]]

@@ -6,6 +6,13 @@ license.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[dependencies]
+cgv-audio.workspace = true
+cgv-model.workspace = true
 cgv-render.workspace = true
-web-sys = { workspace = true, features = ["OffscreenCanvas"] }
+cgv-time.workspace = true
+serde.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { workspace = true, features = ["ImageBitmap", "OffscreenCanvas", "VideoFrame"] }
+wgpu.workspace = true
