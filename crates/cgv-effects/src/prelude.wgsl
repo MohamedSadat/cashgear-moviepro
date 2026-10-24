@@ -66,11 +66,47 @@ fn luma(rgb: vec3<f32>) -> f32 {
     return dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
 }
 
-// A repeatable random number from 0 to 1 for a point.
+// PCG: integer hashing is exact on every GPU, so noise matches across backends.
+fn hash_u32(x: u32) -> u32 {
+    let state = x * 747796405u + 2891336453u;
+    let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+// A repeatable random number from 0 to 1 for the whole-number cell holding `p`.
 fn hash(p: vec2<f32>) -> f32 {
-    let q = fract(p * vec2<f32>(0.1031, 0.1030));
-    let r = q + dot(q, q.yx + vec2<f32>(33.33));
-    return fract((r.x + r.y) * r.x);
+    let cell = bitcast<vec2<u32>>(vec2<i32>(floor(p)));
+    return f32(hash_u32(cell.x ^ hash_u32(cell.y)) >> 8u) / 16777216.0;
+}
+
+// Whole steps of `rate` a second since the clip's start. The small nudge keeps a
+// step from landing a hair either side of a whole number on different GPUs.
+fn time_step(rate: f32) -> f32 {
+    return floor(frame.time * rate + 0.001);
+}
+
+// A whole number that differs from clip to clip.
+fn seed_step() -> f32 {
+    return floor(frame.seed * 997.0);
+}
+
+// The input pixel at `uv`, as whole numbers.
+fn pixel_of(uv: vec2<f32>) -> vec2<f32> {
+    return floor(uv * frame.input_size);
+}
+
+// The cell of whole `size`-pixel squares that holds the pixel at `uv`. Integer
+// division keeps cells the same on every GPU.
+fn cell_of(uv: vec2<f32>, size: f32) -> vec2<f32> {
+    let cell = max(1, i32(round(size)));
+    return vec2<f32>(vec2<i32>(pixel_of(uv)) / cell);
+}
+
+// How much of a picture shows at `p` (0 to 1 across it) when it spans `pixels`
+// on screen: its edges are smoothed over a pixel.
+fn coverage(p: vec2<f32>, pixels: vec2<f32>) -> f32 {
+    let edge = min(min(p.x, 1.0 - p.x) * pixels.x, min(p.y, 1.0 - p.y) * pixels.y);
+    return clamp(edge + 0.5, 0.0, 1.0);
 }
 
 // Smooth value noise from 0 to 1.

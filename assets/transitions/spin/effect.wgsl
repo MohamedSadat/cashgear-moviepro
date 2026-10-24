@@ -9,14 +9,17 @@ fn turned(uv: vec2<f32>, angle: f32, scale: f32) -> vec2<f32> {
     return p / vec2<f32>(aspect, 1.0) + vec2<f32>(0.5);
 }
 
-fn read_clipped(p: vec2<f32>, incoming: bool) -> vec4<f32> {
-    if (any(p < vec2<f32>(0.0)) || any(p > vec2<f32>(1.0))) {
+// A picture shown at `scale`, transparent outside it, with smooth edges.
+fn read_clipped(p: vec2<f32>, incoming: bool, scale: f32) -> vec4<f32> {
+    let shown = coverage(p, frame.size * scale);
+    if (shown <= 0.0) {
         return vec4<f32>(0.0);
     }
+    let q = clamp(p, vec2<f32>(0.0), vec2<f32>(1.0));
     if (incoming) {
-        return read_to(p);
+        return read_to(q) * shown;
     }
-    return read_from(p);
+    return read_from(q) * shown;
 }
 
 fn render(uv: vec2<f32>) -> vec4<f32> {
@@ -30,5 +33,5 @@ fn render(uv: vec2<f32>) -> vec4<f32> {
     let scale = 1.0 - 0.7 * sin(t * PI);
     let p = turned(uv, angle, scale);
     let mixing = smoothstep(0.45, 0.55, t);
-    return mix(read_clipped(p, false), read_clipped(p, true), mixing);
+    return mix(read_clipped(p, false, scale), read_clipped(p, true, scale), mixing);
 }

@@ -1,7 +1,7 @@
 // Bands jump sideways, the channels split and scanlines show, a few times a second.
 fn render(uv: vec2<f32>) -> vec4<f32> {
     let a = params.amount;
-    let t = floor(frame.time * params.speed) + floor(frame.seed * 997.0);
+    let t = time_step(params.speed) + seed_step();
     let band = floor(uv.y * 24.0);
     var shift = 0.0;
     if (hash(vec2<f32>(band, t)) > 1.0 - a * 0.5) {
