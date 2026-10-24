@@ -16,4 +16,4 @@ export {
   type ProjectStore,
 } from './platform';
 export { useProject, type ProjectState, type RecoveryPrompt } from './project/useProject';
-export { TimelineOutline } from './timeline/TimelineOutline';
+export { Timeline } from './timeline/Timeline';

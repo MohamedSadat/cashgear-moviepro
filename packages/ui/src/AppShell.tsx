@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import '@cashgear/ui/styles.css';
 import {
   evaluateCapabilities,
   probeCapabilities,
@@ -10,6 +11,9 @@ import {
 } from '@cgv/engine-client';
 import { BlockedScreen, CapabilityNotice, CapabilityStrip } from './CapabilityReport';
 import { DevOverlay } from './DevOverlay';
+import { useEditor, type EditorState } from './editing/useEditor';
+import { icons } from './icons';
+import { Inspector } from './inspector/Inspector';
 import { MediaLibraryPanel } from './media/MediaLibraryPanel';
 import { TransportBar } from './monitor/TransportBar';
 import { usePlayback, type PlaybackControls } from './monitor/usePlayback';
@@ -24,7 +28,12 @@ import {
   SettingsDialog,
 } from './project/ProjectDialogs';
 import { useProject, type ProjectState } from './project/useProject';
-import { TimelineOutline } from './timeline/TimelineOutline';
+import { useAppSettings } from './settings/useAppSettings';
+import { effectiveKeymap } from './shortcuts/keymap';
+import { ShortcutsDialog } from './shortcuts/ShortcutsDialog';
+import { useShortcuts } from './shortcuts/useShortcuts';
+import { Timeline } from './timeline/Timeline';
+import { Workspace } from './workspace/Workspace';
 import './styles.css';
 
 interface Props {
@@ -37,6 +46,7 @@ export interface DiagnosticHooks {
   library: MediaLibraryState;
   project: ProjectState;
   playback: PlaybackControls;
+  editor: EditorState;
   platform: MediaPlatform;
 }
 
@@ -78,7 +88,14 @@ export function AppShell({ platform }: Props) {
   const project = useProject(client, platform, { autosaveMs: options.autosaveMs });
   const library = project.library;
   const playback = usePlayback(client, project);
-  const [dialog, setDialog] = useState<'projects' | 'settings' | null>(null);
+  const { settings, update, saveLayout } = useAppSettings();
+  const editor = useEditor(project, playback, {
+    snapping: settings.snapping,
+    onSnapping: (snapping) => update({ snapping }),
+  });
+  const keymap = useMemo(() => effectiveKeymap(settings.shortcuts), [settings.shortcuts]);
+  useShortcuts(keymap, editor.run);
+  const [dialog, setDialog] = useState<'projects' | 'settings' | 'shortcuts' | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -91,6 +108,13 @@ export function AppShell({ platform }: Props) {
       live = false;
     };
   }, [platform]);
+
+  // Dark and compact everywhere, including menus the CG library opens outside the app.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.cgTheme = 'dark';
+    root.dataset.cgDensity = 'compact';
+  }, []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -105,9 +129,9 @@ export function AppShell({ platform }: Props) {
 
   useEffect(() => {
     if (!options.diagnostic) return;
-    const hooks: DiagnosticHooks = { client, library, project, playback, platform };
+    const hooks: DiagnosticHooks = { client, library, project, playback, editor, platform };
     Reflect.set(window, '__cgv', hooks);
-  }, [options.diagnostic, client, library, project, playback, platform]);
+  }, [options.diagnostic, client, library, project, playback, editor, platform]);
 
   const gpu: EngineGpu =
     engine.status === 'ready'
@@ -125,6 +149,42 @@ export function AppShell({ platform }: Props) {
     gpu,
   );
 
+  const monitor = (
+    <main className="cgv-stage">
+      <CapabilityNotice report={report} />
+      {project.notices.map((text, index) => (
+        <div key={index} className="cgv-notice" role="alert" data-testid="project-notice">
+          {text}
+          <button type="button" aria-label="Dismiss" onClick={() => project.dismissNotice(index)}>
+            ×
+          </button>
+        </div>
+      ))}
+      {engine.status === 'error' && (
+        <div className="cgv-error" role="alert" data-testid="engine-error">
+          <p>{engine.message}</p>
+          <button type="button" onClick={() => setGeneration((value) => value + 1)}>
+            Retry engine
+          </button>
+          {options.backend !== 'webgl2' && <a href="?gpu=webgl2">Try the WebGL2 renderer</a>}
+        </div>
+      )}
+      <div className="cgv-monitor-area">
+        <ProgramMonitor
+          generation={generation}
+          backend={options.backend}
+          diagnostic={options.diagnostic}
+          gpuFault={options.gpuFault}
+          pattern={options.pattern}
+          decode={options.decode}
+          onState={onState}
+          onClient={setClient}
+        />
+      </div>
+      <TransportBar playback={playback} />
+    </main>
+  );
+
   return (
     <div className="cgv-app">
       <header className="cgv-header">
@@ -134,6 +194,16 @@ export function AppShell({ platform }: Props) {
           onOpenProjects={() => setDialog('projects')}
           onOpenSettings={() => setDialog('settings')}
         />
+        <button
+          type="button"
+          className="cgv-icon-button"
+          aria-label="Keyboard shortcuts"
+          title="Keyboard shortcuts"
+          data-testid="open-shortcuts"
+          onClick={() => setDialog('shortcuts')}
+        >
+          {icons.keyboard}
+        </button>
         {options.diagnostic && engine.status === 'ready' && engine.fault && (
           <div className="cgv-diagnostics">
             <button type="button" onClick={() => engine.fault?.('device-loss')}>
@@ -145,47 +215,14 @@ export function AppShell({ platform }: Props) {
           </div>
         )}
       </header>
-      <div className="cgv-workspace">
-        <MediaLibraryPanel project={project} />
-        <main className="cgv-stage">
-          <CapabilityNotice report={report} />
-          {project.notices.map((text, index) => (
-            <div key={index} className="cgv-notice" role="alert" data-testid="project-notice">
-              {text}
-              <button
-                type="button"
-                aria-label="Dismiss"
-                onClick={() => project.dismissNotice(index)}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-          {engine.status === 'error' && (
-            <div className="cgv-error" role="alert" data-testid="engine-error">
-              <p>{engine.message}</p>
-              <button type="button" onClick={() => setGeneration((value) => value + 1)}>
-                Retry engine
-              </button>
-              {options.backend !== 'webgl2' && <a href="?gpu=webgl2">Try the WebGL2 renderer</a>}
-            </div>
-          )}
-          <div className="cgv-monitor-area">
-            <ProgramMonitor
-              generation={generation}
-              backend={options.backend}
-              diagnostic={options.diagnostic}
-              gpuFault={options.gpuFault}
-              pattern={options.pattern}
-              decode={options.decode}
-              onState={onState}
-              onClient={setClient}
-            />
-          </div>
-          <TransportBar playback={playback} />
-          <TimelineOutline project={project} />
-        </main>
-      </div>
+      <Workspace
+        library={<MediaLibraryPanel project={project} />}
+        monitor={monitor}
+        inspector={<Inspector editor={editor} />}
+        timeline={<Timeline editor={editor} diagnostic={options.diagnostic} />}
+        layout={settings.layout}
+        onLayout={saveLayout}
+      />
       <CapabilityStrip engine={engine} probe={probe} report={report} native={native} />
       {devOverlay && <DevOverlay client={client} />}
       {dialog === 'projects' && (
@@ -193,6 +230,13 @@ export function AppShell({ platform }: Props) {
       )}
       {dialog === 'settings' && project.snapshot && (
         <SettingsDialog project={project} onClose={() => setDialog(null)} />
+      )}
+      {dialog === 'shortcuts' && (
+        <ShortcutsDialog
+          shortcuts={settings.shortcuts}
+          onChange={(shortcuts) => update({ shortcuts })}
+          onClose={() => setDialog(null)}
+        />
       )}
       {project.recovery && <RecoveryDialog project={project} />}
       {project.relinking && !project.recovery && <RelinkDialog project={project} />}

@@ -350,7 +350,7 @@ test('missing media is relinked, and changed files are noticed', async ({ page }
     'data-status',
     'missing',
   );
-  await expect(page.locator('.cgv-clip-offline')).toHaveCount(1);
+  await expect(page.locator('[data-testid="clip"][data-offline="true"]')).toHaveCount(1);
   expect((await snapshot(page)).project).toEqual(before.project);
 
   // Locate it: the picker answers with the moved file.
@@ -366,7 +366,7 @@ test('missing media is relinked, and changed files are noticed', async ({ page }
     'data-status',
     'ready',
   );
-  await expect(page.locator('.cgv-clip-offline')).toHaveCount(0);
+  await expect(page.locator('[data-testid="clip"][data-offline="true"]')).toHaveCount(0);
   const relinked = await snapshot(page);
   expect(relinked.dirty).toBe(true);
   expect(relinked.canUndo).toBe(false);

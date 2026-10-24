@@ -17,6 +17,8 @@ import type { MediaPlatform } from '../platform';
 export interface MediaVisuals {
   /** Object URLs of filmstrip thumbnails, in time order. */
   thumbnails: string[];
+  /** Source time of each thumbnail, in seconds. */
+  times?: number[];
   waveform?: { peaks: Int8Array; peaksPerSecond: number };
 }
 
@@ -89,11 +91,12 @@ async function loadVisuals(
   if (decodableVideo) {
     const index = await cache.read(thumbsKey(item.id));
     if (index) {
-      const { count } = JSON.parse(text(index)) as { count: number };
+      const { count, times } = JSON.parse(text(index)) as { count: number; times?: number[] };
       for (let i = 0; i < count; i++) {
         const bytes = await cache.read(thumbKey(item.id, i));
         if (bytes) visuals.thumbnails.push(jpegUrl(bytes));
       }
+      if (times?.length === visuals.thumbnails.length) visuals.times = times;
     }
     if (!visuals.thumbnails.length) {
       const filmstrip = await jobs.api.filmstrip(source);
@@ -101,6 +104,7 @@ async function loadVisuals(
         await cache.write(thumbKey(item.id, i), image);
         visuals.thumbnails.push(jpegUrl(image));
       }
+      visuals.times = filmstrip.times;
       await cache.write(
         thumbsKey(item.id),
         json({ count: filmstrip.images.length, times: filmstrip.times }),

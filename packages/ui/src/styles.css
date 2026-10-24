@@ -8,6 +8,32 @@
   --cgv-accent: #3d8bfd;
   --cgv-warn: #f2b84b;
   --cgv-danger: #ef5a5a;
+  /* Timeline canvas colours. */
+  --cgv-timeline-bg: #121418;
+  --cgv-track-bg: #191c22;
+  --cgv-track-bg-alt: #16191e;
+  --cgv-track-main-bg: #1c2230;
+  --cgv-track-line: #262b34;
+  --cgv-ruler-bg: #1b1e24;
+  --cgv-ruler-text: #9aa1ad;
+  --cgv-ruler-tick: #3b414c;
+  --cgv-clip-video: #2c5a8c;
+  --cgv-clip-audio: #2b7350;
+  --cgv-clip-image: #68498f;
+  --cgv-clip-offline: #6e2b2b;
+  --cgv-clip-text: #eef1f6;
+  --cgv-clip-border: rgb(255 255 255 / 0.16);
+  --cgv-clip-selected: #f2b84b;
+  --cgv-waveform: rgb(214 255 232 / 0.75);
+  --cgv-waveform-muted: rgb(200 200 200 / 0.35);
+  --cgv-playhead: #ff5252;
+  --cgv-snap-guide: #f2d24b;
+  --cgv-marker-red: #ef5a5a;
+  --cgv-marker-orange: #f59f42;
+  --cgv-marker-yellow: #f2d24b;
+  --cgv-marker-green: #4cc38a;
+  --cgv-marker-blue: #3d8bfd;
+  --cgv-marker-purple: #a874ff;
   font-family:
     system-ui,
     -apple-system,
@@ -19,6 +45,61 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* The CG components, menus and popups included, take the editor's colours. */
+:root[data-cg-theme='dark'] {
+  --cg-page-bg: var(--cgv-bg);
+  --cg-surface: var(--cgv-panel);
+  --cg-surface-subtle: #20242b;
+  --cg-surface-raised: #23272f;
+  --cg-text: var(--cgv-text);
+  --cg-text-secondary: var(--cgv-muted);
+  --cg-border: var(--cgv-border);
+  --cg-border-strong: #4a515d;
+  --cg-accent: var(--cgv-accent);
+  --cg-accent-hover: #5a9dfd;
+  --cg-accent-active: #2f78e6;
+  --cg-accent-soft: #1d3150;
+  --cg-hover: #262b34;
+  --cg-selected: #1d3150;
+  --cg-font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Tokens some CG components read without defining (menus fall back to dark text). */
+  --cg-color-text: var(--cgv-text);
+  --cg-color-text-muted: var(--cgv-muted);
+  --cg-color-text-disabled: #68758a;
+  --cg-color-surface: var(--cgv-panel);
+  --cg-color-surface-hover: #262b34;
+  --cg-color-surface-muted: #20242b;
+  --cg-color-surface-raised: #23272f;
+  --cg-color-surface-subtle: #20242b;
+  --cg-color-border: var(--cgv-border);
+  --cg-color-danger: var(--cgv-danger);
+  --cg-color-focus: var(--cgv-accent);
+  --cg-color-on-primary: #fff;
+}
+
+.cgv-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.cgv-icon {
+  display: block;
+  flex: none;
+}
+
+.cgv-icon-button {
+  display: inline-grid;
+  place-items: center;
+  padding: 4px 6px;
 }
 
 html,
@@ -56,29 +137,60 @@ body,
   gap: 8px;
 }
 
+/* Workspace: library, monitor and inspector above the timeline, in splitters. */
 .cgv-workspace {
-  display: grid;
-  grid-template-columns: minmax(260px, 340px) 1fr;
+  min-height: 0;
+  height: 100%;
+  background: var(--cgv-bg);
+}
+
+.cgv-workspace-top {
+  height: 100%;
+}
+
+.cgv-workspace,
+.cgv-workspace-top {
+  border: 0;
+}
+
+/* Splitter panes: their content fills them. */
+.cgv-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.cgv-pane > div {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+}
+
+.cgv-pane > div > * {
+  flex: 1;
   min-height: 0;
 }
 
 .cgv-stage {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+  height: 100%;
   min-height: 0;
   min-width: 0;
-  padding: 16px;
+  padding: 8px;
 }
 
 .cgv-library {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  height: 100%;
   min-height: 0;
   padding: 12px;
   background: var(--cgv-panel);
-  border-right: 1px solid var(--cgv-border);
   overflow: auto;
 }
 
@@ -386,21 +498,6 @@ body,
   color: var(--cgv-accent);
 }
 
-button {
-  font: inherit;
-  font-size: 13px;
-  padding: 4px 10px;
-  color: var(--cgv-text);
-  background: #2a2f38;
-  border: 1px solid var(--cgv-border);
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-button:hover {
-  background: #343a45;
-}
-
 .cgv-blocked {
   position: fixed;
   inset: 0;
@@ -432,24 +529,42 @@ button:hover {
   margin-bottom: 0;
 }
 
-button:disabled {
-  cursor: default;
-  opacity: 0.45;
-}
+/* Plain controls. A layer, so components with their own styles (the CG library) win. */
+@layer cgv-base {
+  button {
+    font: inherit;
+    font-size: 13px;
+    padding: 4px 10px;
+    color: var(--cgv-text);
+    background: #2a2f38;
+    border: 1px solid var(--cgv-border);
+    border-radius: 4px;
+    cursor: pointer;
+  }
 
-button:disabled:hover {
-  background: #2a2f38;
-}
+  button:hover {
+    background: #343a45;
+  }
 
-input,
-select {
-  font: inherit;
-  font-size: 13px;
-  padding: 4px 6px;
-  color: var(--cgv-text);
-  background: #11151b;
-  border: 1px solid var(--cgv-border);
-  border-radius: 4px;
+  button:disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+
+  button:disabled:hover {
+    background: #2a2f38;
+  }
+
+  input,
+  select {
+    font: inherit;
+    font-size: 13px;
+    padding: 4px 6px;
+    color: var(--cgv-text);
+    background: #11151b;
+    border: 1px solid var(--cgv-border);
+    border-radius: 4px;
+  }
 }
 
 .cgv-muted {
@@ -633,152 +748,307 @@ select {
   font-size: 11px;
 }
 
-/* Timeline outline */
+/* Timeline */
 
 .cgv-timeline {
   display: flex;
-  flex: 0 0 auto;
   flex-direction: column;
-  gap: 4px;
-  max-height: 40%;
-  overflow: auto;
-  padding: 8px;
+  height: 100%;
+  min-height: 0;
   background: var(--cgv-panel);
-  border: 1px solid var(--cgv-border);
-  border-radius: 6px;
+  border-top: 1px solid var(--cgv-border);
 }
 
-.cgv-timeline-header {
+.cgv-timeline-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 2px;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--cgv-border);
 }
 
-.cgv-timeline-header h2 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--cgv-muted);
+.cgv-toolbar-separator {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: var(--cgv-border);
 }
 
-.cgv-timeline-header button {
-  margin-left: auto;
+.cgv-timeline-duration {
+  margin-right: 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
-.cgv-markers {
-  position: relative;
-  height: 8px;
-  margin-left: 168px;
+.cgv-zoom {
+  width: 120px;
+  padding: 0;
+  accent-color: var(--cgv-accent);
 }
 
-.cgv-marker {
-  position: absolute;
-  top: 0;
-  width: 8px;
-  height: 8px;
-  margin-left: -4px;
-  border-radius: 50%;
+.cgv-timeline-body {
+  display: grid;
+  grid-template-columns: 188px 1fr;
+  flex: 1;
+  min-height: 0;
 }
 
-.cgv-marker-red {
-  background: #ef5a5a;
-}
-.cgv-marker-orange {
-  background: #f28c3b;
-}
-.cgv-marker-yellow {
-  background: #f2d14b;
-}
-.cgv-marker-green {
-  background: #5cc97b;
-}
-.cgv-marker-blue {
-  background: #3d8bfd;
-}
-.cgv-marker-purple {
-  background: #a874f2;
-}
-
-.cgv-tracks {
+.cgv-timeline-headers {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  min-height: 0;
+  border-right: 1px solid var(--cgv-border);
+  background: var(--cgv-panel);
 }
 
-.cgv-track {
-  display: grid;
-  grid-template-columns: 160px 1fr;
-  gap: 8px;
+.cgv-timeline-corner {
+  display: flex;
   align-items: center;
+  flex: none;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--cgv-track-line);
 }
 
-.cgv-track-hidden .cgv-track-lane {
-  opacity: 0.4;
+.cgv-timeline-corner .cgv-timecode {
+  font-size: 12px;
+}
+
+.cgv-timeline-header-rows {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.cgv-timeline-drop-hint {
+  border-bottom: 1px dashed var(--cgv-track-line);
 }
 
 .cgv-track-header {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  height: 100%;
+  padding: 0 4px 0 8px;
+  border-bottom: 1px solid var(--cgv-track-line);
+}
+
+.cgv-track-header-main {
+  background: var(--cgv-track-main-bg);
+  box-shadow: inset 3px 0 0 var(--cgv-accent);
 }
 
 .cgv-track-name {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.cgv-track-name-input {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 4px;
+  font-size: 12px;
+}
+
+.cgv-track-main {
+  padding: 0 4px;
+  font-size: 10px;
+  color: var(--cgv-accent);
+  border: 1px solid currentColor;
+  border-radius: 3px;
+}
+
+.cgv-track-toggles {
+  display: flex;
+  gap: 1px;
+}
+
+.cgv-track-toggle {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  color: var(--cgv-muted);
+  background: transparent;
+  border-color: transparent;
+}
+
+.cgv-track-toggle[aria-pressed='true'] {
+  color: var(--cgv-warn);
+  background: rgb(242 184 75 / 0.12);
+}
+
+.cgv-timeline-canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.cgv-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: var(--cgv-playhead);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.cgv-playhead::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: -6px;
+  width: 13px;
+  height: 21px;
+  background: var(--cgv-playhead);
+  clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%);
+}
+
+.cgv-timeline-canvas canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+/* Inspector */
+
+.cgv-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+  background: var(--cgv-panel);
+}
+
+.cgv-inspector h2 {
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.cgv-track-toggle {
-  width: 22px;
-  padding: 0;
+.cgv-inspector p {
+  margin: 0;
+  font-size: 12px;
+}
+
+.cgv-inspector-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--cgv-border);
+}
+
+.cgv-inspector-section h3 {
+  margin: 0;
   font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cgv-muted);
 }
 
-.cgv-track-toggle[aria-pressed='true'] {
-  color: #000;
-  background: var(--cgv-warn);
+.cgv-field {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  align-items: center;
+  gap: 8px;
 }
 
-.cgv-track-lane {
-  position: relative;
-  height: 28px;
-  background: #11151b;
-  border-radius: 3px;
+.cgv-field-label {
+  font-size: 12px;
+  color: var(--cgv-muted);
+  cursor: ew-resize;
+  user-select: none;
+  touch-action: none;
 }
 
-.cgv-clip {
-  position: absolute;
-  top: 2px;
-  bottom: 2px;
-  min-width: 2px;
-  overflow: hidden;
-  padding: 0 4px;
-  font-size: 11px;
-  line-height: 24px;
+.cgv-field-label:hover {
+  color: var(--cgv-text);
+}
+
+.cgv-speed-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+/* Keyboard shortcuts */
+
+.cgv-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 12px 24px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.cgv-shortcuts h3 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--cgv-muted);
+}
+
+.cgv-shortcuts table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12px;
+}
+
+.cgv-shortcuts th {
+  width: 48%;
+}
+
+.cgv-shortcut-keys {
+  width: 30%;
+}
+
+.cgv-shortcuts th {
+  padding: 3px 0;
+  font-weight: 400;
+  text-align: left;
+}
+
+.cgv-shortcut-keys {
+  padding: 3px 8px;
   white-space: nowrap;
+}
+
+.cgv-shortcut-keys kbd {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 5px;
+  font: inherit;
+  font-size: 11px;
+  background: #11151b;
+  border: 1px solid var(--cgv-border);
   border-radius: 3px;
-  box-shadow: inset -1px 0 0 rgb(0 0 0 / 0.5);
 }
 
-.cgv-clip-video {
-  background: #2f5f9e;
+.cgv-shortcut-actions {
+  white-space: nowrap;
+  text-align: right;
 }
 
-.cgv-clip-audio {
-  background: #2f7a55;
-}
-
-.cgv-clip-linked span::before {
-  content: '⛓ ';
-}
-
-.cgv-clip-offline {
-  background: repeating-linear-gradient(-45deg, #5a2a2a 0 6px, #3a1d1d 6px 12px);
+.cgv-shortcut-actions button {
+  padding: 1px 6px;
+  font-size: 11px;
 }

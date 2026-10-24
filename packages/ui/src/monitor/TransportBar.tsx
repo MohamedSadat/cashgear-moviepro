@@ -1,5 +1,5 @@
 import type { QualityMode } from '@cgv/engine-client';
-import type { PlaybackControls } from './usePlayback';
+import { usePlaybackState, type PlaybackControls } from './usePlayback';
 
 const qualities: { mode: QualityMode; label: string }[] = [
   { mode: 'auto', label: 'Auto' },
@@ -11,10 +11,10 @@ const levelLabels = ['Full', '1/2', '1/4'];
 
 /**
  * The program monitor's controls: transport buttons, timecode, a scrub bar and
- * the preview quality. The editing timeline replaces the scrub bar in Phase 4.
+ * the preview quality.
  */
 export function TransportBar({ playback }: { playback: PlaybackControls }) {
-  const state = playback.state;
+  const state = usePlaybackState(playback);
   const disabled = !state || state.duration <= 0;
   const playing = state?.playing ?? false;
   const shuttling = playing && state && state.rate !== 1;

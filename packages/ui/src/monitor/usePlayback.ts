@@ -1,9 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { EngineClient, PlaybackState, QualityMode } from '@cgv/engine-client';
 import type { ProjectState } from '../project/useProject';
 
 export interface PlaybackControls {
-  state: PlaybackState | null;
+  /**
+   * The latest playhead and transport. Reading it does not re-render anything;
+   * components that show it use `usePlaybackState`.
+   */
+  readonly state: PlaybackState | null;
+  /** Hears every change of `state` (about 30 times a second while playing). */
+  subscribe(listener: () => void): () => void;
   /** Why there is no sound, if sound could not start. Playback then runs silent. */
   soundError: string | null;
   toggle(): void;
@@ -16,21 +22,26 @@ export interface PlaybackControls {
   setQuality(mode: QualityMode): void;
 }
 
-const editable = (target: EventTarget | null) =>
-  target instanceof HTMLElement &&
-  (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+/** The playhead state, re-rendering the caller whenever it changes. */
+export function usePlaybackState(playback: PlaybackControls): PlaybackState | null {
+  return useSyncExternalStore(playback.subscribe, () => playback.state);
+}
 
 /**
  * The program monitor's transport: the playhead state the engine reports, sound
- * at the project's rate, and the commands the monitor's buttons and keys send.
- * Space plays and pauses, J/K/L shuttle, the arrow keys step a frame (ten with
- * Shift), Home and End jump to the ends.
+ * at the project's rate, and the commands the monitor's buttons send. Keys reach
+ * these through the shortcut map.
+ *
+ * The state lives outside React state, so playing re-renders only what shows the
+ * playhead, never the whole workspace.
  */
 export function usePlayback(client: EngineClient | null, project: ProjectState): PlaybackControls {
-  const [state, setState] = useState<PlaybackState | null>(null);
+  const store = useRef({ state: null as PlaybackState | null, listeners: new Set<() => void>() });
   const [soundError, setSoundError] = useState<string | null>(null);
-  const stateRef = useRef(state);
-  stateRef.current = state;
+  const publish = useCallback((next: PlaybackState | null) => {
+    store.current.state = next;
+    for (const listener of store.current.listeners) listener();
+  }, []);
   const settings = project.snapshot?.project.settings;
   const sampleRate = settings?.sampleRate;
   const channels = settings?.channels;
@@ -38,16 +49,16 @@ export function usePlayback(client: EngineClient | null, project: ProjectState):
 
   useEffect(() => {
     if (!client) {
-      setState(null);
+      publish(null);
       return;
     }
-    client.onPlayback(setState);
+    client.onPlayback(publish);
     void client.api
       .playbackState()
-      .then(setState)
+      .then(publish)
       .catch(() => {});
     return () => client.onPlayback(null);
-  }, [client]);
+  }, [client, publish]);
 
   useEffect(() => {
     if (!client || !sampleRate || !channels) return;
@@ -70,49 +81,23 @@ export function usePlayback(client: EngineClient | null, project: ProjectState):
 
   const controls = useMemo<PlaybackControls>(
     () => ({
-      state,
+      get state() {
+        return store.current.state;
+      },
+      subscribe: (listener) => {
+        store.current.listeners.add(listener);
+        return () => void store.current.listeners.delete(listener);
+      },
       soundError,
       toggle: () => void client?.togglePlay(),
       shuttle: (key) => void client?.shuttle(key),
       seekFrame,
       step: (frames) => void client?.api.step(frames),
       toStart: () => void client?.api.seek(0),
-      toEnd: () => void client?.api.seek(stateRef.current?.lastFrameTime ?? 0),
+      toEnd: () => void client?.api.seek(store.current.state?.lastFrameTime ?? 0),
       setQuality: (mode) => void client?.api.setQuality(mode),
     }),
-    [client, seekFrame, soundError, state],
+    [client, seekFrame, soundError],
   );
-  const controlsRef = useRef(controls);
-  controlsRef.current = controls;
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.ctrlKey || event.metaKey || event.altKey || editable(event.target)) return;
-      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
-      const run = controlsRef.current;
-      const key = event.key.toLowerCase();
-      if (event.type === 'keyup') {
-        // A focused button would otherwise click on Space as well.
-        if (key === ' ') event.preventDefault();
-        return;
-      }
-      if (event.repeat && (key === ' ' || ['j', 'k', 'l'].includes(key))) return;
-      if (key === ' ') run.toggle();
-      else if (key === 'j' || key === 'k' || key === 'l') run.shuttle(key);
-      else if (key === 'arrowleft') run.step(event.shiftKey ? -10 : -1);
-      else if (key === 'arrowright') run.step(event.shiftKey ? 10 : 1);
-      else if (key === 'home') run.toStart();
-      else if (key === 'end') run.toEnd();
-      else return;
-      event.preventDefault();
-    };
-    window.addEventListener('keydown', onKey);
-    window.addEventListener('keyup', onKey);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('keyup', onKey);
-    };
-  }, []);
-
   return controls;
 }

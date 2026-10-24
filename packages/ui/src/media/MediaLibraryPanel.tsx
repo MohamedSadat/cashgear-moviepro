@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type DragEvent } from 'react';
 import type { MediaItem, MediaRef } from '@cgv/engine-client';
 import { mediaAccept } from '../platform';
 import type { ProjectState } from '../project/useProject';
+import { mediaDragType } from '../timeline/controller';
+import { draggedMedia } from './dragging';
 import type { MediaVisuals } from './useMediaLibrary';
 
 const accept = Object.values(mediaAccept).flat().join(',');
@@ -162,10 +164,11 @@ export function MediaLibraryPanel({ project }: { project: ProjectState }) {
     item: library.items.find((item) => item.id === media.id) ?? null,
     missing: missing.has(media.id),
   }));
+  const fromLibrary = (event: DragEvent) => event.dataTransfer.types.includes(mediaDragType);
   const onDrop = (event: DragEvent) => {
     event.preventDefault();
     setDragging(false);
-    void project.importDrop(event.dataTransfer);
+    if (!fromLibrary(event)) void project.importDrop(event.dataTransfer);
   };
   return (
     <aside
@@ -174,7 +177,7 @@ export function MediaLibraryPanel({ project }: { project: ProjectState }) {
       aria-label="Media library"
       onDragOver={(event) => {
         event.preventDefault();
-        setDragging(true);
+        if (!fromLibrary(event)) setDragging(true);
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
@@ -242,6 +245,14 @@ export function MediaLibraryPanel({ project }: { project: ProjectState }) {
             <li
               key={media.id}
               className={'cgv-media-item' + (lost ? ' cgv-media-item-missing' : '')}
+              draggable={!!item && playable(item)}
+              title={item && playable(item) ? 'Drag onto the timeline' : undefined}
+              onDragStart={(event) => {
+                draggedMedia.id = media.id;
+                event.dataTransfer.setData(mediaDragType, media.id);
+                event.dataTransfer.effectAllowed = 'copy';
+              }}
+              onDragEnd={() => (draggedMedia.id = null)}
               data-testid="media-item"
               data-media-id={media.id}
               data-name={item?.name ?? media.name}

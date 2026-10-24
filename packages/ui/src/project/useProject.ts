@@ -11,10 +11,12 @@ import {
   type MediaRef,
   type Outcome,
   type Preset,
+  type Preview,
   type ProjectEntry,
   type ProjectSettings,
   type ProjectSnapshot,
 } from '@cgv/engine-client';
+import { Gesture } from '../editing/gesture';
 import { useMediaLibrary, type MediaLibraryState } from '../media/useMediaLibrary';
 import type { MediaPlatform } from '../platform';
 
@@ -46,6 +48,30 @@ export interface ProjectState {
   execute(command: Command): Promise<Outcome | null>;
   /** Runs commands as one undo step. On failure, shows why and returns null. */
   executeGroup(label: string, commands: Command[]): Promise<Outcome[] | null>;
+  /**
+   * Runs commands one at a time as one undo step, each able to use what the
+   * earlier ones created (`step` returns the new ids). On failure, undoes them
+   * all, shows why and returns null.
+   */
+  transaction<T>(
+    label: string,
+    run: (step: (command: Command) => Promise<number[]>) => Promise<T>,
+  ): Promise<T | null>;
+  /**
+   * Starts a drag or slider gesture: one undo step whose steps the engine shows
+   * at once. Each step's snapshot goes to `onStep` and to live listeners. Null
+   * without an engine.
+   */
+  gesture(
+    label: string,
+    onStep?: (snapshot: ProjectSnapshot, preview: Preview) => void,
+  ): Gesture | null;
+  /** Ends a gesture, keeping its last step that applied. */
+  finish(gesture: Gesture): Promise<void>;
+  /** Hears every gesture step before it becomes the project state. */
+  onLive(listener: (snapshot: ProjectSnapshot) => void): () => void;
+  /** Shows a message to the user. */
+  notice(text: string): void;
   undo(): Promise<void>;
   redo(): Promise<void>;
   save(): Promise<boolean>;
@@ -86,10 +112,6 @@ const untitled = 'Untitled project';
 const stillDuration = 5 * FLICKS_PER_SECOND;
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
-
-const editable = (target: EventTarget | null) =>
-  target instanceof HTMLElement &&
-  (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
 
 /**
  * The open project: opening, saving, autosave and recovery, relinking, and the
@@ -402,6 +424,56 @@ export function useProject(
     [api, notice, show],
   );
 
+  const transaction = useCallback(
+    async <T>(
+      label: string,
+      run: (step: (command: Command) => Promise<number[]>) => Promise<T>,
+    ): Promise<T | null> => {
+      const engine = api();
+      await engine.projectBeginGroup(label);
+      try {
+        const result = await run(async (command) => {
+          const { outcome } = await engine.projectExecute(command);
+          return outcome.created;
+        });
+        show(await engine.projectEndGroup());
+        return result;
+      } catch (error) {
+        show(await engine.projectCancelGroup());
+        notice(message(error));
+        return null;
+      }
+    },
+    [api, notice, show],
+  );
+
+  const live = useRef(new Set<(snapshot: ProjectSnapshot) => void>());
+  const gesture = useCallback(
+    (label: string, onStep?: (snapshot: ProjectSnapshot, preview: Preview) => void) => {
+      const current = clientRef.current;
+      if (!current || !snapshotRef.current) return null;
+      return new Gesture(current.api, label, (next, preview) => {
+        onStep?.(next, preview);
+        for (const listener of live.current) listener(next);
+      });
+    },
+    [],
+  );
+  const finish = useCallback(
+    async (running: Gesture) => {
+      try {
+        show(await running.end());
+      } catch (error) {
+        notice(message(error));
+      }
+    },
+    [notice, show],
+  );
+  const onLive = useCallback((listener: (snapshot: ProjectSnapshot) => void) => {
+    live.current.add(listener);
+    return () => void live.current.delete(listener);
+  }, []);
+
   addMedia.current = async (media: MediaRef[]) => {
     if (media.length)
       await executeGroup(
@@ -410,8 +482,20 @@ export function useProject(
       );
   };
 
-  const undo = useCallback(async () => show(await api().projectUndo()), [api, show]);
-  const redo = useCallback(async () => show(await api().projectRedo()), [api, show]);
+  const undo = useCallback(async () => {
+    try {
+      show(await api().projectUndo());
+    } catch (error) {
+      notice(message(error));
+    }
+  }, [api, notice, show]);
+  const redo = useCallback(async () => {
+    try {
+      show(await api().projectRedo());
+    } catch (error) {
+      notice(message(error));
+    }
+  }, [api, notice, show]);
   const save = useCallback(
     async () => (await serial(() => saveNow(false))) ?? false,
     [saveNow, serial],
@@ -420,22 +504,6 @@ export function useProject(
     async () => (await serial(() => saveNow(true))) ?? false,
     [saveNow, serial],
   );
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || editable(event.target)) return;
-      const key = event.key.toLowerCase();
-      const run = (action: () => Promise<unknown>) => {
-        event.preventDefault();
-        void action().catch((error) => notice(message(error)));
-      };
-      if (key === 'z' && !event.shiftKey) run(undo);
-      else if ((key === 'z' && event.shiftKey) || key === 'y') run(redo);
-      else if (key === 's') run(event.shiftKey && !store.savesInPlace ? saveAs : save);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [notice, redo, save, saveAs, store.savesInPlace, undo]);
 
   const relinkWith = useCallback(
     async (expected: MediaRef, request: ImportRequest) => {
@@ -482,6 +550,11 @@ export function useProject(
     canSearchFolder: !!platform.searchFolder,
     execute,
     executeGroup,
+    transaction,
+    gesture,
+    finish,
+    onLive,
+    notice,
     undo,
     redo,
     save,
@@ -585,7 +658,7 @@ export function useProject(
       }
       await execute({
         type: 'append',
-        track: current.project.tracks[0].id,
+        track: current.project.mainTrack,
         clip: { media: id, duration },
       });
     },
