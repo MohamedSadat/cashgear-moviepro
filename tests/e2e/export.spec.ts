@@ -30,11 +30,18 @@ const minPsnr = 40;
 const maxOffsetMs = 1000 / 30;
 
 interface Layer {
-  media: string;
+  /** Media, or none for an adjustment layer. */
+  media?: string;
+  kind?: 'adjustment';
   length: number;
+  /** The track it goes on (0 is the bottom); its own index by default. */
+  track?: number;
   transform?: Partial<Record<string, number>>;
   crop?: Partial<Record<string, number>>;
   opacity?: number;
+  effects?: { kind: string; params?: Record<string, unknown> }[];
+  /** Keys by property as [frame, value, easing]; `$n` names effect n of the layer. */
+  keyframes?: Record<string, [number, number, string?][]>;
 }
 interface Fixture {
   name: string;
@@ -42,6 +49,8 @@ interface Fixture {
   frames: number[];
   export: { format: string; video: string; bitrate: number; audio: string };
   layers: Layer[];
+  /** Between layers `from` and `to` (indices) on a track, `frames` long. */
+  transitions?: { track: number; from?: number; to?: number; kind: string; frames: number }[];
 }
 const { fixtures, media: fixtureMedia } = JSON.parse(
   readFileSync(join(root, 'tests/fixtures/export.json'), 'utf8'),
@@ -228,12 +237,16 @@ async function importFiles(page: Page, paths: string[]) {
   return new Map(project.media.map((media) => [media.name, media.id]));
 }
 
-/** Replaces the project's clips with `layers`, one track each, at `size` and 30 fps. */
+/**
+ * Replaces the project's clips with `layers` (one track each unless they say),
+ * at `size` and 30 fps, with their effects, keyframes and `transitions`.
+ */
 async function build(
   page: Page,
   size: [number, number],
   layers: Layer[],
   ids: Map<string, string>,
+  transitions: Fixture['transitions'] = [],
 ) {
   const { project } = await snapshot(page);
   const clips = project.tracks.flatMap((track) => track.clips.map((clip) => clip.id));
@@ -249,16 +262,22 @@ async function build(
     },
   });
   let tracks = (await snapshot(page)).project.tracks;
-  while (tracks.length < layers.length) {
+  const needed = Math.max(...layers.map((layer, index) => (layer.track ?? index) + 1));
+  while (tracks.length < needed) {
     await execute(page, { type: 'addTrack', index: tracks.length });
     tracks = (await snapshot(page)).project.tracks;
   }
+  const placed: number[] = [];
   for (const [index, layer] of layers.entries()) {
     const [clip] = await execute(page, {
       type: 'append',
-      track: tracks[index].id,
-      clip: { media: ids.get(layer.media), duration: layer.length * FRAME },
+      track: tracks[layer.track ?? index].id,
+      clip:
+        layer.kind === 'adjustment'
+          ? { kind: 'adjustment', duration: layer.length * FRAME }
+          : { media: ids.get(layer.media!), duration: layer.length * FRAME },
     });
+    placed.push(clip);
     const properties: Record<string, unknown> = {};
     if (layer.transform)
       properties.transform = {
@@ -275,7 +294,30 @@ async function build(
     if (layer.opacity !== undefined) properties.opacity = layer.opacity;
     if (Object.keys(properties).length)
       await execute(page, { type: 'setClipProperties', clip, properties });
+    const effects: number[] = [];
+    for (const effect of layer.effects ?? [])
+      effects.push((await execute(page, { type: 'addEffect', clip, effect }))[0]);
+    for (const [name, keys] of Object.entries(layer.keyframes ?? {})) {
+      const property = name.replace(/\$(\d+)/, (_, n: string) => String(effects[Number(n)]));
+      for (const [frame, value, ease] of keys)
+        await execute(page, {
+          type: 'setKeyframe',
+          clip,
+          property,
+          time: frame * FRAME,
+          value,
+          interpolation: ease ? { kind: ease } : undefined,
+        });
+    }
   }
+  for (const transition of transitions)
+    await execute(page, {
+      type: 'addTransition',
+      track: tracks[transition.track].id,
+      from: transition.from !== undefined ? placed[transition.from] : null,
+      to: transition.to !== undefined ? placed[transition.to] : null,
+      transition: { kind: transition.kind, duration: transition.frames * FRAME },
+    });
 }
 
 /** Exports with `settings` to a download and saves it as `name`. */
@@ -342,7 +384,7 @@ for (const backend of ['WebGPU', 'WebGL2'] as const) {
       }
     > = {};
     for (const fixture of fixtures) {
-      await build(page, fixture.size, fixture.layers, ids);
+      await build(page, fixture.size, fixture.layers, ids, fixture.transitions);
       const file = testInfo.outputPath(`${fixture.name}.${fixture.export.format}`);
       const settings: Settings = {
         format: fixture.export.format,
@@ -361,8 +403,13 @@ for (const backend of ['WebGPU', 'WebGL2'] as const) {
         color_space: 'bt709',
         color_range: 'tv',
       });
-      const length = Math.max(...fixture.layers.map((layer) => layer.length));
-      expect(Number(video.nb_frames ?? result.frames)).toBe(length);
+      // Each track's clips run one after another.
+      const ends = new Map<number, number>();
+      fixture.layers.forEach((layer, index) => {
+        const track = layer.track ?? index;
+        ends.set(track, (ends.get(track) ?? 0) + layer.length);
+      });
+      expect(Number(video.nb_frames ?? result.frames)).toBe(Math.max(...ends.values()));
       const frames = [];
       for (const index of fixture.frames) {
         const reference = await preview(page, index);

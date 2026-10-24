@@ -58,6 +58,51 @@
       ]
     },
     {
+      "name": "effects-keyframes",
+      "about": "Phase 6: a keyframed transform, vignette and saturation on a clip that dissolves into a still, under an adjustment layer warming both.",
+      "size": [1280, 720],
+      "frames": [3, 14, 24, 30, 36, 50],
+      "export": { "format": "mp4", "video": "avc", "bitrate": 8000000, "audio": "aac" },
+      "layers": [
+        {
+          "media": "h264-1080p30-aac.mp4",
+          "length": 30,
+          "track": 0,
+          "effects": [
+            { "kind": "vignette", "params": { "amount": 0.6 } },
+            { "kind": "saturation", "params": { "saturation": 1.4 } }
+          ],
+          "keyframes": {
+            "transform.scaleX": [
+              [0, 1, "easeInOut"],
+              [30, 0.55]
+            ],
+            "transform.scaleY": [
+              [0, 1, "easeInOut"],
+              [30, 0.55]
+            ],
+            "transform.rotation": [
+              [0, 0, "linear"],
+              [30, 12]
+            ],
+            "effects.$0.amount": [
+              [0, 0, "linear"],
+              [20, 0.9]
+            ]
+          }
+        },
+        { "media": "still-1920x1080.png", "length": 30, "track": 0 },
+        {
+          "kind": "adjustment",
+          "length": 60,
+          "track": 1,
+          "opacity": 0.8,
+          "effects": [{ "kind": "temperature-tint", "params": { "temperature": 0.5 } }]
+        }
+      ],
+      "transitions": [{ "track": 0, "from": 0, "to": 1, "kind": "cross-dissolve", "frames": 12 }]
+    },
+    {
       "name": "webm-stills",
       "about": "Stills and sound in a 1:1 project, as VP9 and Opus in WebM.",
       "size": [1080, 1080],
