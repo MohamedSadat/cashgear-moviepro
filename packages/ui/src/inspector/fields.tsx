@@ -113,8 +113,10 @@ export function ScrubField(props: FieldProps) {
     setScrubbing(null);
   };
 
+  // A label passes clicks on it to its first button, the stopwatch.
+  const Field = props.keys ? 'div' : 'label';
   return (
-    <label className="cgv-field" data-testid={testId}>
+    <Field className="cgv-field" data-testid={testId}>
       {props.keys}
       <span
         className="cgv-field-label"
@@ -143,7 +145,7 @@ export function ScrubField(props: FieldProps) {
           void editor.project.execute(command(round(next)));
         }}
       />
-    </label>
+    </Field>
   );
 }
 
@@ -283,8 +285,10 @@ export function ColorField({
   disabled?: boolean;
   keys?: ReactNode;
 }) {
+  // A label passes clicks on it to its first button, the stopwatch.
+  const Field = keys ? 'div' : 'label';
   return (
-    <label className="cgv-field" data-testid={testId}>
+    <Field className="cgv-field" data-testid={testId}>
       {keys}
       <span className="cgv-field-label">{label}</span>
       <input
@@ -297,7 +301,7 @@ export function ColorField({
           void editor.project.execute(command(hexToColor(event.currentTarget.value, value.a)))
         }
       />
-    </label>
+    </Field>
   );
 }
 
