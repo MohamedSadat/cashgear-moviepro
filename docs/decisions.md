@@ -2,6 +2,49 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-24: Phase 3 answers
+
+- **WebGL2 fallback:** stays in the MVP.
+  - The same WGSL draws on both backends through wgpu, and golden tests run on both, as the exit criterion says.
+  - The real-time target is measured on WebGPU. WebGL2 may need a lower preview quality.
+- **Colour:** Rec.709 SDR only for now.
+  - BT.709 and BT.601 sources convert with their own matrix and range.
+  - HDR sources (PQ or HLG) get a simple tone map and a notice. A wide-gamut and HDR pipeline comes later.
+- **Preview quality:** Full, 1/2 and 1/4, plus Auto.
+  - Full is the project resolution.
+  - Auto is the default. It drops one step when frames run late and steps back up after a few seconds with headroom.
+  - When the GPU falls behind, frames are dropped, never delayed.
+- **Blending:** compositing happens in linear light, as PLAN says, with premultiplied alpha and sRGB output. A 50% opacity looks a little brighter than in Filmora.
+
+## 2026-10-24: Phase 3 defaults
+
+These were proposed alongside the questions, and the user raised no objection.
+
+- **Frames to the GPU:**
+  - Decoder outputs go to the GPU with `copyExternalImageToTexture`, where the browser converts them on the GPU. That is correct for hardware frames.
+  - Frames in CPU memory (software decodes and cached copies) upload their Y, U and V planes, and WGSL converts them with their own matrix. This avoids Chrome's BT.601 conversion.
+- **Scale 1 means fit:** a clip whose size differs from the project's fits inside the frame at scale 1, keeping its aspect ratio, as in Filmora. Rotated media is shown upright first.
+- **Audio:**
+  - WebCodecs decodes in the engine worker, in blocks around the playhead, within a memory budget.
+  - `cgv-audio` (WASM) mixes each clip's volume and track mute, with 5 ms anti-click fades at clip edges. Fade handles come in Phase 8.
+  - `rubato` resamples to the project rate. The AudioContext runs at the project rate.
+  - `engine-client` creates the AudioContext on the main thread, because workers cannot. UI components never touch it.
+  - When no audio device runs, the clock falls back to `performance.now()`.
+- **Shuttle:**
+  - L plays at 1×, 2×, 4× and 8×, J the same in reverse, and K pauses.
+  - Arrow keys step one frame, and Space plays or pauses.
+  - Sound plays only at forward 1× until Phase 9 adds time-stretch. Scrubbing plays 80 ms snippets.
+- **Monitor controls:** a simple scrub bar and timecode sit under the monitor until Phase 4 builds the timeline.
+- **Golden tests:**
+  - Small fixture projects render at 480×270.
+  - Reference PNGs are rendered on the reference machine's WebGPU and committed to `tests/golden`.
+  - Every backend must match them within a small per-channel tolerance: WebGPU, WebGL2 and CI's software GPUs.
+- **Measurements:**
+  - Real time means no dropped frames over 60 s of three stacked 1080p30 tracks, on the GTX 1650 in Chrome and Edge.
+  - A/V drift compares the audio worklet's output timestamps with the time each video frame is shown. It runs for 10 minutes on the reference machine and 60 s in CI.
+  - CI numbers are functional checks, never hardware performance.
+  - The seek criterion is reported for frame-cache hits and for uncached seeks on local media.
+
 ## 2026-10-23: Phase 2 findings and defaults
 
 Small choices made while building the model and the project UI.
