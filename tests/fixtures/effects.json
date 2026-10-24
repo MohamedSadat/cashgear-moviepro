@@ -21,7 +21,8 @@
     { "name": "noise", "params": { "amount": 0.3, "size": 2, "colored": true } },
     { "name": "glitch", "params": { "amount": 0.9 } },
     { "name": "old-film", "params": {} },
-    { "name": "chromatic-aberration", "params": { "amount": 0.015 } }
+    { "name": "chromatic-aberration", "params": { "amount": 0.015 } },
+    { "name": "duotone", "params": {} }
   ],
   "transitions": [
     { "name": "cross-dissolve", "kind": "cross-dissolve", "params": {} },
