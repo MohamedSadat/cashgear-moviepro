@@ -11,6 +11,8 @@ import {
 import { BlockedScreen, CapabilityNotice, CapabilityStrip } from './CapabilityReport';
 import { DevOverlay } from './DevOverlay';
 import { MediaLibraryPanel } from './media/MediaLibraryPanel';
+import { TransportBar } from './monitor/TransportBar';
+import { usePlayback, type PlaybackControls } from './monitor/usePlayback';
 import type { MediaLibraryState } from './media/useMediaLibrary';
 import type { MediaPlatform, NativeInfo } from './platform';
 import { ProgramMonitor, type MonitorState } from './ProgramMonitor';
@@ -34,6 +36,7 @@ export interface DiagnosticHooks {
   client: EngineClient | null;
   library: MediaLibraryState;
   project: ProjectState;
+  playback: PlaybackControls;
   platform: MediaPlatform;
 }
 
@@ -74,6 +77,7 @@ export function AppShell({ platform }: Props) {
   const onState = useCallback((state: MonitorState) => setEngine(state), []);
   const project = useProject(client, platform, { autosaveMs: options.autosaveMs });
   const library = project.library;
+  const playback = usePlayback(client, project);
   const [dialog, setDialog] = useState<'projects' | 'settings' | null>(null);
 
   useEffect(() => {
@@ -101,9 +105,9 @@ export function AppShell({ platform }: Props) {
 
   useEffect(() => {
     if (!options.diagnostic) return;
-    const hooks: DiagnosticHooks = { client, library, project, platform };
+    const hooks: DiagnosticHooks = { client, library, project, playback, platform };
     Reflect.set(window, '__cgv', hooks);
-  }, [options.diagnostic, client, library, project, platform]);
+  }, [options.diagnostic, client, library, project, playback, platform]);
 
   const gpu: EngineGpu =
     engine.status === 'ready'
@@ -178,6 +182,7 @@ export function AppShell({ platform }: Props) {
               onClient={setClient}
             />
           </div>
+          <TransportBar playback={playback} />
           <TimelineOutline project={project} />
         </main>
       </div>
