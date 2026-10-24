@@ -184,6 +184,7 @@ const api: EngineApi = {
   projectUndo: () => project.undo(),
   projectRedo: () => project.redo(),
   projectBeginGroup: (label) => project.beginGroup(label),
+  projectPreview: (command) => project.preview(command),
   projectEndGroup: () => project.endGroup(),
   projectCancelGroup: () => project.cancelGroup(),
   projectSave: () => project.save(),

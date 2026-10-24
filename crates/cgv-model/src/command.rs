@@ -14,7 +14,7 @@ pub enum Edge {
 }
 
 /// What to place for insert, overwrite and append.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipSpec {
     pub media: String,
@@ -29,6 +29,12 @@ pub struct ClipSpec {
     /// Play the sound. Defaults to whether the media has audio.
     #[serde(default)]
     pub audio: Option<bool>,
+    /// Speed of the new clip; `duration` is its length at that speed. Defaults to 1×.
+    #[serde(default)]
+    pub speed: Option<Speed>,
+    /// Picture and sound settings of the new clip, as when pasting a copy.
+    #[serde(default)]
+    pub properties: Option<ClipProperties>,
 }
 
 /// Clip properties to change; missing fields stay as they are.
@@ -65,6 +71,10 @@ pub enum Command {
     SetSettings {
         settings: ProjectSettings,
     },
+    /// Turns the main track's magnetism on (closing its gaps) or off.
+    SetMagnetic {
+        magnetic: bool,
+    },
     AddMedia {
         media: MediaRef,
     },
@@ -79,7 +89,7 @@ pub enum Command {
         #[serde(default)]
         name: Option<String>,
     },
-    /// Removes a track and its clips. A project keeps at least one track.
+    /// Removes a track and its clips. A project keeps at least one track, and its main track.
     RemoveTrack {
         track: TrackId,
     },
@@ -105,7 +115,8 @@ pub enum Command {
     },
 
     /// Places a clip at `at`, pushing later clips on the track to the right. A clip
-    /// under `at` is split first.
+    /// under `at` is split first. On the magnetic main track, insert, overwrite and
+    /// moves happen at the cut between clips nearest `at`.
     Insert {
         track: TrackId,
         at: Flicks,
@@ -151,8 +162,9 @@ pub enum Command {
         edge: Edge,
         delta: Flicks,
     },
-    /// Moves clips by `delta` in time and `tracks` up (positive) or down. Without
-    /// `overwrite`, landing on another clip fails.
+    /// Moves clips by `delta` in time and `tracks` up (positive) or down. Linked
+    /// partners move in time but keep their tracks. Without `overwrite`, landing on
+    /// another clip fails; on the magnetic main track, moved clips are inserted.
     Move {
         clips: Vec<ClipId>,
         delta: Flicks,
@@ -220,6 +232,8 @@ impl Command {
         match self {
             Command::Rename { .. } => "Rename project",
             Command::SetSettings { .. } => "Change project settings",
+            Command::SetMagnetic { magnetic: true, .. } => "Magnetic main track on",
+            Command::SetMagnetic { .. } => "Magnetic main track off",
             Command::AddMedia { .. } => "Import media",
             Command::RemoveMedia { .. } => "Remove media",
             Command::AddTrack { .. } => "Add track",
@@ -293,6 +307,7 @@ mod tests {
         };
         assert_eq!(clip.source_in, Flicks::ZERO);
         assert_eq!(clip.audio, None);
+        assert_eq!((clip.speed, clip.properties), (None, None));
         assert!(serde_json::from_str::<Command>(r#"{"type":"split","at":0,"bogus":1}"#).is_err());
     }
 }

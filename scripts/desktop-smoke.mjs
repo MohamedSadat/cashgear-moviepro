@@ -278,7 +278,7 @@ try {
     return (await hooks.client.api.projectSnapshot()).project;
   }, projectPath);
   const file = JSON.parse(await readFile(projectPath, 'utf8'));
-  if (file.format !== 'cashgear-video-project' || file.version !== 1)
+  if (file.format !== 'cashgear-video-project' || file.version !== 2)
     throw new Error('Unexpected project file: ' + JSON.stringify(file).slice(0, 200));
   expect(file.project).toEqual(saved);
   if (saved.media.length !== 2 || !saved.media.every((m) => m.location.kind === 'path'))

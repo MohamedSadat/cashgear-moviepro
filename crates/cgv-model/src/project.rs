@@ -45,6 +45,11 @@ pub struct Project {
     pub media: Vec<MediaRef>,
     /// Bottom track first: higher tracks draw on top.
     pub tracks: Vec<Arc<Track>>,
+    /// The main track. New projects start with it at the bottom; it cannot be removed.
+    pub main_track: TrackId,
+    /// When set, the main track has no gaps: its clips butt together from 0, and
+    /// clips linked to them follow wherever that moves them.
+    pub magnetic: bool,
     /// Timeline markers, by time.
     pub markers: Vec<Marker>,
     /// The next track, clip, marker or link id. Counting within the project keeps
@@ -53,7 +58,8 @@ pub struct Project {
 }
 
 impl Project {
-    /// An empty project with the default settings and two tracks.
+    /// An empty project with the default settings and two tracks; the bottom one
+    /// is the magnetic main track.
     pub fn new(id: impl Into<String>, name: impl Into<String>) -> Project {
         let mut project = Project {
             id: id.into(),
@@ -61,6 +67,8 @@ impl Project {
             settings: ProjectSettings::default(),
             media: Vec::new(),
             tracks: Vec::new(),
+            main_track: TrackId(0),
+            magnetic: true,
             markers: Vec::new(),
             next_id: 1,
         };
@@ -68,6 +76,7 @@ impl Project {
             let id = TrackId(project.alloc_id());
             project.tracks.push(Arc::new(Track::new(id)));
         }
+        project.main_track = project.tracks[0].id;
         project
     }
 
@@ -90,6 +99,13 @@ impl Project {
 
     pub fn track_index(&self, id: TrackId) -> Option<usize> {
         self.tracks.iter().position(|track| track.id == id)
+    }
+
+    /// The index of the main track when it is magnetic.
+    pub fn magnetic_index(&self) -> Option<usize> {
+        self.magnetic
+            .then(|| self.track_index(self.main_track))
+            .flatten()
     }
 
     /// The track index and clip of `id`.
@@ -563,6 +579,9 @@ mod tests {
         assert_eq!(project.settings.aspect_label(), "16:9");
         assert_eq!(project.settings.preset().map(|p| p.id), Some("landscape"));
         assert_eq!(project.tracks.len(), 2);
+        assert_eq!(project.main_track, project.tracks[0].id);
+        assert!(project.magnetic);
+        assert_eq!(project.magnetic_index(), Some(0));
         assert_eq!(project.next_id, 3);
         assert!(project.settings.validate().is_ok());
     }

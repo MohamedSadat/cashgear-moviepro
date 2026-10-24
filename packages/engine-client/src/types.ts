@@ -13,6 +13,7 @@ import type {
   MediaRef,
   Outcome,
   Preset,
+  Preview,
   ProjectSnapshot,
   SavedText,
 } from './project/types';
@@ -92,6 +93,8 @@ export interface EngineApi {
   projectRedo(): ProjectSnapshot;
   /** Commands until `projectEndGroup` undo as one step (a drag). */
   projectBeginGroup(label: string): void;
+  /** One step of a gesture: replaces what the open group has done with `command`. */
+  projectPreview(command: Command): Preview;
   projectEndGroup(): ProjectSnapshot;
   /** Reverts everything since `projectBeginGroup` (a cancelled drag). */
   projectCancelGroup(): ProjectSnapshot;

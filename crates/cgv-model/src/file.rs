@@ -7,14 +7,32 @@ use crate::validate::validate;
 
 pub const FORMAT: &str = "cashgear-video-project";
 /// The format version this build writes. Older files are migrated when opened.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 pub const EXTENSION: &str = "cgvproj";
 
 /// Upgrades the `project` object of a file from one version to the next.
 type Migration = fn(Value) -> Result<Value, String>;
 
 /// `MIGRATIONS[n - 1]` upgrades version `n` to `n + 1`. Version 1 is the first.
-const MIGRATIONS: &[Migration] = &[];
+const MIGRATIONS: &[Migration] = &[main_track];
+
+/// Format 2 adds the main track. A format 1 project's bottom track becomes its main
+/// track, with magnetism off, so the edit stays exactly as it was.
+fn main_track(mut project: Value) -> Result<Value, String> {
+    let bottom = project
+        .get("tracks")
+        .and_then(Value::as_array)
+        .and_then(|tracks| tracks.first())
+        .and_then(|track| track.get("id"))
+        .cloned()
+        .ok_or("it has no tracks")?;
+    let object = project
+        .as_object_mut()
+        .ok_or("the project is not an object")?;
+    object.insert("mainTrack".into(), bottom);
+    object.insert("magnetic".into(), Value::Bool(false));
+    Ok(project)
+}
 
 #[derive(Serialize)]
 struct Envelope<'a> {
@@ -85,10 +103,32 @@ mod tests {
     fn round_trips_a_new_project() {
         let project = Project::new("p-1", "Holiday");
         let text = to_json(&project);
-        assert!(text.starts_with("{\n  \"format\": \"cashgear-video-project\",\n  \"version\": 1,"));
+        assert!(text.starts_with("{\n  \"format\": \"cashgear-video-project\",\n  \"version\": 2,"));
         let loaded = from_json(&text).unwrap();
         assert_eq!(loaded, project);
         assert_eq!(to_json(&loaded), text);
+    }
+
+    #[test]
+    fn format_1_projects_open_with_their_bottom_track_as_a_main_track_that_is_not_magnetic() {
+        let mut project = Project::new("p-1", "Holiday");
+        project.tracks.swap(0, 1);
+        let mut old = serde_json::to_value(&project).unwrap();
+        let object = old.as_object_mut().unwrap();
+        object.remove("mainTrack");
+        object.remove("magnetic");
+        let file = json!({ "format": FORMAT, "version": 1, "project": old });
+        let opened = from_json(&file.to_string()).unwrap();
+        assert_eq!(opened.main_track, project.tracks[0].id);
+        assert!(!opened.magnetic);
+        assert_eq!(
+            Project {
+                main_track: project.main_track,
+                magnetic: true,
+                ..opened
+            },
+            project
+        );
     }
 
     #[test]

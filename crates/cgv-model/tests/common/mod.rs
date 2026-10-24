@@ -41,9 +41,19 @@ pub fn media(id: &str, kind: MediaKind, seconds: i64) -> MediaRef {
 }
 
 /// A project with a 20 s video with sound ("v"), a 30 s audio file ("a") and a
-/// still ("i"), its two tracks and an empty history.
+/// still ("i"), its two free tracks and an empty history.
 pub fn session() -> Session {
+    session_with(false)
+}
+
+/// [`session`] with the bottom track as the magnetic main track.
+pub fn magnetic_session() -> Session {
+    session_with(true)
+}
+
+pub fn session_with(magnetic: bool) -> Session {
     let mut session = Session::new(Project::new("test-project", "Test"));
+    session.execute(&Command::SetMagnetic { magnetic }).unwrap();
     for media in [
         media("v", MediaKind::Video, 20),
         media("a", MediaKind::Audio, 30),
@@ -65,6 +75,8 @@ pub fn spec(media: &str, source_in: i64, frames: i64) -> ClipSpec {
         duration: f(frames),
         video: None,
         audio: None,
+        speed: None,
+        properties: None,
     }
 }
 
@@ -216,12 +228,23 @@ fn random_spec(project: &Project, rng: &mut Rng) -> ClipSpec {
         1 => (Some(true), Some(false)),
         _ => (None, None),
     };
+    // Pasted copies bring their speed and properties along.
+    let speed = rng
+        .percent(5)
+        .then(|| [Speed { num: 2, den: 1 }, Speed { num: 1, den: 2 }][rng.below(2) as usize]);
+    let properties = rng.percent(5).then(|| ClipProperties {
+        opacity: Some(0.5),
+        volume_db: Some(-6.0),
+        ..ClipProperties::default()
+    });
     ClipSpec {
         media: id.to_string(),
         source_in,
         duration: Flicks(frames * frame),
         video,
         audio,
+        speed,
+        properties,
     }
 }
 
@@ -404,6 +427,9 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
             } else {
                 format!("Edit {}", rng.below(50))
             },
+        },
+        98 => Command::SetMagnetic {
+            magnetic: rng.percent(60),
         },
         _ => Command::Trim {
             clip: any_clip,

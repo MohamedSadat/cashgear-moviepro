@@ -102,16 +102,31 @@ export interface Project {
   media: MediaRef[];
   /** Bottom track first. */
   tracks: Track[];
+  /** The main track; it cannot be removed. */
+  mainTrack: number;
+  /** The main track has no gaps, and clips linked to its clips follow them. */
+  magnetic: boolean;
   markers: Marker[];
   nextId: number;
+}
+
+export interface ClipProperties {
+  transform?: Transform;
+  crop?: Crop;
+  opacity?: number;
+  volumeDb?: number;
 }
 
 export interface ClipSpec {
   media: string;
   sourceIn?: number;
+  /** Timeline length, at `speed`. */
   duration: number;
   video?: boolean;
   audio?: boolean;
+  speed?: Speed;
+  /** Picture and sound settings, as when pasting a copy. */
+  properties?: ClipProperties;
 }
 
 export type Edge = 'start' | 'end';
@@ -120,6 +135,7 @@ export type Edge = 'start' | 'end';
 export type Command =
   | { type: 'rename'; name: string }
   | { type: 'setSettings'; settings: ProjectSettings }
+  | { type: 'setMagnetic'; magnetic: boolean }
   | { type: 'addMedia'; media: MediaRef }
   | { type: 'removeMedia'; media: string }
   | { type: 'addTrack'; index: number; name?: string }
@@ -144,11 +160,7 @@ export type Command =
   | { type: 'unlink'; clips: number[] }
   | { type: 'detachAudio'; clip: number; track?: number | null }
   | { type: 'setSpeed'; clip: number; speed: Speed }
-  | {
-      type: 'setClipProperties';
-      clip: number;
-      properties: { transform?: Transform; crop?: Crop; opacity?: number; volumeDb?: number };
-    }
+  | { type: 'setClipProperties'; clip: number; properties: ClipProperties }
   | { type: 'addMarker'; at: number; name?: string; color: MarkerColor }
   | { type: 'updateMarker'; marker: number; at?: number; name?: string; color?: MarkerColor }
   | { type: 'removeMarker'; marker: number };
@@ -156,6 +168,13 @@ export type Command =
 /** Ids a command created: the new clip, track or marker first. */
 export interface Outcome {
   created: number[];
+}
+
+/** One step of a gesture: the snapshot to draw, and why the step failed, if it did. */
+export interface Preview {
+  outcome: Outcome | null;
+  error: string | null;
+  snapshot: ProjectSnapshot;
 }
 
 /** The open project with its history and save state. */

@@ -29,7 +29,8 @@ pub fn valid_project_id(id: &str) -> bool {
 
 /// Checks the structural rules: unique ids below `next_id`, clips sorted and not
 /// overlapping on each track, every clip's media in the bin, links with at least
-/// two clips, markers in time order and values in range.
+/// two clips, a main track (without gaps when magnetic), markers in time order and
+/// values in range.
 ///
 /// Edit-only rules (whole frames, source within the media) are not checked here:
 /// a changed frame rate or a relinked file can break them without corrupting anything.
@@ -97,6 +98,18 @@ pub fn validate(project: &Project) -> Result<(), String> {
             if let Some(link) = clip.link {
                 *links.entry(link.0).or_default() += 1;
             }
+        }
+    }
+    let main = project
+        .track(project.main_track)
+        .ok_or("The main track is missing")?;
+    if project.magnetic {
+        let mut end = Flicks::ZERO;
+        for clip in &main.clips {
+            if clip.start != end {
+                return Err("The magnetic main track has a gap".into());
+            }
+            end = clip.end();
         }
     }
     for (&link, &count) in &links {

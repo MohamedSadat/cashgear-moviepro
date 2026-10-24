@@ -354,6 +354,13 @@ mod bridge {
         pub fn cancel_group(&mut self) {
             self.inner.cancel_group();
         }
+        /// Inside a group, replaces what it has done with `command` (one drag step)
+        /// and returns the outcome. A failure keeps the previous step.
+        pub fn preview(&mut self, command: &str) -> Result<String, JsValue> {
+            let command: cgv_model::Command = parse(command)?;
+            let outcome = self.inner.preview(&command).map_err(js_error)?;
+            serde_json::to_string(&outcome).map_err(js_error)
+        }
         /// Records a relinked or changed media file. Not an undo step.
         pub fn update_media(&mut self, media: &str) -> Result<(), JsValue> {
             self.inner.update_media(parse(media)?).map_err(js_error)

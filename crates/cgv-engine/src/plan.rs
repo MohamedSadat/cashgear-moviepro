@@ -187,8 +187,12 @@ mod tests {
         }
     }
 
+    /// A project with free tracks, so clips sit where each test puts them.
     fn session() -> Session {
         let mut session = Session::new(Project::new("p", "Plan"));
+        session
+            .execute(&Command::SetMagnetic { magnetic: false })
+            .unwrap();
         for item in [
             media("video", MediaKind::Video),
             media("still", MediaKind::Image),
@@ -213,6 +217,8 @@ mod tests {
                     duration: Flicks(FRAME * frames),
                     video: None,
                     audio: None,
+                    speed: None,
+                    properties: None,
                 },
             })
             .unwrap();

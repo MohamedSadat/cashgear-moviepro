@@ -24,8 +24,10 @@ impl Project {
             frame: self.settings.frame_duration(),
             project: self.clone(),
             created: Vec::new(),
+            deferred: BTreeSet::new(),
         };
         edit.run(command)?;
+        edit.settle()?;
         edit.normalize_links();
         validate(&edit.project).map_err(|error| format!("Internal edit error: {error}"))?;
         Ok((
@@ -41,6 +43,9 @@ struct Edit {
     project: Project,
     frame: Flicks,
     created: Vec<u64>,
+    /// Tracks to check for overlaps once the magnetic main track has settled: until
+    /// then, a clip may overlap one that settling moves out of its way.
+    deferred: BTreeSet<TrackId>,
 }
 
 fn div_round(numerator: i128, denominator: i128) -> i128 {
@@ -62,6 +67,8 @@ impl Edit {
                 settings.validate()?;
                 self.project.settings = *settings;
             }
+            // Turning magnetism on closes the main track's gaps as the edit settles.
+            Command::SetMagnetic { magnetic } => self.project.magnetic = *magnetic,
             Command::AddMedia { media } => {
                 media.validate()?;
                 if self.project.media(&media.id).is_some() {
@@ -87,6 +94,9 @@ impl Edit {
                     return Err("A project keeps at least one track".into());
                 }
                 self.unlocked(index)?;
+                if *track == self.project.main_track {
+                    return Err("The main track can't be deleted".into());
+                }
                 self.project.tracks.remove(index);
             }
             Command::MoveTrack { track, index } => {
@@ -262,6 +272,40 @@ impl Edit {
         Ok(clips.into_iter().collect())
     }
 
+    /// The magnetic main track's index, when magnetism is on.
+    fn main_index(&self) -> Option<usize> {
+        self.project.magnetic_index()
+    }
+
+    /// True when clip `id` is on the magnetic main track or linked to a clip there:
+    /// the main track's rules then decide where it ends up.
+    fn main_driven(&self, id: ClipId) -> bool {
+        let (Some(main), Ok((index, clip))) = (self.main_index(), self.find(id)) else {
+            return false;
+        };
+        index == main
+            || clip.link.is_some_and(|link| {
+                self.project.tracks[main]
+                    .clips
+                    .iter()
+                    .any(|c| c.link == Some(link))
+            })
+    }
+
+    /// The cut on track `index` nearest `time`: the timeline start or a clip's
+    /// start or end. Ties go to the earlier cut.
+    fn nearest_cut(&self, index: usize, time: Flicks) -> Flicks {
+        let mut best = Flicks::ZERO;
+        for clip in &self.project.tracks[index].clips {
+            for cut in [clip.start, clip.end()] {
+                if (cut.0 - time.0).abs() < (best.0 - time.0).abs() {
+                    best = cut;
+                }
+            }
+        }
+        best
+    }
+
     /// The nearest frame boundary to `time`.
     fn snap(&self, time: Flicks) -> Result<Flicks, String> {
         if time.0.abs() > MAX_TIME.0 {
@@ -313,8 +357,17 @@ impl Edit {
         self.check_clip(&clip)
     }
 
-    /// Fails when clips on track `index` overlap.
-    fn check_track(&self, index: usize) -> Result<(), String> {
+    /// Fails when clips on track `index` overlap. With a magnetic main track the
+    /// check waits until the edit has settled.
+    fn check_track(&mut self, index: usize) -> Result<(), String> {
+        if self.project.magnetic {
+            self.deferred.insert(self.project.tracks[index].id);
+            return Ok(());
+        }
+        self.check_overlaps(index)
+    }
+
+    fn check_overlaps(&self, index: usize) -> Result<(), String> {
         let clips = &self.project.tracks[index].clips;
         for pair in clips.windows(2) {
             if pair[0].end() > pair[1].start {
@@ -451,13 +504,20 @@ impl Edit {
         if !video && !audio {
             return Err("A clip needs its picture, its sound or both".into());
         }
-        let clip = Clip {
+        let speed = spec.speed.unwrap_or(Speed::NORMAL);
+        if Speed::new(speed.num, speed.den) != Some(speed) {
+            return Err("Speed must be a reduced fraction from 0.1× to 100×".into());
+        }
+        if media.is_still() && speed != Speed::NORMAL {
+            return Err("Stills have no speed".into());
+        }
+        let mut clip = Clip {
             id: ClipId(self.alloc()),
             media: media.id,
             start,
             duration: self.snap(spec.duration)?,
             source_in: spec.source_in,
-            speed: Speed::NORMAL,
+            speed,
             video,
             audio,
             link: None,
@@ -468,6 +528,9 @@ impl Edit {
             effects: Vec::new(),
             keyframes: BTreeMap::new(),
         };
+        if let Some(properties) = &spec.properties {
+            apply_properties(&mut clip, properties)?;
+        }
         self.check_clip(&clip)?;
         Ok(clip)
     }
@@ -505,13 +568,17 @@ impl Edit {
     ) -> Result<(), String> {
         let index = self.track_index(track)?;
         self.unlocked(index)?;
+        let main = self.main_index() == Some(index);
         let at = match at {
+            Some(at) if main => self.nearest_cut(index, self.position(at)?),
             Some(at) => self.position(at)?,
             None => self.project.tracks[index].end().unwrap_or(Flicks::ZERO),
         };
         let clip = self.new_clip(spec, at)?;
         self.created.push(clip.id.0);
-        if push {
+        if push && main {
+            // Settling pushes the later clips, and the clips linked to them, aside.
+        } else if push {
             let under = self.project.tracks[index]
                 .clips
                 .iter()
@@ -534,9 +601,13 @@ impl Edit {
             return Err("Nothing to delete".into());
         }
         let mut by_track: BTreeMap<usize, Vec<Clip>> = BTreeMap::new();
+        let mut driven = BTreeSet::new();
         for id in self.with_partners(ids)? {
             let (index, clip) = self.find(id)?;
             self.unlocked(index)?;
+            if self.main_driven(id) {
+                driven.insert(id);
+            }
             by_track.entry(index).or_default().push(clip);
         }
         for (index, mut clips) in by_track {
@@ -544,7 +615,8 @@ impl Edit {
             clips.sort_by_key(|clip| std::cmp::Reverse(clip.start));
             for clip in clips {
                 self.track_mut(index).clips.retain(|c| c.id != clip.id);
-                if ripple {
+                // The magnetic main track closes its own gaps; other tracks keep theirs.
+                if ripple && !driven.contains(&clip.id) {
                     self.shift(index, clip.end(), -clip.duration)?;
                 }
             }
@@ -595,10 +667,25 @@ impl Edit {
 
     fn trim(&mut self, id: ClipId, edge: Edge, delta: Flicks, ripple: bool) -> Result<(), String> {
         let delta = self.snap(delta)?;
-        for target in self.with_partners(&[id])? {
+        let targets = self.with_partners(&[id])?;
+        // On the magnetic main track every trim ripples: settling closes or opens
+        // the room, for the clips linked to it too.
+        let driven = targets.iter().any(|&target| self.main_driven(target));
+        let ripple = ripple && !driven;
+        for target in targets {
             let (index, clip) = self.find(target)?;
             self.unlocked(index)?;
             match (edge, ripple) {
+                (Edge::Start, false) if driven => {
+                    // The clip keeps its place and settling moves the later ones, so a
+                    // longer first clip never starts before 0.
+                    let still = self.is_still(&clip.media);
+                    let changed = self.clip_mut(index, target);
+                    changed.duration -= delta;
+                    if !still {
+                        changed.source_in += changed.speed.source_span(delta);
+                    }
+                }
                 (Edge::Start, false) => {
                     let start = clip.start + delta;
                     if start >= clip.end() {
@@ -706,25 +793,61 @@ impl Edit {
         }
         let delta = self.snap(delta)?;
         let count = self.project.tracks.len() as i64;
+        let main = self.main_index();
+        let named: BTreeSet<ClipId> = ids.iter().copied().collect();
         let mut moving = Vec::new();
         for id in self.with_partners(ids)? {
-            let (from, mut clip) = self.find(id)?;
+            let (from, clip) = self.find(id)?;
             self.unlocked(from)?;
-            let to = from as i64 + tracks as i64;
+            // The named clips change tracks; their partners only move in time.
+            let to = if named.contains(&id) {
+                from as i64 + tracks as i64
+            } else {
+                from as i64
+            };
             if !(0..count).contains(&to) {
                 return Err("There is no track there".into());
             }
             let to = to as usize;
             self.unlocked(to)?;
-            clip.start += delta;
-            self.check_clip(&clip)?;
             moving.push((from, to, clip));
         }
-        for (from, _, clip) in &moving {
+        // Clips linked to ones going onto the magnetic main track follow them there.
+        let main_links: BTreeSet<LinkId> = moving
+            .iter()
+            .filter(|(_, to, _)| Some(*to) == main)
+            .filter_map(|(_, _, clip)| clip.link)
+            .collect();
+        let (onto_main, rest): (Vec<_>, Vec<_>) =
+            moving.into_iter().partition(|(_, to, _)| Some(*to) == main);
+        let (followers, mut moving): (Vec<_>, Vec<_>) = rest
+            .into_iter()
+            .partition(|(_, _, clip)| clip.link.is_some_and(|l| main_links.contains(&l)));
+        for (from, _, clip) in onto_main.iter().chain(&moving) {
             self.track_mut(*from).clips.retain(|c| c.id != clip.id);
         }
+        for (_, _, clip) in moving.iter_mut() {
+            clip.start += delta;
+            self.check_clip(clip)?;
+        }
         moving.sort_by_key(|(_, to, clip)| (*to, clip.start));
+        // Followers move too, so nothing may be overwritten onto them either.
+        let mut placed: Vec<(usize, Flicks, Flicks)> = followers
+            .iter()
+            .map(|(index, _, clip)| (*index, clip.start, clip.end()))
+            .collect();
         for (_, to, clip) in moving {
+            // A clip moved onto its partner's track must not land on it.
+            if placed
+                .iter()
+                .any(|&(track, start, end)| track == to && start < clip.end() && clip.start < end)
+            {
+                return Err(format!(
+                    "Clip {} would land on a clip that moves with it",
+                    clip.id
+                ));
+            }
+            placed.push((to, clip.start, clip.end()));
             if overwrite {
                 self.clear_range(to, clip.start, clip.end())?;
             } else if !self.project.tracks[to].is_free(clip.start, clip.end(), &[]) {
@@ -736,6 +859,53 @@ impl Edit {
             }
             self.track_mut(to).insert_sorted(clip);
             self.check_track(to)?;
+        }
+        if let (Some(main), false) = (main, onto_main.is_empty()) {
+            self.insert_on_main(main, onto_main, delta, &followers)?;
+        }
+        Ok(())
+    }
+
+    /// Inserts `clips`, moved onto the magnetic main track at `main`, as one block
+    /// at the cut nearest where `delta` takes the first of them. Their `followers`
+    /// (linked clips on other tracks) move as far as they did.
+    fn insert_on_main(
+        &mut self,
+        main: usize,
+        mut clips: Vec<(usize, usize, Clip)>,
+        delta: Flicks,
+        followers: &[(usize, usize, Clip)],
+    ) -> Result<(), String> {
+        clips.sort_by_key(|(from, _, clip)| (clip.start, *from));
+        let cut = self.nearest_cut(main, clips[0].2.start + delta);
+        let position = self.project.tracks[main]
+            .clips
+            .partition_point(|c| c.start < cut);
+        let mut at = cut;
+        let mut shifts: BTreeMap<LinkId, Flicks> = BTreeMap::new();
+        let mut block = Vec::new();
+        for (_, _, mut clip) in clips {
+            if let Some(link) = clip.link {
+                shifts.entry(link).or_insert(at - clip.start);
+            }
+            clip.start = at;
+            at += clip.duration;
+            self.check_clip(&clip)?;
+            block.push(clip);
+        }
+        let track = self.track_mut(main);
+        for (offset, clip) in block.into_iter().enumerate() {
+            track.clips.insert(position + offset, clip);
+        }
+        for (index, _, follower) in followers {
+            let shift = follower.link.and_then(|link| shifts.get(&link)).copied();
+            let position = self.project.tracks[*index].position(follower.id);
+            if let (Some(shift), Some(position)) = (shift, position) {
+                self.track_mut(*index).clips[position].start += shift;
+                self.track_mut(*index).clips.sort_by_key(|c| c.start);
+                self.check_clip_id(follower.id)?;
+                self.check_track(*index)?;
+            }
         }
         Ok(())
     }
@@ -854,6 +1024,9 @@ impl Edit {
                 if to == index {
                     return Err("The sound needs a different track".into());
                 }
+                if self.main_index() == Some(to) {
+                    return Err("Sound can't be detached onto the magnetic main track".into());
+                }
                 self.unlocked(to)?;
                 if !self.project.tracks[to].is_free(clip.start, clip.end(), &[]) {
                     return Err(format!(
@@ -922,32 +1095,75 @@ impl Edit {
     }
 
     fn set_properties(&mut self, id: ClipId, properties: &ClipProperties) -> Result<(), String> {
-        let (index, _) = self.find(id)?;
+        let (index, mut clip) = self.find(id)?;
         self.unlocked(index)?;
-        if let Some(transform) = &properties.transform {
-            check_transform(transform)?;
+        apply_properties(&mut clip, properties)?;
+        *self.clip_mut(index, id) = clip;
+        Ok(())
+    }
+
+    /// Closes the gaps on the magnetic main track, keeping its clips in the order
+    /// the edit left them, and moves the clips linked to them by as much. Then runs
+    /// the overlap checks that waited for it.
+    fn settle(&mut self) -> Result<(), String> {
+        if let Some(main) = self.main_index() {
+            let mut end = Flicks::ZERO;
+            let shifts: Vec<(Option<LinkId>, Flicks)> = self.project.tracks[main]
+                .clips
+                .iter()
+                .map(|clip| {
+                    let shift = end - clip.start;
+                    end += clip.duration;
+                    (clip.link, shift)
+                })
+                .collect();
+            if shifts.iter().any(|(_, shift)| *shift != Flicks::ZERO) {
+                self.unlocked(main)?;
+                for (clip, (_, shift)) in self.track_mut(main).clips.iter_mut().zip(&shifts) {
+                    clip.start += *shift;
+                }
+                self.deferred.insert(self.project.main_track);
+                // A link follows the first main-track clip it holds.
+                let mut by_link: BTreeMap<LinkId, Flicks> = BTreeMap::new();
+                for (link, shift) in &shifts {
+                    if let Some(link) = link {
+                        by_link.entry(*link).or_insert(*shift);
+                    }
+                }
+                by_link.retain(|_, shift| *shift != Flicks::ZERO);
+                let follows = |clip: &Clip| clip.link.and_then(|link| by_link.get(&link)).copied();
+                for index in (0..self.project.tracks.len()).filter(|&i| i != main) {
+                    let moved: Vec<ClipId> = self.project.tracks[index]
+                        .clips
+                        .iter()
+                        .filter(|clip| follows(clip).is_some())
+                        .map(|clip| clip.id)
+                        .collect();
+                    if moved.is_empty() {
+                        continue;
+                    }
+                    self.unlocked(index)?;
+                    let track = self.track_mut(index);
+                    for clip in track.clips.iter_mut() {
+                        if let Some(shift) = follows(clip) {
+                            clip.start += shift;
+                        }
+                    }
+                    track.clips.sort_by_key(|c| c.start);
+                    let id = track.id;
+                    self.deferred.insert(id);
+                    for clip in moved {
+                        self.check_clip_id(clip)?;
+                    }
+                }
+            }
         }
-        if let Some(crop) = &properties.crop {
-            check_crop(crop)?;
-        }
-        if let Some(opacity) = properties.opacity {
-            check_opacity(opacity)?;
-        }
-        if let Some(volume) = properties.volume_db {
-            check_volume(volume)?;
-        }
-        let clip = self.clip_mut(index, id);
-        if let Some(transform) = properties.transform {
-            clip.transform = transform;
-        }
-        if let Some(crop) = properties.crop {
-            clip.crop = crop;
-        }
-        if let Some(opacity) = properties.opacity {
-            clip.opacity = opacity;
-        }
-        if let Some(volume) = properties.volume_db {
-            clip.volume_db = volume;
+        for id in std::mem::take(&mut self.deferred) {
+            // A track the edit removed has nothing left to check.
+            if let Some(index) = self.project.track_index(id) {
+                self.track_mut(index).clips.sort_by_key(|c| c.start);
+                self.check_overlaps(index)?;
+            }
         }
         Ok(())
     }
@@ -1002,6 +1218,35 @@ fn check_marker_name(name: &str) -> Result<String, String> {
         return Err(format!("Marker names are at most {MAX_NAME} characters"));
     }
     Ok(name.to_string())
+}
+
+/// Checks and applies clip property changes.
+fn apply_properties(clip: &mut Clip, properties: &ClipProperties) -> Result<(), String> {
+    if let Some(transform) = &properties.transform {
+        check_transform(transform)?;
+    }
+    if let Some(crop) = &properties.crop {
+        check_crop(crop)?;
+    }
+    if let Some(opacity) = properties.opacity {
+        check_opacity(opacity)?;
+    }
+    if let Some(volume) = properties.volume_db {
+        check_volume(volume)?;
+    }
+    if let Some(transform) = properties.transform {
+        clip.transform = transform;
+    }
+    if let Some(crop) = properties.crop {
+        clip.crop = crop;
+    }
+    if let Some(opacity) = properties.opacity {
+        clip.opacity = opacity;
+    }
+    if let Some(volume) = properties.volume_db {
+        clip.volume_db = volume;
+    }
+    Ok(())
 }
 
 pub(crate) fn check_transform(t: &Transform) -> Result<(), String> {

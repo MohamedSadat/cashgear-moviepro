@@ -150,12 +150,18 @@ fn tracks_are_added_moved_renamed_and_removed() {
     );
     run(&mut s, Command::RemoveTrack { track: added });
     assert_eq!(s.project().tracks.len(), 2);
-    let first = track_id(&s, 0);
-    run(&mut s, Command::RemoveTrack { track: first });
-    let last = track_id(&s, 0);
+    let main = track_id(&s, 0);
+    assert_eq!(main, s.project().main_track);
     fails(
         &mut s,
-        Command::RemoveTrack { track: last },
+        Command::RemoveTrack { track: main },
+        "main track can't be deleted",
+    );
+    let other = track_id(&s, 1);
+    run(&mut s, Command::RemoveTrack { track: other });
+    fails(
+        &mut s,
+        Command::RemoveTrack { track: main },
         "at least one track",
     );
 }
@@ -1294,6 +1300,370 @@ fn clip_properties_are_checked_and_set() {
     }
 }
 
+// ---- Magnetic main track --------------------------------------------------------------------
+
+/// Detaches `clip`'s sound onto a new track below it and returns the sound clip.
+fn detach(session: &mut Session, clip: ClipId) -> ClipId {
+    let outcome = run(session, Command::DetachAudio { clip, track: None });
+    ClipId(outcome.created[0])
+}
+
+#[test]
+fn new_projects_have_a_magnetic_main_track_that_stays() {
+    let mut s = magnetic_session();
+    let main = track_id(&s, 0);
+    assert_eq!(s.project().main_track, main);
+    assert!(s.project().magnetic);
+    let v = append(&mut s, 0, "v", 0, 30);
+    detach(&mut s, v);
+    assert_eq!(
+        s.project().magnetic_index(),
+        Some(1),
+        "the sound's track went below the main track"
+    );
+    fails(
+        &mut s,
+        Command::RemoveTrack { track: main },
+        "main track can't be deleted",
+    );
+    let top = track_id(&s, 2);
+    let still = append(&mut s, 2, "i", 0, 30);
+    let _ = top;
+    fails(
+        &mut s,
+        Command::DetachAudio {
+            clip: still,
+            track: Some(main),
+        },
+        "own sound",
+    );
+    let other = append(&mut s, 2, "v", 0, 30);
+    fails(
+        &mut s,
+        Command::DetachAudio {
+            clip: other,
+            track: Some(main),
+        },
+        "magnetic main track",
+    );
+}
+
+#[test]
+fn deleting_on_the_main_track_closes_the_gap_and_linked_clips_follow() {
+    let mut s = magnetic_session();
+    let a = append(&mut s, 0, "v", 0, 30);
+    append(&mut s, 0, "v", 100, 30);
+    let c = append(&mut s, 0, "v", 200, 30);
+    detach(&mut s, c);
+    // Unlinked music on the sound track stays where it is.
+    let sounds = track_id(&s, 0);
+    run(
+        &mut s,
+        Command::Overwrite {
+            track: sounds,
+            at: f(0),
+            clip: spec("a", 0, 20),
+        },
+    );
+    assert_eq!(layout(&s, 0), [(0, 20, 0), (60, 30, 200)]);
+    run(&mut s, Command::Delete { clips: vec![a] });
+    assert_eq!(layout(&s, 1), [(0, 30, 100), (30, 30, 200)]);
+    assert_eq!(layout(&s, 0), [(0, 20, 0), (30, 30, 200)]);
+    assert!(s.undo());
+    assert_eq!(layout(&s, 1), [(0, 30, 0), (30, 30, 100), (60, 30, 200)]);
+    // Ripple delete on the main track does the same: other tracks keep their gaps.
+    run(&mut s, Command::RippleDelete { clips: vec![a] });
+    assert_eq!(layout(&s, 0), [(0, 20, 0), (30, 30, 200)]);
+}
+
+#[test]
+fn inserts_and_overwrites_on_the_main_track_land_on_the_nearest_cut() {
+    let mut s = magnetic_session();
+    append(&mut s, 0, "v", 0, 30);
+    let b = append(&mut s, 0, "v", 100, 30);
+    detach(&mut s, b);
+    let main = track_id(&s, 1);
+    // Frame 40 is nearer the cut at 30 than the one at 60: the sound of b moves on too.
+    run(
+        &mut s,
+        Command::Insert {
+            track: main,
+            at: f(40),
+            clip: spec("a", 0, 10),
+        },
+    );
+    assert_eq!(layout(&s, 1), [(0, 30, 0), (30, 10, 0), (40, 30, 100)]);
+    assert_eq!(layout(&s, 0), [(40, 30, 100)]);
+    // Past the end, a clip goes at the end.
+    run(
+        &mut s,
+        Command::Overwrite {
+            track: main,
+            at: f(500),
+            clip: spec("v", 0, 5),
+        },
+    );
+    assert_eq!(layout(&s, 1)[3], (70, 5, 0));
+    // An overwrite at a cut replaces what follows it.
+    run(
+        &mut s,
+        Command::Overwrite {
+            track: main,
+            at: f(29),
+            clip: spec("i", 0, 15),
+        },
+    );
+    assert_eq!(
+        layout(&s, 1),
+        [(0, 30, 0), (30, 15, 0), (45, 25, 105), (70, 5, 0)]
+    );
+}
+
+#[test]
+fn trims_on_the_main_track_ripple_and_linked_clips_keep_in_step() {
+    let mut s = magnetic_session();
+    let a = append(&mut s, 0, "v", 10, 30);
+    let b = append(&mut s, 0, "v", 100, 30);
+    detach(&mut s, a);
+    let sounds = track_id(&s, 0);
+    let b_sound = detach_onto(&mut s, b, 0);
+    run(
+        &mut s,
+        Command::Overwrite {
+            track: sounds,
+            at: f(200),
+            clip: spec("a", 0, 10),
+        },
+    );
+    let trim = |s: &mut Session, clip: ClipId, edge: Edge, frames: i64| {
+        run(
+            s,
+            Command::Trim {
+                clip,
+                edge,
+                delta: f(frames),
+                ripple: false,
+            },
+        );
+    };
+    trim(&mut s, a, Edge::End, -10);
+    assert_eq!(layout(&s, 1), [(0, 20, 10), (20, 30, 100)]);
+    assert_eq!(layout(&s, 0), [(0, 20, 10), (20, 30, 100), (200, 10, 0)]);
+    trim(&mut s, a, Edge::Start, 5);
+    assert_eq!(layout(&s, 1), [(0, 15, 15), (15, 30, 100)]);
+    assert_eq!(layout(&s, 0), [(0, 15, 15), (15, 30, 100), (200, 10, 0)]);
+    // Longer clips push the later ones (and their sound) along.
+    trim(&mut s, a, Edge::Start, -10);
+    assert_eq!(layout(&s, 1), [(0, 25, 5), (25, 30, 100)]);
+    trim(&mut s, b_sound, Edge::End, 10);
+    assert_eq!(layout(&s, 1), [(0, 25, 5), (25, 40, 100)]);
+    assert_eq!(layout(&s, 0), [(0, 25, 5), (25, 40, 100), (200, 10, 0)]);
+    // A ripple trim on the main track leaves other tracks alone as well.
+    run(
+        &mut s,
+        Command::Trim {
+            clip: a,
+            edge: Edge::End,
+            delta: f(-5),
+            ripple: true,
+        },
+    );
+    assert_eq!(layout(&s, 0), [(0, 20, 5), (20, 40, 100), (200, 10, 0)]);
+}
+
+#[test]
+fn moving_on_the_main_track_reorders_and_linked_clips_follow() {
+    let mut s = magnetic_session();
+    let a = append(&mut s, 0, "v", 0, 30);
+    append(&mut s, 0, "v", 100, 30);
+    append(&mut s, 0, "v", 200, 30);
+    let sound = detach(&mut s, a);
+    let move_by = |s: &mut Session, clip: ClipId, frames: i64| {
+        run(
+            s,
+            Command::Move {
+                clips: vec![clip],
+                delta: f(frames),
+                tracks: 0,
+                overwrite: false,
+            },
+        );
+    };
+    // With a lifted out, frame 50 is nearer the cut at 60 (c's start) than b's at 30.
+    move_by(&mut s, a, 50);
+    assert_eq!(layout(&s, 1), [(0, 30, 100), (30, 30, 0), (60, 30, 200)]);
+    assert_eq!(layout(&s, 0), [(30, 30, 0)]);
+    // A short drag lands back on the cut it came from.
+    move_by(&mut s, a, 10);
+    assert_eq!(layout(&s, 1), [(0, 30, 100), (30, 30, 0), (60, 30, 200)]);
+    move_by(&mut s, a, -25);
+    assert_eq!(layout(&s, 1), [(0, 30, 0), (30, 30, 100), (60, 30, 200)]);
+    // Moving the linked sound moves its main-track clip, so the two stay together.
+    move_by(&mut s, sound, 1000);
+    assert_eq!(layout(&s, 1), [(0, 30, 100), (30, 30, 200), (60, 30, 0)]);
+    assert_eq!(layout(&s, 0), [(60, 30, 0)]);
+}
+
+#[test]
+fn clips_moved_onto_the_main_track_are_inserted_and_moved_off_close_the_gap() {
+    let mut s = magnetic_session();
+    append(&mut s, 0, "v", 0, 30);
+    append(&mut s, 0, "v", 100, 30);
+    let title = append(&mut s, 1, "i", 0, 20);
+    run(
+        &mut s,
+        Command::Move {
+            clips: vec![title],
+            delta: f(28),
+            tracks: -1,
+            overwrite: true,
+        },
+    );
+    assert_eq!(layout(&s, 0), [(0, 30, 0), (30, 20, 0), (50, 30, 100)]);
+    assert!(layout(&s, 1).is_empty());
+    run(
+        &mut s,
+        Command::Move {
+            clips: vec![title],
+            delta: f(0),
+            tracks: 1,
+            overwrite: false,
+        },
+    );
+    assert_eq!(layout(&s, 0), [(0, 30, 0), (30, 30, 100)]);
+    assert_eq!(layout(&s, 1), [(30, 20, 0)]);
+}
+
+#[test]
+fn turning_magnetism_on_closes_the_main_track_gaps() {
+    let mut s = session();
+    assert!(!s.project().magnetic);
+    let main = track_id(&s, 0);
+    append(&mut s, 0, "v", 0, 30);
+    let b = append(&mut s, 0, "v", 100, 30);
+    run(
+        &mut s,
+        Command::Move {
+            clips: vec![b],
+            delta: f(20),
+            tracks: 0,
+            overwrite: false,
+        },
+    );
+    assert_eq!(layout(&s, 0), [(0, 30, 0), (50, 30, 100)]);
+    run(&mut s, Command::SetMagnetic { magnetic: true });
+    assert_eq!(layout(&s, 0), [(0, 30, 0), (30, 30, 100)]);
+    assert!(s.undo());
+    assert_eq!(layout(&s, 0), [(0, 30, 0), (50, 30, 100)]);
+    run(
+        &mut s,
+        Command::SetTrackLocked {
+            track: main,
+            locked: true,
+        },
+    );
+    fails(&mut s, Command::SetMagnetic { magnetic: true }, "locked");
+}
+
+#[test]
+fn a_main_track_edit_that_would_move_a_locked_partner_fails() {
+    let mut s = magnetic_session();
+    let a = append(&mut s, 0, "v", 0, 30);
+    let b = append(&mut s, 0, "v", 100, 30);
+    let sound = detach(&mut s, b);
+    let sounds = s.project().clip(sound).unwrap().0;
+    let track = track_id(&s, sounds);
+    run(
+        &mut s,
+        Command::SetTrackLocked {
+            track,
+            locked: true,
+        },
+    );
+    fails(&mut s, Command::Delete { clips: vec![a] }, "locked");
+}
+
+#[test]
+fn linked_partners_move_in_time_but_keep_their_tracks() {
+    let mut s = session();
+    let v = append(&mut s, 1, "v", 0, 30);
+    let sound = detach_onto(&mut s, v, 0);
+    run(
+        &mut s,
+        Command::AddTrack {
+            index: 2,
+            name: None,
+        },
+    );
+    run(
+        &mut s,
+        Command::Move {
+            clips: vec![v],
+            delta: f(10),
+            tracks: 1,
+            overwrite: false,
+        },
+    );
+    assert_eq!(s.project().clip(v).unwrap().0, 2);
+    assert_eq!(s.project().clip(sound).unwrap().0, 0);
+    assert_eq!(clip(&s, sound).start, f(10));
+}
+
+#[test]
+fn clips_can_be_placed_with_a_speed_and_properties() {
+    let mut s = magnetic_session();
+    let main = track_id(&s, 0);
+    let pasted = ClipSpec {
+        speed: Some(Speed { num: 2, den: 1 }),
+        properties: Some(ClipProperties {
+            opacity: Some(0.5),
+            volume_db: Some(-6.0),
+            ..ClipProperties::default()
+        }),
+        ..spec("v", 30, 60)
+    };
+    let id = ClipId(
+        run(
+            &mut s,
+            Command::Append {
+                track: main,
+                clip: pasted.clone(),
+            },
+        )
+        .created[0],
+    );
+    let placed = clip(&s, id);
+    assert_eq!(placed.speed, Speed { num: 2, den: 1 });
+    assert_eq!((placed.duration, placed.source_out()), (f(60), f(150)));
+    assert_eq!((placed.opacity, placed.volume_db), (0.5, -6.0));
+    fails(
+        &mut s,
+        Command::Append {
+            track: main,
+            clip: ClipSpec {
+                media: "i".into(),
+                source_in: Flicks::ZERO,
+                ..pasted.clone()
+            },
+        },
+        "Stills have no speed",
+    );
+    fails(
+        &mut s,
+        Command::Append {
+            track: main,
+            clip: ClipSpec {
+                properties: Some(ClipProperties {
+                    opacity: Some(2.0),
+                    ..ClipProperties::default()
+                }),
+                ..pasted
+            },
+        },
+        "Opacity",
+    );
+}
+
 // ---- Markers -------------------------------------------------------------------------------
 
 #[test]
@@ -1429,6 +1799,45 @@ fn a_group_is_one_undo_step_and_can_be_cancelled() {
     s.cancel_group();
     assert_eq!(s.project(), &before);
     assert_eq!(s.history_len(), (1, 1));
+}
+
+#[test]
+fn a_gesture_previews_each_step_from_where_it_began() {
+    let mut s = magnetic_session();
+    let a = append(&mut s, 0, "v", 0, 30);
+    append(&mut s, 0, "v", 100, 30);
+    let (before, start) = (s.project().clone(), s.generation());
+    let drag = |frames: i64| Command::Move {
+        clips: vec![a],
+        delta: f(frames),
+        tracks: 0,
+        overwrite: false,
+    };
+    assert!(s.preview(&drag(20)).is_err(), "no gesture is open");
+    s.begin_group("Move");
+    s.preview(&drag(50)).unwrap();
+    assert_eq!(layout(&s, 0), [(0, 30, 100), (30, 30, 0)]);
+    let swapped = s.generation();
+    // Each preview starts again from the state before the gesture.
+    s.preview(&drag(5)).unwrap();
+    assert_eq!(s.project(), &before);
+    assert_eq!(s.generation(), start);
+    s.preview(&drag(50)).unwrap();
+    assert_ne!(s.generation(), swapped);
+    // A step that cannot apply keeps the previous one.
+    let nowhere = Command::Move {
+        clips: vec![a],
+        delta: f(0),
+        tracks: 5,
+        overwrite: false,
+    };
+    assert!(s.preview(&nowhere).is_err());
+    assert_eq!(layout(&s, 0), [(0, 30, 100), (30, 30, 0)]);
+    s.end_group();
+    assert_eq!(s.history_len(), (3, 0), "two appends and one move");
+    assert_eq!(s.undo_label(), Some("Move"));
+    s.undo();
+    assert_eq!((s.project(), s.generation()), (&before, start));
 }
 
 #[test]

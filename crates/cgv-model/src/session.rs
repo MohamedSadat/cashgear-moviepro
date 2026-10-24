@@ -134,6 +134,22 @@ impl Session {
         }
     }
 
+    /// Inside a group, replaces everything the group has done with `command`. A drag
+    /// sends the whole gesture so far, so every step starts from where it began.
+    /// When `command` fails, the previous step of the gesture stays.
+    pub fn preview(&mut self, command: &Command) -> Result<Outcome, String> {
+        let group = self.group.as_ref().ok_or("No gesture is open")?;
+        let (next, outcome) = group.before.apply(command)?;
+        if next == group.before {
+            self.generation = group.before_generation;
+            self.state = next;
+        } else if next != self.state {
+            self.generation = self.fresh_generation();
+            self.state = next;
+        }
+        Ok(outcome)
+    }
+
     pub fn end_group(&mut self) {
         let Some(group) = &mut self.group else {
             return;

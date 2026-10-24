@@ -6,6 +6,7 @@ import type {
   MediaRef,
   Outcome,
   Preset,
+  Preview,
   ProjectSnapshot,
   SavedText,
 } from './types';
@@ -85,6 +86,21 @@ export class ProjectService {
 
   beginGroup(label: string) {
     this.require().begin_group(label);
+  }
+
+  /**
+   * One step of a gesture inside a group: replaces what the group has done with
+   * `command`. A step that cannot apply keeps the previous one and says why.
+   */
+  preview(command: Command): Preview {
+    const session = this.require();
+    try {
+      const outcome = JSON.parse(session.preview(JSON.stringify(command))) as Outcome;
+      this.onChange(false);
+      return { outcome, error: null, snapshot: this.snapshot() };
+    } catch (error) {
+      return { outcome: null, error: String(error), snapshot: this.snapshot() };
+    }
   }
 
   endGroup(): ProjectSnapshot {

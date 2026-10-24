@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cgv_model::*;
 use cgv_time::{Flicks, FrameRate};
-use common::{random_command, session, Rng};
+use common::{random_command, session_with, Rng};
 use proptest::prelude::*;
 
 /// The rules that hold after any sequence of successful commands.
@@ -61,6 +61,104 @@ fn kept(clip: &Clip, clips: &[Clip]) -> bool {
             ..clip.clone()
         }
     })
+}
+
+/// [`kept`], except that the clip may have moved in time.
+fn kept_anywhere(clip: &Clip, clips: &[Clip]) -> bool {
+    clips.iter().any(|other| {
+        Clip {
+            link: None,
+            start: clip.start,
+            ..other.clone()
+        } == Clip {
+            link: None,
+            ..clip.clone()
+        }
+    })
+}
+
+/// True when `id` is on the magnetic main track or linked to a clip there, so the
+/// main track decides where it goes.
+fn main_driven(project: &Project, id: ClipId) -> bool {
+    let (Some(main), Some((index, clip))) = (project.magnetic_index(), project.clip(id)) else {
+        return false;
+    };
+    index == main
+        || clip.link.is_some_and(|link| {
+            project.tracks[main]
+                .clips
+                .iter()
+                .any(|c| c.link == Some(link))
+        })
+}
+
+/// Where source time zero would play: trims and settling keep it, moves shift it.
+fn anchor(project: &Project, clip: &Clip) -> Option<Flicks> {
+    let media = project.media(&clip.media)?;
+    (!media.is_still()).then(|| clip.start - clip.speed.timeline_span(clip.source_in))
+}
+
+/// Clips linked to a clip on the magnetic main track stay in step with it.
+fn check_sync(before: &Project, after: &Project, command: &Command) {
+    let (Some(main), Some(main_now)) = (before.magnetic_index(), after.magnetic_index()) else {
+        return;
+    };
+    let named = |ids: &[ClipId]| ids.iter().all(|id| main_driven(before, *id));
+    let exempt = match command {
+        // These make or change links, or keep each clip's start and source.
+        Command::Link { .. }
+        | Command::Unlink { .. }
+        | Command::DetachAudio { .. }
+        | Command::SetSpeed { .. } => true,
+        // Edits that push later clips along another track may push a partner.
+        Command::Insert { track, .. } => before.track_index(*track) != Some(main),
+        Command::RippleDelete { clips } => !named(clips),
+        Command::Trim { clip, ripple, .. } => *ripple && !main_driven(before, *clip),
+        _ => false,
+    };
+    if exempt {
+        return;
+    }
+    // A link follows the first main-track clip it holds.
+    let mut leaders = BTreeSet::new();
+    for now in &after.tracks[main_now].clips {
+        let Some(link) = now.link else { continue };
+        if !leaders.insert(link) {
+            continue;
+        }
+        let Some(leader) = before.tracks[main].clips.iter().find(|c| c.id == now.id) else {
+            continue;
+        };
+        if leader.link != Some(link) {
+            continue;
+        }
+        for partner in before
+            .clips()
+            .filter(|c| c.link == Some(link) && c.id != leader.id)
+        {
+            let Some((partner_index, partner_now)) = after.clip(partner.id) else {
+                continue;
+            };
+            // Clips at different speeds drift apart under a slip by design.
+            let speeds = [leader.speed, partner.speed, now.speed, partner_now.speed];
+            if partner_index == main_now
+                || partner_now.link != now.link
+                || speeds.iter().any(|&speed| speed != leader.speed)
+            {
+                continue;
+            }
+            let offset = |project: &Project, a: &Clip, b: &Clip| {
+                Some(anchor(project, b)? - anchor(project, a)?)
+            };
+            assert_eq!(
+                offset(after, now, partner_now),
+                offset(before, leader, partner),
+                "{command:?} put clip {} out of step with main-track clip {}",
+                partner.id,
+                leader.id
+            );
+        }
+    }
 }
 
 fn covered(track: &Track) -> Flicks {
@@ -120,20 +218,34 @@ fn check_effects(before: &Project, after: &Project, command: &Command, outcome: 
             for track in &before.tracks {
                 let now = after.track(track.id).unwrap();
                 for clip in &now.clips {
-                    assert!(kept(clip, &track.clips), "delete changed a clip it kept");
+                    let same = if main_driven(after, clip.id) {
+                        kept_anywhere(clip, &track.clips)
+                    } else {
+                        kept(clip, &track.clips)
+                    };
+                    assert!(same, "delete changed a clip it kept");
                 }
             }
         }
         Command::RippleDelete { .. } => {
-            for track in &before.tracks {
+            let main = before.magnetic_index();
+            for (index, track) in before.tracks.iter().enumerate() {
                 let now = after.track(track.id).unwrap();
                 let kept: BTreeSet<ClipId> = now.clips.iter().map(|c| c.id).collect();
+                // Other tracks close only the gaps of clips the main track does not drive.
+                let free = |c: &&Clip| Some(index) == main || !main_driven(before, c.id);
                 let removed: Vec<&Clip> = track
                     .clips
                     .iter()
                     .filter(|c| !kept.contains(&c.id))
+                    .filter(free)
                     .collect();
-                for old in track.clips.iter().filter(|c| kept.contains(&c.id)) {
+                for old in track
+                    .clips
+                    .iter()
+                    .filter(|c| kept.contains(&c.id))
+                    .filter(free)
+                {
                     let closed = removed
                         .iter()
                         .filter(|r| r.end() <= old.start)
@@ -191,8 +303,9 @@ fn check_effects(before: &Project, after: &Project, command: &Command, outcome: 
             delta,
             tracks,
             ..
-        } => {
-            // The named clips and their partners keep their content and move together.
+        } if before.magnetic_index().is_none() => {
+            // The named clips and their partners keep their content and move together;
+            // only the named clips change tracks.
             let frame = before.settings.frame_duration().0;
             let delta = Flicks((delta.0 as f64 / frame as f64).round() as i64 * frame);
             let links: BTreeSet<LinkId> = clips
@@ -208,7 +321,16 @@ fn check_effects(before: &Project, after: &Project, command: &Command, outcome: 
                     let (index, new) = after.clip(old.id).unwrap();
                     assert_eq!(new.start, old.start + delta, "move went the wrong distance");
                     assert_eq!((new.duration, new.source_in), (old.duration, old.source_in));
-                    assert_eq!(index as i64, old_index as i64 + *tracks as i64);
+                    let shift = if clips.contains(&old.id) { *tracks } else { 0 };
+                    assert_eq!(index as i64, old_index as i64 + shift as i64);
+                }
+            }
+        }
+        Command::Move { clips, .. } => {
+            // Moves on and off the magnetic main track keep each clip's content.
+            for id in clips {
+                if let (Some((_, old)), Some((_, new))) = (before.clip(*id), after.clip(*id)) {
+                    assert_eq!((new.duration, new.source_in), (old.duration, old.source_in));
                 }
             }
         }
@@ -246,11 +368,17 @@ fn check_effects(before: &Project, after: &Project, command: &Command, outcome: 
                 None => [*clip].into(),
             };
             for old in before.clips().filter(|c| !group.contains(&c.id)) {
-                assert_eq!(
-                    after.clip(old.id).map(|(_, c)| c),
-                    Some(old),
-                    "trim changed another clip"
-                );
+                let now = after.clip(old.id).map(|(_, c)| c);
+                if main_driven(before, old.id) {
+                    // Settling may move later main-track clips and the clips they lead.
+                    let now = now.expect("trim removed another clip");
+                    assert!(
+                        kept_anywhere(old, std::slice::from_ref(now)),
+                        "trim changed another clip"
+                    );
+                } else {
+                    assert_eq!(now, Some(old), "trim changed another clip");
+                }
             }
         }
         _ => {}
@@ -296,6 +424,7 @@ fn random_history(session: &mut Session, rng: &mut Rng, target: usize) -> (Vec<P
                 frame_rate_changed |= after.settings.frame_rate != FrameRate::FPS_30;
                 check_rules(&after, frame_rate_changed);
                 check_effects(&before, &after, &command, &outcome);
+                check_sync(&before, &after, &command);
                 assert!(session.undo());
                 assert_eq!(
                     session.project(),
@@ -332,8 +461,12 @@ proptest! {
     #![proptest_config(ProptestConfig { cases: 128, ..ProptestConfig::default() })]
 
     #[test]
-    fn random_edits_keep_every_rule_and_undo_exactly(seed in any::<u64>(), steps in 1usize..120) {
-        let mut session = session();
+    fn random_edits_keep_every_rule_and_undo_exactly(
+        seed in any::<u64>(),
+        steps in 1usize..120,
+        magnetic in any::<bool>(),
+    ) {
+        let mut session = session_with(magnetic);
         let original = session.project().clone();
         let mut rng = Rng(seed);
         let (states, _) = random_history(&mut session, &mut rng, steps);
@@ -351,8 +484,17 @@ proptest! {
 
 #[test]
 fn a_thousand_random_commands_then_a_thousand_undos_restore_the_original_exactly() {
-    for seed in [1, 2, 3, 0xC0FFEE] {
-        let mut session = session();
+    for (seed, magnetic) in [
+        (1, false),
+        (2, false),
+        (3, false),
+        (0xC0FFEE, false),
+        (4, true),
+        (5, true),
+        (6, true),
+        (0xFACADE, true),
+    ] {
+        let mut session = session_with(magnetic);
         let original = session.project().clone();
         let mut rng = Rng(seed);
         let (states, run) = random_history(&mut session, &mut rng, 1000);
@@ -376,7 +518,7 @@ fn a_thousand_random_commands_then_a_thousand_undos_restore_the_original_exactly
         }
         assert_eq!(session.project(), &end);
         eprintln!(
-            "seed {seed}: 1000 applied, {} no-ops, {} rejected {:?}; end state {} tracks, {} clips, {} markers, {} media; kinds {:?}",
+            "seed {seed} (magnetic at first: {magnetic}): 1000 applied, {} no-ops, {} rejected {:?}; end state {} tracks, {} clips, {} markers, {} media; kinds {:?}",
             run.unchanged,
             run.rejected.values().sum::<usize>(),
             run.rejected,
