@@ -319,9 +319,22 @@ pub struct Lut {
     /// The input range: inputs outside it are clamped.
     pub domain_min: [f64; 3],
     pub domain_max: [f64; 3],
+    /// A hash of `data`: renderers cache the LUT by it, since undo can give a
+    /// different LUT the same id.
+    pub fingerprint: String,
     /// RGB outputs as little-endian 16-bit values (0 to 65535 for 0 to 1), red
     /// varying fastest, in base64.
     pub data: String,
+}
+
+/// FNV-1a, 64 bits, as 16 hex digits.
+fn fingerprint(data: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in data.bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{hash:016x}")
 }
 
 /// A LUT to add, as [`crate::lut::parse_cube`] makes it.
@@ -402,6 +415,7 @@ impl LutSpec {
             size: self.size,
             domain_min: self.domain_min,
             domain_max: self.domain_max,
+            fingerprint: fingerprint(&self.data),
             data: self.data.clone(),
         })
     }
@@ -409,6 +423,14 @@ impl LutSpec {
 
 impl Lut {
     pub(crate) fn check(&self) -> Result<(), String> {
+        let hex = self.fingerprint.len() == 16
+            && self
+                .fingerprint
+                .chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c));
+        if !hex {
+            return Err(format!("LUT {} has an invalid fingerprint", self.id));
+        }
         check_lut(
             &self.name,
             self.shape,
