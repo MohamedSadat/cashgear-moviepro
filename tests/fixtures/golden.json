@@ -1,0 +1,85 @@
+{
+  "comment": "Golden render fixtures (tests/e2e/golden.spec.ts). Each builds a project from test media and renders one frame; tests/golden/<name>.png is the reference. Times and lengths are frames at 30 fps; transforms use project pixels.",
+  "media": ["h264-1080p30-aac.mp4", "still-1920x1080.png", "still-1280x720.jpg", "alpha.png"],
+  "fixtures": [
+    {
+      "name": "fit-video",
+      "about": "A 1080p video frame fitted to the frame: Y'CbCr to RGB and downscaling.",
+      "frame": 150,
+      "layers": [{ "media": "h264-1080p30-aac.mp4", "length": 300 }]
+    },
+    {
+      "name": "fit-portrait",
+      "about": "A 16:9 still in a 9:16 project: letterboxed, never stretched.",
+      "size": [270, 480],
+      "frame": 0,
+      "layers": [{ "media": "still-1280x720.jpg", "length": 30 }]
+    },
+    {
+      "name": "transform",
+      "about": "Scale, rotation and position over a video background.",
+      "frame": 60,
+      "layers": [
+        { "media": "h264-1080p30-aac.mp4", "length": 300 },
+        {
+          "media": "still-1920x1080.png",
+          "length": 300,
+          "transform": { "x": 60, "y": -40, "scaleX": 0.5, "scaleY": 0.5, "rotation": 30 }
+        }
+      ]
+    },
+    {
+      "name": "anchor",
+      "about": "Rotation about a corner anchor, over a video stretched unevenly about its centre.",
+      "frame": 10,
+      "layers": [
+        {
+          "media": "h264-1080p30-aac.mp4",
+          "length": 300,
+          "transform": { "scaleX": 1.25, "scaleY": 0.75, "rotation": 180 }
+        },
+        {
+          "media": "still-1920x1080.png",
+          "length": 300,
+          "transform": { "anchorX": 0, "anchorY": 0, "rotation": 15, "scaleX": 0.6, "scaleY": 0.6 }
+        }
+      ]
+    },
+    {
+      "name": "crop",
+      "about": "Cropped edges hide the picture without moving the rest.",
+      "frame": 90,
+      "layers": [
+        { "media": "still-1920x1080.png", "length": 300 },
+        {
+          "media": "h264-1080p30-aac.mp4",
+          "length": 300,
+          "crop": { "left": 0.1, "top": 0.2, "right": 0.3, "bottom": 0.05 }
+        }
+      ]
+    },
+    {
+      "name": "opacity",
+      "about": "Half opacity, blended in linear light.",
+      "frame": 30,
+      "layers": [
+        { "media": "still-1920x1080.png", "length": 300 },
+        { "media": "h264-1080p30-aac.mp4", "length": 300, "opacity": 0.5 }
+      ]
+    },
+    {
+      "name": "alpha",
+      "about": "A still with a soft alpha ramp, scaled and rotated over video (premultiplied alpha).",
+      "frame": 45,
+      "layers": [
+        { "media": "h264-1080p30-aac.mp4", "length": 300 },
+        {
+          "media": "alpha.png",
+          "length": 300,
+          "transform": { "scaleX": 0.8, "scaleY": 0.8, "rotation": -10 },
+          "opacity": 0.9
+        }
+      ]
+    }
+  ]
+}

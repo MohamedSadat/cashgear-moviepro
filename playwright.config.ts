@@ -3,7 +3,9 @@ import { defineConfig } from '@playwright/test';
 // CI runners have no GPU: GPU_TEST_SOFTWARE=1 switches to SwiftShader for WebGPU
 // and WARP or SwiftShader for WebGL2. Locally the specs run on the real GPU.
 // Both use installed Chrome or Edge: Playwright's bundled Chromium has no H.264 or AAC.
+// Sound may start without a click, so API-driven tests play with the audio clock too.
 const software = process.env.GPU_TEST_SOFTWARE === '1';
+const autoplay = '--autoplay-policy=no-user-gesture-required';
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 60000,
@@ -30,8 +32,9 @@ export default defineConfig({
             '--enable-unsafe-swiftshader',
             '--use-angle=d3d11-warp',
             '--use-webgpu-adapter=swiftshader',
+            autoplay,
           ]
-        : [],
+        : [autoplay],
     },
   },
   projects: software
@@ -47,6 +50,7 @@ export default defineConfig({
                 '--enable-unsafe-webgpu',
                 '--enable-unsafe-swiftshader',
                 '--use-angle=swiftshader',
+                autoplay,
               ],
             },
           },
