@@ -420,6 +420,26 @@ impl Edit {
                 }
                 self.project.luts.remove(position);
             }
+            Command::Batch { commands } => {
+                for command in commands {
+                    let batchable = matches!(
+                        command,
+                        Command::SetClipProperties { .. }
+                            | Command::SetEffectParams { .. }
+                            | Command::SetEffectEnabled { .. }
+                            | Command::SetKeyframe { .. }
+                            | Command::SetKeyframes { .. }
+                            | Command::RemoveKeyframes { .. }
+                            | Command::MoveKeyframes { .. }
+                            | Command::ClearKeyframes { .. }
+                            | Command::SetTransition { .. }
+                    );
+                    if !batchable {
+                        return Err(format!("{} can't run in a batch", command.label()));
+                    }
+                    self.run(command)?;
+                }
+            }
             Command::AddMarker { at, name, color } => {
                 let marker = Marker {
                     id: MarkerId(self.alloc()),

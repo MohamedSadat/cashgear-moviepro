@@ -428,6 +428,12 @@ pub enum Command {
         name: String,
         color: MarkerColor,
     },
+
+    /// Several clip property, effect or keyframe changes as one command, so one
+    /// gesture step can change them together (a uniform scale's x and y).
+    Batch {
+        commands: Vec<Command>,
+    },
     UpdateMarker {
         marker: MarkerId,
         #[serde(default)]
@@ -500,6 +506,7 @@ impl Command {
             Command::AddMarker { .. } => "Add marker",
             Command::UpdateMarker { .. } => "Change marker",
             Command::RemoveMarker { .. } => "Delete marker",
+            Command::Batch { commands } => commands.first().map_or("Change clip", Command::label),
         }
     }
 }

@@ -452,6 +452,47 @@ fn a_property_s_keyframes_can_be_replaced_at_once() {
 }
 
 #[test]
+fn a_batch_sets_several_keyframes_as_one_step() {
+    let mut s = session();
+    let clip = append(&mut s, 0, "v", 0, 90);
+    let scale = |property: &str| Command::SetKeyframe {
+        clip,
+        property: property.into(),
+        time: f(10),
+        value: number(2.0),
+        interpolation: None,
+    };
+    run(
+        &mut s,
+        Command::Batch {
+            commands: vec![scale("transform.scaleX"), scale("transform.scaleY")],
+        },
+    );
+    let c = common::clip(&s, clip);
+    assert_eq!(c.transform_at(f(10)).scale_y, 2.0);
+    assert_eq!(s.undo_label(), Some("Set keyframe"));
+    assert!(s.undo());
+    assert!(common::clip(&s, clip).keyframes.is_empty(), "one undo step");
+    fails(
+        &mut s,
+        Command::Batch {
+            commands: vec![
+                scale("transform.scaleX"),
+                Command::Delete { clips: vec![clip] },
+            ],
+        },
+        "can't run in a batch",
+    );
+    fails(
+        &mut s,
+        Command::Batch {
+            commands: vec![scale("transform.scaleX"), scale("transform.bogus")],
+        },
+        "not a property",
+    );
+}
+
+#[test]
 fn stopping_an_animation_keeps_the_value_at_the_playhead() {
     let mut s = session();
     let clip = append(&mut s, 0, "v", 0, 90);

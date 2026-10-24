@@ -274,6 +274,7 @@ export type Command =
       interpolation?: Interpolation;
     }
   | { type: 'removeKeyframes'; clip: number; property: string; times: number[] }
+  | { type: 'setKeyframes'; clip: number; property: string; keys: Keyframe[] }
   | { type: 'moveKeyframes'; clip: number; properties?: string[]; times: number[]; delta: number }
   | {
       type: 'setInterpolation';
@@ -301,7 +302,9 @@ export type Command =
   | { type: 'removeLut'; lut: number }
   | { type: 'addMarker'; at: number; name?: string; color: MarkerColor }
   | { type: 'updateMarker'; marker: number; at?: number; name?: string; color?: MarkerColor }
-  | { type: 'removeMarker'; marker: number };
+  | { type: 'removeMarker'; marker: number }
+  /** Clip property, effect, keyframe and transition changes as one command (one gesture step). */
+  | { type: 'batch'; commands: Command[] };
 
 /** Ids a command created: the new clip, track, marker, effect, transition or LUT first. */
 export interface Outcome {
