@@ -29,9 +29,27 @@ pub struct AudioClip {
     pub source_start: i64,
     /// Linear gain.
     pub gain: f32,
+    /// Linear gains at timeline samples, in order, joined by straight lines and
+    /// held beyond the ends: animated volume. Empty means `gain` throughout.
+    pub envelope: Vec<(i64, f32)>,
     /// False where the neighbouring clip continues the same audio seamlessly.
     pub fade_in: bool,
     pub fade_out: bool,
+}
+
+/// The gain of `envelope` at sample `t`. `cursor` remembers the segment, so a run
+/// of rising `t` walks the envelope once.
+fn envelope_gain(envelope: &[(i64, f32)], t: i64, cursor: &mut usize) -> f32 {
+    while *cursor + 1 < envelope.len() && envelope[*cursor + 1].0 <= t {
+        *cursor += 1;
+    }
+    let (at, gain) = envelope[*cursor];
+    match envelope.get(*cursor + 1) {
+        Some(&(next, next_gain)) if t > at => {
+            gain + (next_gain - gain) * ((t - at) as f32 / (next - at) as f32)
+        }
+        _ => gain,
+    }
 }
 
 /// Decoded source audio handed to [`Mixer::insert_block`].
@@ -286,6 +304,7 @@ impl Mixer {
         let clock = self.clock;
         for clip in clips {
             let (from, to) = (clip.start.max(start), clip.end.min(end));
+            let mut cursor = 0;
             let mut at = from;
             while at < to {
                 let source = clip.source_start + at - clip.start;
@@ -301,7 +320,11 @@ impl Mixer {
                 {
                     block.last_used = clock;
                     for t in at..run_end {
-                        let mut gain = clip.gain;
+                        let mut gain = if clip.envelope.is_empty() {
+                            clip.gain
+                        } else {
+                            envelope_gain(&clip.envelope, t, &mut cursor)
+                        };
                         if clip.fade_in {
                             gain *= (((t - clip.start) as f32 + 0.5) / fade).min(1.0);
                         }
@@ -354,6 +377,7 @@ mod tests {
             end,
             source_start,
             gain: 1.0,
+            envelope: Vec::new(),
             fade_in: false,
             fade_out: false,
         }
@@ -435,6 +459,36 @@ mod tests {
         let b = |i: i64| (i as f64 / 48_000.0) as f32 * db_to_gain(-6.0);
         assert!((out[7 * 2] - (a(7) + b(2))).abs() < 1e-7);
         assert!((db_to_gain(-6.0) - 0.501_187).abs() < 1e-6);
+    }
+
+    #[test]
+    fn an_envelope_ramps_the_gain_between_its_points_and_holds_beyond_them() {
+        let mut mixer = Mixer::new(RATE, 1, DEFAULT_BUDGET_BYTES);
+        let data = vec![1.0f32; 48_000 + 9600];
+        mixer
+            .insert_block(
+                "dc",
+                0,
+                SourceAudio {
+                    sample_rate: RATE,
+                    channels: 1,
+                    data: &data,
+                    start_seconds: 0.0,
+                },
+            )
+            .unwrap();
+        let mut ramped = clip("dc", 0, 400, 0);
+        ramped.envelope = vec![(100, 0.0), (200, 1.0), (300, 0.5)];
+        let out = mixer.mix(&[ramped], 0, 400);
+        assert_eq!(out[50], 0.0, "held before the first point");
+        assert!((out[150] - 0.5).abs() < 1e-6);
+        assert!((out[250] - 0.75).abs() < 1e-6);
+        assert!((out[399] - 0.5).abs() < 1e-6, "held after the last point");
+        // Mixing from the middle gives the same samples.
+        let mut ramped = clip("dc", 0, 400, 0);
+        ramped.envelope = vec![(100, 0.0), (200, 1.0), (300, 0.5)];
+        let tail = mixer.mix(&[ramped], 240, 20);
+        assert!((tail[10] - out[250]).abs() < 1e-7);
     }
 
     #[test]

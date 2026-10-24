@@ -99,6 +99,9 @@ pub struct LayerGeometry {
     /// The drawn quad: the visible part grown by about one output pixel, so the
     /// shader can smooth its edges.
     pub quad: [f64; 4],
+    /// Output pixels per unit of u and of v.
+    pub per_u: f64,
+    pub per_v: f64,
 }
 
 /// Upright `(u, v)` to the stored picture's texture coordinates.
@@ -218,7 +221,36 @@ pub fn layer_geometry(
         to_texture: texture_map(picture.rotation),
         visible,
         quad,
+        per_u,
+        per_v,
     })
+}
+
+/// The size in pixels to run a layer's effects at: its visible part as it is
+/// drawn, but never more than the picture's own pixels, nor `limit`.
+pub fn effect_size(geometry: &LayerGeometry, picture: &Picture, limit: u32) -> (u32, u32) {
+    let [u0, v0, u1, v1] = geometry.visible;
+    let (width, height) = picture.upright();
+    let side = |drawn: f64, own: f64| (drawn.min(own).ceil().max(1.0) as u32).min(limit.max(1));
+    (
+        side(geometry.per_u * (u1 - u0), width * (u1 - u0)),
+        side(geometry.per_v * (v1 - v0), height * (v1 - v0)),
+    )
+}
+
+/// Upright `(u, v)` inside the visible part to coordinates of a texture that holds
+/// just that part: what a layer's effects leave.
+pub fn visible_map(visible: [f64; 4]) -> Affine {
+    let [u0, v0, u1, v1] = visible;
+    let (a, d) = (1.0 / (u1 - u0), 1.0 / (v1 - v0));
+    Affine {
+        a,
+        b: 0.0,
+        c: 0.0,
+        d,
+        tx: -u0 * a,
+        ty: -v0 * d,
+    }
 }
 
 /// The output size for a project at a preview `scale` (1, 0.5, 0.25): even, at least 16.
@@ -389,6 +421,35 @@ mod tests {
             to_project(HD, &pic, &flipped).apply(0.0, 0.0),
             (1920.0, 0.0),
         );
+    }
+
+    #[test]
+    fn effects_run_at_the_drawn_size_of_the_visible_part_up_to_the_picture_size() {
+        let crop = CropRect {
+            left: 0.25,
+            ..Default::default()
+        };
+        let pic = picture(3840.0, 2160.0, 0);
+        // A 4K picture at quarter preview of a 1080p project: drawn 480 × 270.
+        let quarter = layer_geometry(HD, 0.25, &pic, &Default::default(), &crop).unwrap();
+        assert_eq!(effect_size(&quarter, &pic, 8192), (360, 270));
+        // Scaled up 4×, it is drawn larger than it is: its own pixels are the limit.
+        let big = LayerTransform {
+            scale_x: 4.0,
+            scale_y: 4.0,
+            ..Default::default()
+        };
+        let zoomed = layer_geometry(HD, 1.0, &pic, &big, &crop).unwrap();
+        assert_eq!(effect_size(&zoomed, &pic, 8192), (2880, 2160));
+        assert_eq!(effect_size(&zoomed, &pic, 2048), (2048, 2048));
+        // A rotated phone clip runs upright.
+        let portrait = picture(1920.0, 1080.0, 90);
+        let full =
+            layer_geometry(HD, 1.0, &portrait, &Default::default(), &Default::default()).unwrap();
+        assert_eq!(effect_size(&full, &portrait, 8192), (608, 1080));
+        let map = visible_map(quarter.visible);
+        close(map.apply(0.25, 0.0), (0.0, 0.0));
+        close(map.apply(1.0, 1.0), (1.0, 1.0));
     }
 
     #[test]

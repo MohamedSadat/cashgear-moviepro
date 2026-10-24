@@ -1,4 +1,6 @@
 import { expose } from 'comlink';
+import { builtinLooks, loadPackImages, lookText } from './effects/assets';
+import type { CatalogEntry } from './effects/types';
 import { FrameLoop, workerScheduler } from './frame-loop';
 import { AudioBlocks } from './media/audio-blocks';
 import { MediaService, type DecodePreference } from './media/service';
@@ -7,7 +9,7 @@ import { PlaybackController } from './playback/controller';
 import { ProjectService } from './project/service';
 import type { Pixels } from './playback/types';
 import type { EngineApi, EngineEvent, EngineInfo, GpuFault, InitOptions } from './types';
-import initWasm, { Engine, MediaLibrary } from './pkg/cgv_wasm';
+import initWasm, { Engine, MediaLibrary, effects_catalog } from './pkg/cgv_wasm';
 
 let engine: Engine | undefined;
 let loop: FrameLoop | undefined;
@@ -81,6 +83,13 @@ const api: EngineApi = {
     if (diagnostic && options.simulateGpuFailure) simulateGpuFailure(options.simulateGpuFailure);
     await ensureWasm();
     const created = await Engine.create(canvas, options.backend, fatal);
+    if (disposed) {
+      created.dispose();
+      created.free();
+      throw new Error('Engine disposed during initialization');
+    }
+    // Transitions read their gradients from the first frame on.
+    await loadPackImages(created);
     if (disposed) {
       created.dispose();
       created.free();
@@ -197,6 +206,18 @@ const api: EngineApi = {
     await ensureWasm();
     return ProjectService.presets();
   },
+  projectImportLut: (name, text) => project.importLut(name, text),
+  async projectImportLook(id) {
+    const looks = await builtinLooks();
+    const look = looks.find((entry) => entry.id === id);
+    if (!look) throw new Error(`There is no built-in look ${id}`);
+    return project.importLut(look.name, await lookText(id));
+  },
+  async effectsCatalog() {
+    await ensureWasm();
+    return JSON.parse(effects_catalog()) as CatalogEntry[];
+  },
+  builtinLooks: () => builtinLooks(),
 
   // Sound may be set up before the renderer starts (the project opens first).
   async attachAudio(buffer, sampleRate, channels) {

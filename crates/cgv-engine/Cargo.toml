@@ -8,10 +8,12 @@ rust-version.workspace = true
 
 [dependencies]
 cgv-audio.workspace = true
+cgv-effects.workspace = true
 cgv-model.workspace = true
 cgv-render.workspace = true
 cgv-time.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys = { workspace = true, features = ["ImageBitmap", "OffscreenCanvas", "VideoFrame"] }

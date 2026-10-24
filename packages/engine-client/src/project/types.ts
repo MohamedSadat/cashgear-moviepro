@@ -59,8 +59,95 @@ export interface Crop {
   bottom: number;
 }
 
+/** A colour as a picker shows it: sRGB-encoded, straight alpha, 0 to 1. */
+export interface Color {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
+
+/** A setting of an effect or transition: a number, switch, colour, choice or LUT reference. */
+export type ParamValue = number | boolean | Color | string;
+export type Params = Record<string, ParamValue>;
+
+/** A video effect on a clip; effects run in list order. */
+export interface Effect {
+  id: number;
+  /** The effect's id in its pack, such as `gaussian-blur`. */
+  kind: string;
+  pack: string;
+  version: number;
+  enabled: boolean;
+  /** Missing settings take the definition's defaults. */
+  params: Params;
+}
+
+/** An effect to add. `id` is where it was copied from, so its keyframes follow it. */
+export interface EffectSpec {
+  id?: number;
+  kind: string;
+  pack?: string;
+  version?: number;
+  enabled?: boolean;
+  params?: Params;
+}
+
+/** How the value moves from a keyframe to the next. Eases follow CSS. */
+export type Interpolation =
+  | { kind: 'linear' }
+  | { kind: 'hold' }
+  | { kind: 'easeIn' }
+  | { kind: 'easeOut' }
+  | { kind: 'easeInOut' }
+  | { kind: 'bezier'; x1: number; y1: number; x2: number; y2: number };
+
+export type KeyValue = number | Color;
+
+/** A property's value at a time from the clip's start. */
+export interface Keyframe {
+  time: number;
+  value: KeyValue;
+  interpolation: Interpolation;
+}
+
+export type Alignment = 'start' | 'center' | 'end';
+
+/** A transition between touching clips (`from`, then `to`), or at a free edge. */
+export interface Transition {
+  id: number;
+  kind: string;
+  pack: string;
+  version: number;
+  from: number | null;
+  to: number | null;
+  duration: number;
+  alignment: Alignment;
+  params: Params;
+}
+
+export interface TransitionSpec {
+  kind: string;
+  pack?: string;
+  version?: number;
+  duration: number;
+  alignment?: Alignment;
+  params?: Params;
+}
+
+/** A project LUT, without its data. */
+export interface LutInfo {
+  id: number;
+  name: string;
+  shape: '1d' | '3d';
+  size: number;
+}
+
 export interface Clip {
   id: number;
+  /** An adjustment layer has no media: its effects apply to the tracks below. */
+  kind?: 'media' | 'adjustment';
+  /** Empty for an adjustment layer. */
   media: string;
   start: number;
   duration: number;
@@ -73,8 +160,9 @@ export interface Clip {
   crop: Crop;
   opacity: number;
   volumeDb: number;
-  effects?: unknown[];
-  keyframes?: Record<string, unknown[]>;
+  effects?: Effect[];
+  /** Animated properties by name: `opacity`, `transform.x`, `effects.<id>.<setting>`… */
+  keyframes?: Record<string, Keyframe[]>;
 }
 
 export interface Track {
@@ -85,6 +173,8 @@ export interface Track {
   muted: boolean;
   hidden: boolean;
   clips: Clip[];
+  /** By time. */
+  transitions?: Transition[];
 }
 
 export type MarkerColor = 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple';
@@ -107,6 +197,8 @@ export interface Project {
   /** The main track has no gaps, and clips linked to its clips follow them. */
   magnetic: boolean;
   markers: Marker[];
+  /** LUTs kept in the project for its effects. */
+  luts: LutInfo[];
   nextId: number;
 }
 
@@ -119,7 +211,9 @@ export interface ClipProperties {
 }
 
 export interface ClipSpec {
-  media: string;
+  kind?: 'media' | 'adjustment';
+  /** Empty (or left out) for an adjustment layer. */
+  media?: string;
   sourceIn?: number;
   /** Timeline length, at `speed`. */
   duration: number;
@@ -128,6 +222,9 @@ export interface ClipSpec {
   speed?: Speed;
   /** Picture and sound settings, as when pasting a copy. */
   properties?: ClipProperties;
+  /** Effects and keyframes, as when pasting a copy. */
+  effects?: EffectSpec[];
+  keyframes?: Record<string, Keyframe[]>;
 }
 
 export type Edge = 'start' | 'end';
@@ -162,11 +259,51 @@ export type Command =
   | { type: 'detachAudio'; clip: number; track?: number | null }
   | { type: 'setSpeed'; clip: number; speed: Speed }
   | { type: 'setClipProperties'; clip: number; properties: ClipProperties }
+  | { type: 'addEffect'; clip: number; effect: EffectSpec; index?: number }
+  | { type: 'removeEffect'; clip: number; effect: number }
+  | { type: 'moveEffect'; clip: number; effect: number; index: number }
+  | { type: 'setEffectEnabled'; clip: number; effect: number; enabled: boolean }
+  | { type: 'setEffectParams'; clip: number; effect: number; params: Params }
+  | { type: 'resetEffect'; clip: number; effect: number; params?: Params }
+  | {
+      type: 'setKeyframe';
+      clip: number;
+      property: string;
+      time: number;
+      value: KeyValue;
+      interpolation?: Interpolation;
+    }
+  | { type: 'removeKeyframes'; clip: number; property: string; times: number[] }
+  | { type: 'moveKeyframes'; clip: number; properties?: string[]; times: number[]; delta: number }
+  | {
+      type: 'setInterpolation';
+      clip: number;
+      property: string;
+      times: number[];
+      interpolation: Interpolation;
+    }
+  | { type: 'clearKeyframes'; clip: number; property: string; at?: number }
+  | {
+      type: 'addTransition';
+      track: number;
+      from?: number | null;
+      to?: number | null;
+      transition: TransitionSpec;
+    }
+  | {
+      type: 'setTransition';
+      transition: number;
+      duration?: number;
+      alignment?: Alignment;
+      params?: Params;
+    }
+  | { type: 'removeTransition'; transition: number }
+  | { type: 'removeLut'; lut: number }
   | { type: 'addMarker'; at: number; name?: string; color: MarkerColor }
   | { type: 'updateMarker'; marker: number; at?: number; name?: string; color?: MarkerColor }
   | { type: 'removeMarker'; marker: number };
 
-/** Ids a command created: the new clip, track or marker first. */
+/** Ids a command created: the new clip, track, marker, effect, transition or LUT first. */
 export interface Outcome {
   created: number[];
 }

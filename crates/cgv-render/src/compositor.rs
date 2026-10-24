@@ -1,16 +1,20 @@
-//! The GPU side of the compositor (browser only). A frame is built in three
-//! steps: each layer's source becomes a linear, premultiplied texture; the layers
-//! draw bottom first into the composition target; the target is presented on the
-//! monitor or read back. Preview and export share all of it.
+//! The GPU side of the compositor (browser only). A frame is built in steps:
+//! each layer's source becomes a linear, premultiplied texture; layers run their
+//! effects; transitions blend their two sides; then the layers draw bottom first
+//! into the composition target, which adjustment layers change in place. The
+//! target is presented on the monitor or read back. Preview and export share all
+//! of it.
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use cgv_model::Params;
 use wgpu::*;
 
 use crate::color::{rgb_to_yuv, yuv_to_rgb, FrameColor, Matrix, Transfer};
 use crate::geometry::{
-    export_picture, layer_geometry, nv12_texels, CropRect, LayerTransform, Picture,
+    effect_size, export_picture, layer_geometry, nv12_texels, visible_map, Affine, CropRect,
+    LayerGeometry, LayerTransform, Picture,
 };
 
 /// Layers sample sRGB-encoded storage, which the GPU decodes to linear light.
@@ -20,8 +24,13 @@ const READBACK_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
 const LAYER_UNIFORM_SIZE: u64 = 96;
 const CONVERT_UNIFORM_SIZE: u64 = 64;
 const EXPORT_UNIFORM_SIZE: u64 = 80;
-/// Uniform slots per frame: one per layer and one per frame conversion.
-const UNIFORM_SLOTS: u64 = 256;
+/// The `frame` uniform of an effect pass.
+const EFFECT_FRAME_SIZE: u64 = 64;
+/// Uniform slots per frame: one per layer and frame conversion, two or more per
+/// effect pass.
+const UNIFORM_SLOTS: u64 = 2048;
+/// Pack images and LUTs hold data, not colour: no sRGB decoding.
+const DATA_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
 /// Free textures kept per size and format.
 const POOL_KEEP: usize = 6;
 
@@ -67,6 +76,144 @@ pub struct LayerDraw {
     pub opacity: f64,
 }
 
+/// A LUT an effect reads: the key it was uploaded under, and its input range.
+#[derive(Clone, Copy, Debug)]
+pub struct LutUse<'a> {
+    pub key: &'a str,
+    pub min: [f64; 3],
+    pub max: [f64; 3],
+}
+
+/// An effect or transition to run, with its settings at this frame.
+#[derive(Clone, Debug)]
+pub struct EffectRun<'a> {
+    pub entry: &'a cgv_effects::Entry,
+    pub params: &'a Params,
+    /// Seconds since the clip's start.
+    pub time: f64,
+    pub seed: f64,
+    pub lut: Option<LutUse<'a>>,
+    /// The key of the pack image the shader reads.
+    pub image: Option<String>,
+}
+
+/// A layer: its source slot, where it goes and the effects it runs first.
+#[derive(Clone, Debug)]
+pub struct LayerStep<'a> {
+    pub index: usize,
+    pub draw: LayerDraw,
+    pub effects: Vec<EffectRun<'a>>,
+}
+
+/// How a frame is drawn, bottom first. A frame has a handful of steps, built
+/// once: their size does not matter.
+#[allow(clippy::large_enum_variant)]
+#[derive(Clone, Debug)]
+pub enum Step<'a> {
+    Layer(LayerStep<'a>),
+    /// Two layers blended by a transition; a missing side is transparent.
+    Transition {
+        from: Option<LayerStep<'a>>,
+        to: Option<LayerStep<'a>>,
+        transition: EffectRun<'a>,
+        progress: f64,
+    },
+    /// Effects applied to the composition so far, mixed in by `opacity`.
+    Adjustment {
+        effects: Vec<EffectRun<'a>>,
+        opacity: f64,
+    },
+}
+
+/// Where a layer is drawn from: its source slot, or a texture its effects left.
+#[derive(Clone, Copy, Debug)]
+enum Source {
+    Layer(usize),
+    Output(usize),
+}
+
+/// A layer ready to draw: its texture and its layer uniforms.
+#[derive(Clone, Copy, Debug)]
+struct Drawable {
+    source: Source,
+    offset: u32,
+}
+
+/// What the composition passes do, in order.
+enum Op<'s> {
+    Draw(Drawable),
+    /// A full-frame texture over the composition (a transition's result).
+    Over(usize),
+    Adjust(&'s [EffectRun<'s>], f64),
+}
+
+/// The frame being composed: the project's size and the output's.
+struct Scene {
+    project: (f64, f64),
+    scale: f64,
+    output: (u32, u32),
+}
+
+fn begin_pass<'e>(
+    encoder: &'e mut CommandEncoder,
+    label: &str,
+    view: &TextureView,
+    clear: bool,
+) -> RenderPass<'e> {
+    encoder.begin_render_pass(&RenderPassDescriptor {
+        label: Some(label),
+        color_attachments: &[Some(RenderPassColorAttachment {
+            view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: Operations {
+                load: if clear {
+                    LoadOp::Clear(Color::TRANSPARENT)
+                } else {
+                    LoadOp::Load
+                },
+                store: StoreOp::Store,
+            },
+        })],
+        ..Default::default()
+    })
+}
+
+/// The layer shader's uniforms: where the picture goes, how its texture maps,
+/// its visible part and the quad drawn around it.
+fn layer_values(geometry: &LayerGeometry, to_texture: &Affine, opacity: f64) -> Vec<u8> {
+    let clip = geometry.to_clip.to_f32();
+    let tex = to_texture.to_f32();
+    let v = geometry.visible.map(|value| value as f32);
+    let q = geometry.quad.map(|value| value as f32);
+    floats(&[
+        clip[0],
+        clip[1],
+        clip[2],
+        clip[3],
+        clip[4],
+        clip[5],
+        opacity as f32,
+        0.0,
+        tex[0],
+        tex[1],
+        tex[2],
+        tex[3],
+        tex[4],
+        tex[5],
+        0.0,
+        0.0,
+        v[0],
+        v[1],
+        v[2],
+        v[3],
+        q[0],
+        q[1],
+        q[2],
+        q[3],
+    ])
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct TextureKey {
     width: u32,
@@ -92,11 +239,10 @@ impl TexturePool {
         if let Some(texture) = self.free.get_mut(&key).and_then(Vec::pop) {
             return texture;
         }
-        let mut usage = TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST;
-        if key.format == LAYER_FORMAT {
-            // Conversion passes render into it; external copies require it too.
-            usage |= TextureUsages::RENDER_ATTACHMENT;
-        }
+        // Conversion and effect passes render into it; external copies require it too.
+        let usage = TextureUsages::TEXTURE_BINDING
+            | TextureUsages::COPY_DST
+            | TextureUsages::RENDER_ATTACHMENT;
         let texture = device.create_texture(&TextureDescriptor {
             label: Some("Layer texture"),
             size: Extent3d {
@@ -120,12 +266,18 @@ impl TexturePool {
         }
     }
 
+    /// Returns a texture for reuse. Effect chains release textures while a frame
+    /// is built, so nothing is destroyed until [`TexturePool::trim`].
     fn release(&mut self, texture: Pooled) {
-        let free = self.free.entry(texture.key).or_default();
-        if free.len() < POOL_KEEP {
-            free.push(texture);
-        } else {
-            texture.texture.destroy();
+        self.free.entry(texture.key).or_default().push(texture);
+    }
+
+    /// Keeps at most a few free textures of each size; call after a submission.
+    fn trim(&mut self) {
+        for free in self.free.values_mut() {
+            while free.len() > POOL_KEEP {
+                free.pop().expect("texture").texture.destroy();
+            }
         }
     }
 
@@ -154,6 +306,8 @@ struct FrameBuild {
     layers: Vec<Option<LayerTexture>>,
     /// Plane textures to return to the pool after submission.
     planes: Vec<Pooled>,
+    /// What effects and transitions left, drawn in the composition.
+    outputs: Vec<Pooled>,
     uniforms: Vec<u8>,
     slots: u64,
 }
@@ -251,7 +405,21 @@ pub struct Compositor {
     convert_layout: BindGroupLayout,
     present_layout: BindGroupLayout,
     export_layout: BindGroupLayout,
+    effect_layout: BindGroupLayout,
+    copy_layout: BindGroupLayout,
     layer_pipeline: RenderPipeline,
+    extract_pipeline: RenderPipeline,
+    copy_pipeline: RenderPipeline,
+    over_pipeline: RenderPipeline,
+    mix_pipeline: RenderPipeline,
+    /// Each effect's pass pipelines, by `pack/id`, made on first use.
+    effect_pipelines: HashMap<String, Vec<RenderPipeline>>,
+    /// Bound where an effect reads no image, LUT or second picture: transparent.
+    blank: TextureView,
+    blank_cube: TextureView,
+    blank_textures: [Texture; 2],
+    images: HashMap<String, (Texture, TextureView)>,
+    luts: HashMap<String, (Texture, TextureView, u32)>,
     nv12_pipeline: RenderPipeline,
     i420_pipeline: RenderPipeline,
     premultiply_pipeline: RenderPipeline,
@@ -378,6 +546,42 @@ impl Compositor {
                 sampler_entry(32),
             ],
         });
+        // Effect passes: frame and settings uniforms, input, original, sampler,
+        // LUT cube and pack image.
+        let effect_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Effect"),
+            entries: &[
+                uniform_entry(0, true, EFFECT_FRAME_SIZE),
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                texture_entry(2),
+                texture_entry(3),
+                sampler_entry(4),
+                BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D3,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                texture_entry(6),
+            ],
+        });
+        let copy_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Copy"),
+            entries: &[texture_entry(40), sampler_entry(41)],
+        });
         let layer_pipeline = Self::pipeline(
             device,
             &shader,
@@ -398,6 +602,52 @@ impl Compositor {
                 PrimitiveTopology::TriangleList,
             )
         };
+        let extract_pipeline = Self::pipeline(
+            device,
+            &shader,
+            &[&layer_uniform_layout, &texture_layout],
+            ("vs_full", "fs_extract"),
+            comp_format,
+            None,
+            PrimitiveTopology::TriangleList,
+        );
+        let copy = |blend| {
+            Self::pipeline(
+                device,
+                &shader,
+                &[&copy_layout],
+                ("vs_full", "fs_copy"),
+                comp_format,
+                blend,
+                PrimitiveTopology::TriangleList,
+            )
+        };
+        // Adjustments mix their result in by a constant: src · k + dst · (1 − k).
+        let constant = BlendComponent {
+            src_factor: BlendFactor::Constant,
+            dst_factor: BlendFactor::OneMinusConstant,
+            operation: BlendOperation::Add,
+        };
+        let blank_texture = |dimension| {
+            device.create_texture(&TextureDescriptor {
+                label: Some("Blank"),
+                size: Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension,
+                format: DATA_FORMAT,
+                usage: TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+        };
+        let blank_textures = [
+            blank_texture(TextureDimension::D2),
+            blank_texture(TextureDimension::D3),
+        ];
         let uniforms = device.create_buffer(&BufferDescriptor {
             label: Some("Compositor uniforms"),
             size: UNIFORM_SLOTS * align,
@@ -444,6 +694,21 @@ impl Compositor {
             present_layout,
             export_layout,
             layer_pipeline,
+            extract_pipeline,
+            copy_pipeline: copy(None),
+            over_pipeline: copy(Some(BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
+            mix_pipeline: copy(Some(BlendState {
+                color: constant,
+                alpha: constant,
+            })),
+            effect_layout,
+            copy_layout,
+            effect_pipelines: HashMap::new(),
+            blank: blank_textures[0].create_view(&TextureViewDescriptor::default()),
+            blank_cube: blank_textures[1].create_view(&TextureViewDescriptor::default()),
+            blank_textures,
+            images: HashMap::new(),
+            luts: HashMap::new(),
             present_pipelines: HashMap::new(),
             export_pipeline: None,
             shader,
@@ -549,19 +814,22 @@ impl Compositor {
             }),
             layers: (0..layers).map(|_| None).collect(),
             planes: Vec::new(),
+            outputs: Vec::new(),
             uniforms: Vec::new(),
             slots: 0,
         });
     }
 
+    /// Stores `bytes` in the frame's uniforms at the next aligned slots.
     fn slot(frame: &mut FrameBuild, align: u64, bytes: &[u8]) -> Result<u64, String> {
-        if frame.slots >= UNIFORM_SLOTS {
-            return Err(format!("A frame can hold at most {UNIFORM_SLOTS} layers"));
+        let needed = (bytes.len() as u64).div_ceil(align).max(1);
+        if frame.slots + needed > UNIFORM_SLOTS {
+            return Err("The frame has too many layers and effects to draw".into());
         }
         let offset = frame.slots * align;
         frame.uniforms.resize(offset as usize, 0);
         frame.uniforms.extend_from_slice(bytes);
-        frame.slots += 1;
+        frame.slots += needed;
         Ok(offset)
     }
 
@@ -1040,109 +1308,615 @@ impl Compositor {
         });
     }
 
-    /// Draws the frame's layers, bottom first, into a composition of `output`
-    /// pixels for a project of `project` pixels. `draws` pairs each source slot
-    /// with how to draw it.
+    /// Draws the frame's `steps`, bottom first, into a composition of `output`
+    /// pixels for a project of `project` pixels. Layers name their source slots.
     pub fn compose(
         &mut self,
         device: &Device,
         project: (u32, u32),
         output: (u32, u32),
-        draws: &[(usize, LayerDraw)],
+        steps: &[Step],
     ) -> Result<(), String> {
         let limit = device.limits().max_texture_dimension_2d;
         let output = (output.0.clamp(1, limit), output.1.clamp(1, limit));
         self.ensure_comp(device, output.0, output.1);
         self.project = project;
-        let scale = output.0 as f64 / project.0 as f64;
-        let project_f = (project.0 as f64, project.1 as f64);
+        let scene = Scene {
+            project: (project.0 as f64, project.1 as f64),
+            scale: output.0 as f64 / project.0 as f64,
+            output,
+        };
         let mut frame = self.frame.take().ok_or("No frame is being built")?;
-        let mut drawn = Vec::new();
-        for (index, draw) in draws {
-            if !matches!(frame.layers.get(*index), Some(Some(_))) {
-                continue;
-            }
-            let Some(geometry) =
-                layer_geometry(project_f, scale, &draw.picture, &draw.transform, &draw.crop)
-            else {
-                continue;
-            };
-            let opacity = draw.opacity.clamp(0.0, 1.0);
-            if opacity <= 0.0 {
-                continue;
-            }
-            let clip = geometry.to_clip.to_f32();
-            let tex = geometry.to_texture.to_f32();
-            let v = geometry.visible.map(|value| value as f32);
-            let q = geometry.quad.map(|value| value as f32);
-            let values = [
-                clip[0],
-                clip[1],
-                clip[2],
-                clip[3],
-                clip[4],
-                clip[5],
-                opacity as f32,
-                0.0,
-                tex[0],
-                tex[1],
-                tex[2],
-                tex[3],
-                tex[4],
-                tex[5],
-                0.0,
-                0.0,
-                v[0],
-                v[1],
-                v[2],
-                v[3],
-                q[0],
-                q[1],
-                q[2],
-                q[3],
-            ];
-            let offset = match Self::slot(&mut frame, self.align, &floats(&values)) {
-                Ok(offset) => offset,
-                Err(error) => {
-                    self.frame = Some(frame);
-                    return Err(error);
-                }
-            };
-            if let Some(Some(LayerTexture::Pooled(pooled))) = frame.layers.get_mut(*index) {
-                if pooled.binding.is_none() {
-                    pooled.binding = Some(self.texture_binding(device, &pooled.view));
-                }
-            }
-            drawn.push((*index, offset as u32));
-        }
-        {
-            let comp = self.comp.as_ref().unwrap();
-            let mut pass = frame.encoder.begin_render_pass(&RenderPassDescriptor {
-                label: Some("Composition"),
-                color_attachments: &[Some(RenderPassColorAttachment {
-                    view: &comp.view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: Operations {
-                        load: LoadOp::Clear(Color::TRANSPARENT),
-                        store: StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-            pass.set_pipeline(&self.layer_pipeline);
-            for (index, offset) in &drawn {
-                let binding = match frame.layers[*index].as_ref().unwrap() {
-                    LayerTexture::Pooled(pooled) => pooled.binding.as_ref().unwrap(),
-                    LayerTexture::Still(key) => &self.stills[key].binding,
-                };
-                pass.set_bind_group(0, &self.layer_uniforms, &[*offset]);
-                pass.set_bind_group(1, binding, &[]);
-                pass.draw(0..4, 0..1);
-            }
-        }
+        let result = self.compose_steps(device, &mut frame, &scene, steps);
         self.frame = Some(frame);
+        result
+    }
+
+    fn compose_steps(
+        &mut self,
+        device: &Device,
+        frame: &mut FrameBuild,
+        scene: &Scene,
+        steps: &[Step],
+    ) -> Result<(), String> {
+        // Everything that depends only on the sources is drawn first.
+        let mut ops = Vec::new();
+        for step in steps {
+            match step {
+                Step::Layer(layer) => {
+                    if let Some(drawable) = self.prepare_layer(device, frame, scene, layer)? {
+                        ops.push(Op::Draw(drawable));
+                    }
+                }
+                Step::Transition {
+                    from,
+                    to,
+                    transition,
+                    progress,
+                } => {
+                    let from = match from {
+                        Some(side) => self.render_side(device, frame, scene, side)?,
+                        None => None,
+                    };
+                    let to = match to {
+                        Some(side) => self.render_side(device, frame, scene, side)?,
+                        None => None,
+                    };
+                    if from.is_none() && to.is_none() {
+                        continue;
+                    }
+                    let blended = self.run_transition(
+                        device,
+                        frame,
+                        scene.output,
+                        from,
+                        to,
+                        transition,
+                        *progress,
+                    )?;
+                    frame.outputs.push(blended);
+                    ops.push(Op::Over(frame.outputs.len() - 1));
+                }
+                Step::Adjustment { effects, opacity } => {
+                    if !effects.is_empty() && *opacity > 0.0 {
+                        ops.push(Op::Adjust(effects, opacity.min(1.0)));
+                    }
+                }
+            }
+        }
+        // Then the composition, in passes split where an adjustment layer reads it.
+        let mut clear = true;
+        let mut rest = &ops[..];
+        loop {
+            let split = rest
+                .iter()
+                .position(|op| matches!(op, Op::Adjust(..)))
+                .unwrap_or(rest.len());
+            self.draw_ops(device, frame, &rest[..split], clear);
+            clear = false;
+            let Some(Op::Adjust(effects, opacity)) = rest.get(split) else {
+                break;
+            };
+            self.adjust(device, frame, scene.output, effects, *opacity)?;
+            rest = &rest[split + 1..];
+        }
         Ok(())
+    }
+
+    fn target_key(&self, size: (u32, u32)) -> TextureKey {
+        TextureKey {
+            width: size.0.max(1),
+            height: size.1.max(1),
+            format: self.comp_format,
+        }
+    }
+
+    /// The layer-pass binding of a drawable's texture.
+    fn binding<'f>(&'f self, frame: &'f FrameBuild, source: Source) -> &'f BindGroup {
+        match source {
+            Source::Layer(index) => match frame.layers[index].as_ref().expect("source") {
+                LayerTexture::Pooled(pooled) => pooled.binding.as_ref().expect("binding"),
+                LayerTexture::Still(key) => &self.stills[key].binding,
+            },
+            Source::Output(index) => frame.outputs[index].binding.as_ref().expect("binding"),
+        }
+    }
+
+    fn copy_binding(&self, device: &Device, view: &TextureView) -> BindGroup {
+        device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Copy"),
+            layout: &self.copy_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 40,
+                    resource: BindingResource::TextureView(view),
+                },
+                BindGroupEntry {
+                    binding: 41,
+                    resource: BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        })
+    }
+
+    /// Readies layer `step` to draw: its uniforms, and its effects run on its
+    /// visible part, upright, at the size it is drawn. None when it shows nothing.
+    fn prepare_layer(
+        &mut self,
+        device: &Device,
+        frame: &mut FrameBuild,
+        scene: &Scene,
+        step: &LayerStep,
+    ) -> Result<Option<Drawable>, String> {
+        let index = step.index;
+        if !matches!(frame.layers.get(index), Some(Some(_))) {
+            return Ok(None);
+        }
+        let draw = &step.draw;
+        let Some(geometry) = layer_geometry(
+            scene.project,
+            scene.scale,
+            &draw.picture,
+            &draw.transform,
+            &draw.crop,
+        ) else {
+            return Ok(None);
+        };
+        let opacity = draw.opacity.clamp(0.0, 1.0);
+        if opacity <= 0.0 {
+            return Ok(None);
+        }
+        if let Some(Some(LayerTexture::Pooled(pooled))) = frame.layers.get_mut(index) {
+            if pooled.binding.is_none() {
+                pooled.binding = Some(self.texture_binding(device, &pooled.view));
+            }
+        }
+        if step.effects.is_empty() {
+            let values = layer_values(&geometry, &geometry.to_texture, opacity);
+            let offset = Self::slot(frame, self.align, &values)?;
+            return Ok(Some(Drawable {
+                source: Source::Layer(index),
+                offset: offset as u32,
+            }));
+        }
+        let limit = device.limits().max_texture_dimension_2d;
+        let size = effect_size(&geometry, &draw.picture, limit);
+        let values = layer_values(&geometry, &geometry.to_texture, 1.0);
+        let extract = Self::slot(frame, self.align, &values)?;
+        let input = self.pool.acquire(device, self.target_key(size));
+        {
+            let binding = self.binding(frame, Source::Layer(index)).clone();
+            let mut pass = begin_pass(&mut frame.encoder, "Effect input", &input.view, true);
+            pass.set_pipeline(&self.extract_pipeline);
+            pass.set_bind_group(0, &self.layer_uniforms, &[extract as u32]);
+            pass.set_bind_group(1, &binding, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        let aspect = size.0 as f64 / size.1 as f64;
+        let mut result = self.run_effects(device, frame, input, aspect, &step.effects)?;
+        if result.binding.is_none() {
+            result.binding = Some(self.texture_binding(device, &result.view));
+        }
+        let values = layer_values(&geometry, &visible_map(geometry.visible), opacity);
+        let offset = Self::slot(frame, self.align, &values)?;
+        frame.outputs.push(result);
+        Ok(Some(Drawable {
+            source: Source::Output(frame.outputs.len() - 1),
+            offset: offset as u32,
+        }))
+    }
+
+    /// Runs `effects` in order, each pass into a fresh texture of the pool;
+    /// returns the last one.
+    fn run_effects(
+        &mut self,
+        device: &Device,
+        frame: &mut FrameBuild,
+        input: Pooled,
+        aspect: f64,
+        effects: &[EffectRun],
+    ) -> Result<Pooled, String> {
+        let mut current = input;
+        for run in effects {
+            let pipelines = self.effect_pipelines(device, run.entry);
+            let size = (current.key.width, current.key.height);
+            let mut latest: Option<Pooled> = None;
+            for (pass, pipeline) in run.entry.definition.passes.iter().zip(&pipelines) {
+                let scaled = |side: u32| ((side as f64 * pass.scale).round() as u32).max(1);
+                let target = self
+                    .pool
+                    .acquire(device, self.target_key((scaled(size.0), scaled(size.1))));
+                let source = latest.as_ref().unwrap_or(&current);
+                let input = (&source.view, (source.key.width, source.key.height));
+                self.effect_pass(
+                    device,
+                    frame,
+                    pipeline,
+                    &target,
+                    input,
+                    &current.view,
+                    run,
+                    aspect,
+                    0.0,
+                )?;
+                // The pass just recorded reads it; later passes may write it again.
+                if let Some(old) = latest.replace(target) {
+                    self.pool.release(old);
+                }
+            }
+            if let Some(result) = latest {
+                let original = std::mem::replace(&mut current, result);
+                self.pool.release(original);
+            }
+        }
+        Ok(current)
+    }
+
+    /// One pass of an effect or transition into `target`.
+    #[allow(clippy::too_many_arguments)]
+    fn effect_pass(
+        &self,
+        device: &Device,
+        frame: &mut FrameBuild,
+        pipeline: &RenderPipeline,
+        target: &Pooled,
+        input: (&TextureView, (u32, u32)),
+        original: &TextureView,
+        run: &EffectRun,
+        aspect: f64,
+        progress: f64,
+    ) -> Result<(), String> {
+        let lut = run
+            .lut
+            .and_then(|lut| self.luts.get(lut.key).map(|(_, view, n)| (lut, view, *n)));
+        let (lut_view, lut_min, lut_scale) = match lut {
+            Some((lut, view, n)) => {
+                let scale = |axis: usize| 1.0 / (lut.max[axis] - lut.min[axis]).max(1e-9);
+                (
+                    view,
+                    [lut.min[0], lut.min[1], lut.min[2], n as f64],
+                    [scale(0), scale(1), scale(2), 1.0],
+                )
+            }
+            None => (&self.blank_cube, [0.0, 0.0, 0.0, 2.0], [1.0, 1.0, 1.0, 0.0]),
+        };
+        let image = run
+            .image
+            .as_deref()
+            .and_then(|key| self.images.get(key))
+            .map_or(&self.blank, |(_, view)| view);
+        let size = (target.key.width, target.key.height);
+        let mut values = vec![
+            size.0 as f32,
+            size.1 as f32,
+            input.1 .0 as f32,
+            input.1 .1 as f32,
+            run.time as f32,
+            progress as f32,
+            run.seed as f32,
+            aspect as f32,
+        ];
+        values.extend(lut_min.iter().chain(&lut_scale).map(|&v| v as f32));
+        let frame_offset = Self::slot(frame, self.align, &floats(&values))?;
+        let params = cgv_effects::pack_params(run.entry, run.params);
+        let params_offset = Self::slot(frame, self.align, &params)?;
+        let buffer = |size: u64| {
+            BindingResource::Buffer(BufferBinding {
+                buffer: &self.uniforms,
+                offset: 0,
+                size: BufferSize::new(size),
+            })
+        };
+        let binding = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Effect pass"),
+            layout: &self.effect_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: buffer(EFFECT_FRAME_SIZE),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: buffer(params.len() as u64),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(input.0),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::TextureView(original),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: BindingResource::Sampler(&self.sampler),
+                },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: BindingResource::TextureView(lut_view),
+                },
+                BindGroupEntry {
+                    binding: 6,
+                    resource: BindingResource::TextureView(image),
+                },
+            ],
+        });
+        let mut pass = begin_pass(&mut frame.encoder, "Effect", &target.view, true);
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &binding, &[frame_offset as u32, params_offset as u32]);
+        pass.draw(0..3, 0..1);
+        Ok(())
+    }
+
+    /// The pass pipelines of an effect, compiled on first use.
+    fn effect_pipelines(
+        &mut self,
+        device: &Device,
+        entry: &cgv_effects::Entry,
+    ) -> Vec<RenderPipeline> {
+        let key = format!("{}/{}", entry.pack, entry.definition.id);
+        if let Some(pipelines) = self.effect_pipelines.get(&key) {
+            return pipelines.clone();
+        }
+        let module = device.create_shader_module(ShaderModuleDescriptor {
+            label: Some(&key),
+            source: ShaderSource::Wgsl(cgv_effects::shader_source(entry).into()),
+        });
+        let pipelines: Vec<RenderPipeline> = (0..entry.definition.passes.len())
+            .map(|index| {
+                let fragment = format!("cgv_pass_{index}");
+                Self::pipeline(
+                    device,
+                    &module,
+                    &[&self.effect_layout],
+                    ("cgv_vertex", &fragment),
+                    self.comp_format,
+                    None,
+                    PrimitiveTopology::TriangleList,
+                )
+            })
+            .collect();
+        self.effect_pipelines.insert(key, pipelines.clone());
+        pipelines
+    }
+
+    /// One side of a transition: the layer, with its effects, drawn alone in a
+    /// full-frame texture.
+    fn render_side(
+        &mut self,
+        device: &Device,
+        frame: &mut FrameBuild,
+        scene: &Scene,
+        side: &LayerStep,
+    ) -> Result<Option<Pooled>, String> {
+        let Some(drawable) = self.prepare_layer(device, frame, scene, side)? else {
+            return Ok(None);
+        };
+        let target = self.pool.acquire(device, self.target_key(scene.output));
+        let binding = self.binding(frame, drawable.source).clone();
+        let mut pass = begin_pass(&mut frame.encoder, "Transition side", &target.view, true);
+        pass.set_pipeline(&self.layer_pipeline);
+        pass.set_bind_group(0, &self.layer_uniforms, &[drawable.offset]);
+        pass.set_bind_group(1, &binding, &[]);
+        pass.draw(0..4, 0..1);
+        drop(pass);
+        Ok(Some(target))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_transition(
+        &mut self,
+        device: &Device,
+        frame: &mut FrameBuild,
+        output: (u32, u32),
+        from: Option<Pooled>,
+        to: Option<Pooled>,
+        run: &EffectRun,
+        progress: f64,
+    ) -> Result<Pooled, String> {
+        let pipelines = self.effect_pipelines(device, run.entry);
+        let target = self.pool.acquire(device, self.target_key(output));
+        let from_view = from.as_ref().map_or(&self.blank, |side| &side.view);
+        let to_view = to.as_ref().map_or(&self.blank, |side| &side.view);
+        let aspect = output.0 as f64 / output.1 as f64;
+        self.effect_pass(
+            device,
+            frame,
+            &pipelines[0],
+            &target,
+            (from_view, output),
+            to_view,
+            run,
+            aspect,
+            progress,
+        )?;
+        for side in [from, to].into_iter().flatten() {
+            self.pool.release(side);
+        }
+        Ok(target)
+    }
+
+    /// Draws `ops` into the composition in one pass, clearing it first if asked.
+    fn draw_ops(&self, device: &Device, frame: &mut FrameBuild, ops: &[Op], clear: bool) {
+        let bindings: Vec<BindGroup> = ops
+            .iter()
+            .map(|op| match op {
+                Op::Draw(drawable) => self.binding(frame, drawable.source).clone(),
+                Op::Over(index) => self.copy_binding(device, &frame.outputs[*index].view),
+                Op::Adjust(..) => unreachable!("adjustments split the passes"),
+            })
+            .collect();
+        let comp = self.comp.as_ref().expect("composition target");
+        let mut pass = begin_pass(&mut frame.encoder, "Composition", &comp.view, clear);
+        for (op, binding) in ops.iter().zip(&bindings) {
+            match op {
+                Op::Draw(drawable) => {
+                    pass.set_pipeline(&self.layer_pipeline);
+                    pass.set_bind_group(0, &self.layer_uniforms, &[drawable.offset]);
+                    pass.set_bind_group(1, binding, &[]);
+                    pass.draw(0..4, 0..1);
+                }
+                Op::Over(_) => {
+                    pass.set_pipeline(&self.over_pipeline);
+                    pass.set_bind_group(0, binding, &[]);
+                    pass.draw(0..3, 0..1);
+                }
+                Op::Adjust(..) => {}
+            }
+        }
+    }
+
+    /// An adjustment layer: its effects run on a copy of the composition so far,
+    /// and the result is mixed back in by `opacity`.
+    fn adjust(
+        &mut self,
+        device: &Device,
+        frame: &mut FrameBuild,
+        output: (u32, u32),
+        effects: &[EffectRun],
+        opacity: f64,
+    ) -> Result<(), String> {
+        let copy = self.pool.acquire(device, self.target_key(output));
+        let comp_binding = self.copy_binding(device, &self.comp.as_ref().expect("target").view);
+        {
+            let mut pass = begin_pass(&mut frame.encoder, "Adjustment input", &copy.view, true);
+            pass.set_pipeline(&self.copy_pipeline);
+            pass.set_bind_group(0, &comp_binding, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        let aspect = output.0 as f64 / output.1 as f64;
+        let adjusted = self.run_effects(device, frame, copy, aspect, effects)?;
+        let binding = self.copy_binding(device, &adjusted.view);
+        {
+            let comp = self.comp.as_ref().expect("target");
+            let mut pass = begin_pass(&mut frame.encoder, "Adjustment", &comp.view, false);
+            pass.set_pipeline(&self.mix_pipeline);
+            let k = opacity.clamp(0.0, 1.0);
+            pass.set_blend_constant(Color {
+                r: k,
+                g: k,
+                b: k,
+                a: k,
+            });
+            pass.set_bind_group(0, &binding, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        frame.outputs.push(adjusted);
+        Ok(())
+    }
+
+    /// Uploads an image a pack's definitions read (such as a luma-wipe gradient),
+    /// as data: no colour conversion.
+    pub fn upload_image(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        key: &str,
+        image: ExternalImageSource,
+    ) -> Result<(), String> {
+        let (width, height) = (image.width(), image.height());
+        let limit = device.limits().max_texture_dimension_2d;
+        if width == 0 || height == 0 || width > limit || height > limit {
+            return Err(format!("A {width}×{height} image does not fit on the GPU"));
+        }
+        let texture = device.create_texture(&TextureDescriptor {
+            label: Some("Pack image"),
+            size: Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: DATA_FORMAT,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        queue.copy_external_image_to_texture(
+            &CopyExternalImageSourceInfo {
+                source: image,
+                origin: Origin2d::ZERO,
+                flip_y: false,
+            },
+            CopyExternalImageDestInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+                color_space: PredefinedColorSpace::Srgb,
+                premultiplied_alpha: false,
+            },
+            Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&TextureViewDescriptor::default());
+        if let Some((old, _)) = self.images.insert(key.to_string(), (texture, view)) {
+            old.destroy();
+        }
+        Ok(())
+    }
+
+    pub fn has_image(&self, key: &str) -> bool {
+        self.images.contains_key(key)
+    }
+
+    /// Uploads a LUT as a cube of `points` per side: RGBA8 texels, red fastest.
+    pub fn upload_lut(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        key: &str,
+        points: u32,
+        texels: &[u8],
+    ) -> Result<(), String> {
+        if points < 2 || texels.len() != (points as usize).pow(3) * 4 {
+            return Err("The LUT's data does not match its size".into());
+        }
+        let size = Extent3d {
+            width: points,
+            height: points,
+            depth_or_array_layers: points,
+        };
+        let texture = device.create_texture(&TextureDescriptor {
+            label: Some("LUT"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D3,
+            format: DATA_FORMAT,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            texels,
+            TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(points * 4),
+                rows_per_image: Some(points),
+            },
+            size,
+        );
+        let view = texture.create_view(&TextureViewDescriptor::default());
+        if let Some((old, _, _)) = self.luts.insert(key.to_string(), (texture, view, points)) {
+            old.destroy();
+        }
+        Ok(())
+    }
+
+    pub fn has_lut(&self, key: &str) -> bool {
+        self.luts.contains_key(key)
     }
 
     /// Records a pass that shows the composition in `viewport` of `target`.
@@ -1199,6 +1973,7 @@ impl Compositor {
             encoder,
             layers,
             planes,
+            outputs,
             ..
         } = frame;
         queue.submit([encoder.finish()]);
@@ -1208,9 +1983,10 @@ impl Compositor {
                 self.pool.release(texture);
             }
         }
-        for texture in planes {
+        for texture in planes.into_iter().chain(outputs) {
             self.pool.release(texture);
         }
+        self.pool.trim();
         Ok(())
     }
 
@@ -1220,9 +1996,10 @@ impl Compositor {
                 self.pool.release(texture);
             }
         }
-        for texture in frame.planes {
+        for texture in frame.planes.into_iter().chain(frame.outputs) {
             self.pool.release(texture);
         }
+        self.pool.trim();
     }
 
     /// Shows the last composition again (after a resize, say).
@@ -1496,6 +2273,15 @@ impl Compositor {
         }
         if let Some(export) = self.export.take() {
             export.texture.destroy();
+        }
+        for (_, (texture, _)) in self.images.drain() {
+            texture.destroy();
+        }
+        for (_, (texture, _, _)) in self.luts.drain() {
+            texture.destroy();
+        }
+        for texture in &self.blank_textures {
+            texture.destroy();
         }
     }
 }

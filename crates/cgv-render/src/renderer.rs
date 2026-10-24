@@ -5,7 +5,7 @@ use wasm_bindgen::JsCast;
 use web_sys::OffscreenCanvas;
 use wgpu::*;
 
-use crate::compositor::{Compositor, FrameSource, LayerDraw, Readback};
+use crate::compositor::{Compositor, FrameSource, Readback, Step};
 use crate::geometry::letterbox;
 use crate::pattern::PatternUniforms;
 
@@ -332,10 +332,10 @@ impl Renderer {
         &mut self,
         project: (u32, u32),
         output: (u32, u32),
-        draws: &[(usize, LayerDraw)],
+        steps: &[Step],
     ) -> Result<(), String> {
         self.compositor
-            .compose(&self.device, project, output, draws)
+            .compose(&self.device, project, output, steps)
     }
 
     fn viewport(&self) -> [f32; 4] {
@@ -435,6 +435,20 @@ impl Renderer {
     }
     pub fn has_still(&self, key: &str) -> bool {
         self.compositor.has_still(key)
+    }
+    pub fn upload_image(&mut self, key: &str, image: ExternalImageSource) -> Result<(), String> {
+        self.compositor
+            .upload_image(&self.device, &self.queue, key, image)
+    }
+    pub fn has_image(&self, key: &str) -> bool {
+        self.compositor.has_image(key)
+    }
+    pub fn upload_lut(&mut self, key: &str, points: u32, texels: &[u8]) -> Result<(), String> {
+        self.compositor
+            .upload_lut(&self.device, &self.queue, key, points, texels)
+    }
+    pub fn has_lut(&self, key: &str) -> bool {
+        self.compositor.has_lut(key)
     }
     pub fn drop_still(&mut self, key: &str) -> bool {
         self.compositor.drop_still(key)

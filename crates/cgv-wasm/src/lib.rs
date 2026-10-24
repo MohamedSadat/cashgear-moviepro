@@ -76,6 +76,8 @@ mod bridge {
                 width: 16,
                 height: 9,
                 layers: Vec::new(),
+                steps: Vec::new(),
+                luts: Vec::new(),
             });
             self.inner.compose(1.0, true).map_err(js_error)
         }
@@ -227,6 +229,43 @@ mod bridge {
         }
         pub fn drop_still(&mut self, key: &str) -> bool {
             self.inner.drop_still(key)
+        }
+        /// JSON `[{ key, path }]`: images the definitions read, by their path under
+        /// `assets`. Upload each with `upload_image`.
+        pub fn pack_images(&self) -> Result<String, JsValue> {
+            self.inner.pack_images().map_err(js_error)
+        }
+        pub fn upload_image(
+            &mut self,
+            key: &str,
+            bitmap: web_sys::ImageBitmap,
+        ) -> Result<(), JsValue> {
+            let image = wgpu::ExternalImageSource::ImageBitmap(bitmap);
+            self.inner.upload_image(key, image).map_err(js_error)
+        }
+        pub fn has_image(&self, key: &str) -> bool {
+            self.inner.has_image(key)
+        }
+        /// Uploads a project LUT under `key` (`LutPlan.key`). `shape` is `1d` or
+        /// `3d`; `values` are its 16-bit RGB outputs (`ProjectSession.lut_values`).
+        pub fn upload_lut(
+            &mut self,
+            key: &str,
+            shape: &str,
+            size: u32,
+            values: &[u16],
+        ) -> Result<(), JsValue> {
+            let shape = match shape {
+                "1d" => cgv_model::LutShape::OneD,
+                "3d" => cgv_model::LutShape::ThreeD,
+                other => return Err(js_error(format!("{other} is not a LUT shape"))),
+            };
+            self.inner
+                .upload_lut(key, shape, size, values)
+                .map_err(js_error)
+        }
+        pub fn has_lut(&self, key: &str) -> bool {
+            self.inner.has_lut(key)
         }
         /// Milliseconds the GPU took for the latest finished frame.
         pub fn gpu_ms(&self) -> f64 {
@@ -391,6 +430,21 @@ mod bridge {
             let command: cgv_model::Command = parse(command)?;
             let outcome = self.inner.preview(&command).map_err(js_error)?;
             serde_json::to_string(&outcome).map_err(js_error)
+        }
+        /// Reads a `.cube` file and adds it to the project (an undo step). Returns
+        /// the outcome: the new LUT's id first.
+        pub fn import_lut(&mut self, name: &str, text: &str) -> Result<String, JsValue> {
+            let lut = cgv_model::lut::parse_cube(name, text).map_err(js_error)?;
+            let outcome = self
+                .inner
+                .execute(&cgv_model::Command::AddLut { lut })
+                .map_err(js_error)?;
+            serde_json::to_string(&outcome).map_err(js_error)
+        }
+        /// A project LUT's 16-bit RGB outputs, for `Engine.upload_lut`.
+        pub fn lut_values(&self, id: f64) -> Option<Vec<u16>> {
+            let lut = self.inner.project().lut(cgv_model::LutId(id as u64))?;
+            Some(lut.values())
         }
         /// Records a relinked or changed media file. Not an undo step.
         pub fn update_media(&mut self, media: &str) -> Result<(), JsValue> {
@@ -665,6 +719,14 @@ mod bridge {
         pub fn reset_stats(&mut self) {
             self.stats = Default::default();
         }
+    }
+
+    /// The effects and transitions the engine runs: JSON `CatalogEntry[]`
+    /// (`cgv_effects`), each a definition with its pack.
+    #[wasm_bindgen]
+    pub fn effects_catalog() -> Result<String, JsValue> {
+        let registry = cgv_effects::Registry::builtin().map_err(js_error)?;
+        serde_json::to_string(&registry.catalog()).map_err(js_error)
     }
 
     /// The project's reference to a library item: JSON `MediaItem` in, `MediaRef` out.

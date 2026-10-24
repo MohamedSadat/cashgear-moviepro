@@ -1,3 +1,4 @@
+import { loadPackImages } from '../effects/assets';
 import { expose } from 'comlink';
 import { AudioBlocks } from '../media/audio-blocks';
 import { MediaService } from '../media/service';
@@ -27,6 +28,7 @@ const api: ExportWorkerApi = {
       job.backend,
       (problem: string) => stop.abort(new Error(problem)),
     );
+    await loadPackImages(engine);
     const media = new MediaService(new MediaLibrary(job.platform));
     // Exports wait for every frame, so the decoders' stalls at clip ends cost nothing.
     media.decode = job.decode && job.decode !== 'auto' ? job.decode : 'hardware';

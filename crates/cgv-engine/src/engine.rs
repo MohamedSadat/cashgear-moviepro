@@ -1,19 +1,56 @@
+use cgv_effects::Registry;
+use cgv_model::{parse_lut_ref, LutShape, ParamValue};
 use cgv_render::geometry::{output_size, CropRect, LayerTransform, Picture};
-use cgv_render::{FrameSource, LayerDraw, Readback, Renderer};
+use cgv_render::{EffectRun, FrameSource, LayerDraw, LayerStep, LutUse, Readback, Renderer, Step};
 use web_sys::OffscreenCanvas;
 
-use crate::plan::FramePlan;
+use crate::plan::{self, EffectPlan, FramePlan, LutPlan};
 use crate::PatternClock;
 
-/// The engine's GPU side: the program monitor's renderer and the frame being
-/// built. A frame is planned from the project, given a source per layer, then
-/// composed and shown. Export uses the same steps without showing.
+/// The engine's GPU side: the program monitor's renderer, the effects it knows
+/// and the frame being built. A frame is planned from the project, given a source
+/// per layer, then composed and shown. Export uses the same steps without showing.
 pub struct Engine {
     renderer: Renderer,
+    registry: Registry,
     clock: PatternClock,
     frames: u32,
     plan: Option<FramePlan>,
     pictures: Vec<Option<Picture>>,
+}
+
+/// An effect of the plan as the renderer runs it; None for one this build lacks.
+fn effect_run<'a>(
+    registry: &'a Registry,
+    luts: &'a [LutPlan],
+    effect: &'a EffectPlan,
+    time: f64,
+    seed: f64,
+) -> Option<EffectRun<'a>> {
+    let entry = registry.get(&effect.pack, &effect.kind)?;
+    let definition = &entry.definition;
+    let lut = definition
+        .lut_param()
+        .and_then(|param| match effect.params.get(param) {
+            Some(ParamValue::Text(text)) => parse_lut_ref(text),
+            _ => None,
+        })
+        .and_then(|id| luts.iter().find(|lut| lut.id == id))
+        .map(|lut| LutUse {
+            key: &lut.key,
+            min: lut.domain_min,
+            max: lut.domain_max,
+        });
+    Some(EffectRun {
+        entry,
+        params: &effect.params,
+        time,
+        seed,
+        lut,
+        image: definition
+            .image(&effect.params)
+            .map(|file| entry.image_key(file)),
+    })
 }
 
 fn transform(value: &cgv_model::Transform) -> LayerTransform {
@@ -45,6 +82,7 @@ impl Engine {
     ) -> Result<Self, String> {
         Ok(Self {
             renderer: Renderer::new(canvas, preference, on_error).await?,
+            registry: Registry::builtin()?,
             clock: PatternClock::default(),
             frames: 0,
             plan: None,
@@ -95,28 +133,103 @@ impl Engine {
     /// Returns whether the monitor shows it now.
     pub fn compose(&mut self, scale: f64, present: bool) -> Result<bool, String> {
         let plan = self.plan.take().ok_or("No frame is planned")?;
-        let draws: Vec<(usize, LayerDraw)> = plan
-            .layers
+        let (registry, pictures) = (&self.registry, &self.pictures);
+        let layer = |index: usize| -> Option<LayerStep> {
+            let layer = plan.layers.get(index)?;
+            Some(LayerStep {
+                index,
+                draw: LayerDraw {
+                    picture: (*pictures.get(index)?)?,
+                    transform: transform(&layer.transform),
+                    crop: crop(&layer.crop),
+                    opacity: layer.opacity,
+                },
+                effects: layer
+                    .effects
+                    .iter()
+                    .filter_map(|e| {
+                        effect_run(registry, &plan.luts, e, layer.clip_seconds, layer.seed)
+                    })
+                    .collect(),
+            })
+        };
+        let steps: Vec<Step> = plan
+            .steps
             .iter()
-            .enumerate()
-            .filter_map(|(index, layer)| {
-                Some((
-                    index,
-                    LayerDraw {
-                        picture: self.pictures[index]?,
-                        transform: transform(&layer.transform),
-                        crop: crop(&layer.crop),
-                        opacity: layer.opacity,
-                    },
-                ))
+            .filter_map(|step| match step {
+                plan::Step::Layer { layer: index } => layer(*index).map(Step::Layer),
+                plan::Step::Transition {
+                    from,
+                    to,
+                    transition,
+                    progress,
+                } => {
+                    let (from, to) = (from.and_then(layer), to.and_then(layer));
+                    match effect_run(registry, &plan.luts, transition, 0.0, 0.0) {
+                        Some(transition) => Some(Step::Transition {
+                            from,
+                            to,
+                            transition,
+                            progress: *progress,
+                        }),
+                        // A transition this build lacks cuts at its middle.
+                        None if *progress < 0.5 => from.map(Step::Layer),
+                        None => to.map(Step::Layer),
+                    }
+                }
+                plan::Step::Adjustment {
+                    effects,
+                    opacity,
+                    clip_seconds,
+                    seed,
+                    ..
+                } => Some(Step::Adjustment {
+                    effects: effects
+                        .iter()
+                        .filter_map(|e| effect_run(registry, &plan.luts, e, *clip_seconds, *seed))
+                        .collect(),
+                    opacity: *opacity,
+                }),
             })
             .collect();
         let output = output_size(plan.width, plan.height, scale);
         self.renderer
-            .compose((plan.width, plan.height), output, &draws)?;
+            .compose((plan.width, plan.height), output, &steps)?;
         let shown = self.renderer.finish(present)?;
         self.frames += shown as u32;
         Ok(shown)
+    }
+
+    /// The images the definitions read, as JSON `[{ key, path }]`.
+    pub fn pack_images(&self) -> Result<String, String> {
+        serde_json::to_string(&self.registry.images()).map_err(|error| error.to_string())
+    }
+
+    pub fn upload_image(
+        &mut self,
+        key: &str,
+        image: wgpu::ExternalImageSource,
+    ) -> Result<(), String> {
+        self.renderer.upload_image(key, image)
+    }
+    pub fn has_image(&self, key: &str) -> bool {
+        self.renderer.has_image(key)
+    }
+
+    /// Uploads a project LUT's 16-bit RGB outputs under `key` (its fingerprint).
+    pub fn upload_lut(
+        &mut self,
+        key: &str,
+        shape: LutShape,
+        size: u32,
+        values: &[u16],
+    ) -> Result<(), String> {
+        let (points, texels) = cgv_effects::lut_texels(shape, size, values)
+            .ok_or("The LUT's data does not match its size")?;
+        self.renderer.upload_lut(key, points, &texels)
+    }
+    pub fn has_lut(&self, key: &str) -> bool {
+        self.renderer.has_lut(key)
     }
 
     pub fn needs_present(&self) -> bool {

@@ -58,6 +58,7 @@ export {
   type ExportVideoCodec,
   type FormatInfo,
 } from './export/settings';
+export type * from './effects/types';
 export type * from './export/types';
 export type * from './media/types';
 export type * from './playback/types';

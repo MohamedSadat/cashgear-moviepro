@@ -52,6 +52,7 @@ function project(magnetic: boolean): Project {
     mainTrack: 11,
     magnetic,
     markers: [],
+    luts: [],
     nextId: 60,
   };
 }

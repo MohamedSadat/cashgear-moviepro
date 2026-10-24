@@ -18,6 +18,7 @@ import type {
   SavedText,
 } from './project/types';
 import type { Pixels, PlaybackState, PlaybackStatsReport, QualityMode } from './playback/types';
+import type { CatalogEntry, LookInfo } from './effects/types';
 
 export type BackendPreference = 'auto' | 'webgl2';
 export type Backend = 'WebGPU' | 'WebGL2';
@@ -107,6 +108,13 @@ export interface EngineApi {
   projectClipsAt(time: number): ClipAt[];
   projectSnapPoints(playhead: number | null, exclude: number[]): number[];
   projectPresets(): Promise<Preset[]>;
+  /** Reads a `.cube` file into the project's LUTs (one undo step). */
+  projectImportLut(name: string, text: string): { outcome: Outcome; snapshot: ProjectSnapshot };
+  /** Imports built-in look `id` as a project LUT (one undo step). */
+  projectImportLook(id: string): Promise<{ outcome: Outcome; snapshot: ProjectSnapshot }>;
+  /** Every effect and transition the engine runs. */
+  effectsCatalog(): Promise<CatalogEntry[]>;
+  builtinLooks(): Promise<LookInfo[]>;
 
   /** Gives the worker the sound ring the page's audio output plays. */
   attachAudio(buffer: SharedArrayBuffer, sampleRate: number, channels: number): Promise<void>;

@@ -77,6 +77,23 @@ fn vs_full(@builtin(vertex_index) index: u32) -> FullOut {
     return out;
 }
 
+// A layer's visible part, upright, filling the target: what its effects start from.
+// The layer uniforms map upright (u, v) to the source texture.
+@fragment
+fn fs_extract(in: FullOut) -> @location(0) vec4<f32> {
+    let uv = mix(layer.visible.xy, layer.visible.zw, in.uv);
+    return textureSample(layer_texture, layer_sampler, affine(layer.tex0, layer.tex1, uv));
+}
+
+// A texture as it is: copied, or drawn over the composition with blending.
+@group(0) @binding(40) var copy_texture: texture_2d<f32>;
+@group(0) @binding(41) var copy_sampler: sampler;
+
+@fragment
+fn fs_copy(in: FullOut) -> @location(0) vec4<f32> {
+    return textureSampleLevel(copy_texture, copy_sampler, in.uv, 0.0);
+}
+
 fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
     let low = c / 12.92;
     let high = pow((c + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4));

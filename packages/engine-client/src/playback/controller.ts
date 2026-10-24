@@ -372,7 +372,7 @@ export class PlaybackController {
       starting.drawn = true;
       const sources = this.gatherNow(plan);
       const scale = this.playback.quality_scale();
-      const presented = !!sources && this.draw(planJson, sources, scale, true);
+      const presented = !!sources && this.draw(session, planJson, plan, sources, scale, true);
       if (presented) {
         this.lastPresented = plan.frame;
         this.onScreen = { frame: plan.frame, time: plan.time };
@@ -461,7 +461,8 @@ export class PlaybackController {
       this.undecoded.add(frame);
       return false;
     }
-    const presented = this.draw(planJson, sources, this.playback.quality_scale(), true);
+    const scale = this.playback.quality_scale();
+    const presented = this.draw(session, planJson, plan, sources, scale, true);
     if (!presented) return false;
     const previous = this.lastPresented;
     const missed = rate === 1 && previous >= 0 ? Math.max(0, frame - previous - 1) : 0;
@@ -680,8 +681,15 @@ export class PlaybackController {
   }
 
   /** Composes `planJson` with its gathered sources and shows it. */
-  private draw(planJson: string, sources: (LayerSource | null)[], scale: number, present: boolean) {
-    return drawFrame(this.deps.engine, planJson, sources, scale, present);
+  private draw(
+    session: ProjectSession,
+    planJson: string,
+    plan: FramePlan,
+    sources: (LayerSource | null)[],
+    scale: number,
+    present: boolean,
+  ) {
+    return drawFrame(this.deps.engine, session, planJson, plan, sources, scale, present);
   }
 
   /** Draws the playhead's frame while paused, waiting for its sources. */
@@ -710,7 +718,8 @@ export class PlaybackController {
       // A newer request, playback or another project took over meanwhile.
       if (token !== this.renderToken || this.deps.session() !== session) return;
       if (reverse !== this.playback.playing() || this.starting) return;
-      if (this.draw(planJson, sources, this.playback.quality_scale(), true) || !reverse) {
+      const scale = this.playback.quality_scale();
+      if (this.draw(session, planJson, plan, sources, scale, true) || !reverse) {
         this.lastPresented = frame;
         this.onScreen = { frame, time };
       }

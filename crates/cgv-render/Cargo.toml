@@ -11,6 +11,8 @@ rust-version.workspace = true
 naga = { workspace = true, features = ["glsl-out"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+cgv-effects.workspace = true
+cgv-model.workspace = true
 wgpu.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true

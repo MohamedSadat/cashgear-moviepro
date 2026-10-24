@@ -1,6 +1,7 @@
-//! wgpu compositor: frames to linear-light textures, layers drawn bottom track
-//! first with transform, crop and opacity, and the result shown on the program
-//! monitor or read back. The Phase 0 test pattern stays as a diagnostic.
+//! wgpu compositor: frames to linear-light textures, effects and transitions
+//! from `cgv-effects` packs, layers drawn bottom track first with transform, crop
+//! and opacity, and the result shown on the program monitor or read back. The
+//! Phase 0 test pattern stays as a diagnostic.
 pub mod color;
 #[cfg(target_arch = "wasm32")]
 mod compositor;
@@ -9,7 +10,9 @@ pub mod pattern;
 #[cfg(target_arch = "wasm32")]
 mod renderer;
 #[cfg(target_arch = "wasm32")]
-pub use compositor::{FrameSource, LayerDraw, PlaneFormat, Planes, Readback};
+pub use compositor::{
+    EffectRun, FrameSource, LayerDraw, LayerStep, LutUse, PlaneFormat, Planes, Readback, Step,
+};
 #[cfg(target_arch = "wasm32")]
 pub use renderer::{now_ms, Renderer};
 

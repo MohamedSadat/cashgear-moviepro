@@ -1,8 +1,15 @@
 // Mirrors the JSON of crates/cgv-engine (plan::FramePlan, stats::StatsSummary).
-import type { Crop, Speed, Transform } from '../project/types';
+import type { Crop, Params, Speed, Transform } from '../project/types';
 import type { AudioReport } from './audio-player';
 
 export type QualityMode = 'auto' | 'full' | 'half' | 'quarter';
+
+/** An effect to run at a frame, with its settings there (keyframes applied). */
+export interface EffectPlan {
+  pack: string;
+  kind: string;
+  params: Params;
+}
 
 /** One picture of a planned frame. Times are flicks. */
 export interface LayerPlan {
@@ -19,15 +26,50 @@ export interface LayerPlan {
   clipEnd: number;
   sourceIn: number;
   speed: Speed;
+  /** Seconds from the clip's start (negative, or past its end, in a transition). */
+  clipSeconds: number;
+  seed: number;
+  effects?: EffectPlan[];
 }
 
-/** What one project frame shows, bottom layer first. */
+/** How a frame is drawn, bottom first. */
+export type PlanStep =
+  | { kind: 'layer'; layer: number }
+  | {
+      kind: 'transition';
+      from: number | null;
+      to: number | null;
+      transition: EffectPlan;
+      progress: number;
+    }
+  | {
+      kind: 'adjustment';
+      clip: number;
+      effects: EffectPlan[];
+      opacity: number;
+      clipSeconds: number;
+      seed: number;
+    };
+
+/** A project LUT a frame's effects read; `key` is what the GPU caches it by. */
+export interface LutPlan {
+  id: number;
+  key: string;
+  shape: '1d' | '3d';
+  size: number;
+  domainMin: [number, number, number];
+  domainMax: [number, number, number];
+}
+
+/** What one project frame shows: its pictures, and how they are drawn. */
 export interface FramePlan {
   frame: number;
   time: number;
   width: number;
   height: number;
   layers: LayerPlan[];
+  steps: PlanStep[];
+  luts?: LutPlan[];
 }
 
 /** The playhead and transport, as the monitor shows them. */

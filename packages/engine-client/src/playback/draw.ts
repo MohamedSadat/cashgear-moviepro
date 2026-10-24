@@ -1,5 +1,7 @@
+import { uploadLuts } from '../effects/assets';
 import type { FramePlanes } from '../media/planes';
-import type { Engine } from '../pkg/cgv_wasm';
+import type { Engine, ProjectSession } from '../pkg/cgv_wasm';
+import type { FramePlan } from './types';
 
 /** One layer's picture for a frame. */
 export type LayerSource =
@@ -8,17 +10,22 @@ export type LayerSource =
   | { kind: 'still'; key: string; width: number; height: number };
 
 /**
- * Composes `planJson` (from `ProjectSession.plan_frame`) with a source per layer
- * at `scale` of the project resolution: the GPU half of `renderFrame(t)`, shared
- * by preview and export. Shows it when `present` is set; returns whether it did.
+ * Composes `planJson` (from `ProjectSession.plan_frame`, parsed as `plan`) with a
+ * source per layer at `scale` of the project resolution: the GPU half of
+ * `renderFrame(t)`, shared by preview and export. LUTs the effects read are
+ * uploaded from `session` first. Shows the frame when `present` is set; returns
+ * whether it did.
  */
 export function drawFrame(
   engine: Engine,
+  session: ProjectSession,
   planJson: string,
+  plan: FramePlan,
   sources: (LayerSource | null)[],
   scale: number,
   present: boolean,
 ): boolean {
+  uploadLuts(engine, session, plan);
   engine.begin(planJson);
   sources.forEach((source, index) => {
     if (!source) return;

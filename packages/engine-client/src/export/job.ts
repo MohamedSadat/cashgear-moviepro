@@ -258,7 +258,7 @@ export async function runExport(
         const plan = JSON.parse(planJson) as FramePlan;
         const upcoming = JSON.parse(session.upcoming_layers(time, upcomingFlicks)) as LayerPlan[];
         const layers = await sources.gather(plan, upcoming);
-        drawFrame(engine, planJson, layers, scale, false);
+        drawFrame(engine, session, planJson, plan, layers, scale, false);
         pending.push({
           index,
           pixels: engine.read_nv12(settings.width, settings.height) as Promise<Nv12>,

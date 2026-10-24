@@ -56,6 +56,7 @@ function project(tracks: Track[]): Project {
     mainTrack: tracks[0].id,
     magnetic: true,
     markers: [{ id: 99, time: 12 * S, name: '', color: 'red' }],
+    luts: [],
     nextId: 100,
   };
 }

@@ -131,6 +131,13 @@ export class ProjectService {
     return this.snapshot();
   }
 
+  /** Reads a `.cube` file into the project (one undo step); the outcome names the new LUT. */
+  importLut(name: string, text: string): { outcome: Outcome; snapshot: ProjectSnapshot } {
+    const outcome = JSON.parse(this.require().import_lut(name, text)) as Outcome;
+    this.onChange(false);
+    return { outcome, snapshot: this.snapshot() };
+  }
+
   /** Records a relinked or changed file. Not an undo step; leaves unsaved changes. */
   updateMedia(media: MediaRef): ProjectSnapshot {
     this.require().update_media(JSON.stringify(media));
