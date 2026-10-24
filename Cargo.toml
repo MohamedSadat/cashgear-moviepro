@@ -45,3 +45,12 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# The model, the effect catalogue and JSON are mostly serde code, run per edit or
+# per frame plan, not per pixel or sample: they are built for size.
+[profile.release.package.cgv-model]
+opt-level = "s"
+[profile.release.package.cgv-effects]
+opt-level = "s"
+[profile.release.package.serde_json]
+opt-level = "s"
