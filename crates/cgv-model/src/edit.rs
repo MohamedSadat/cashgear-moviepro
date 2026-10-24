@@ -277,6 +277,30 @@ impl Edit {
                 }
                 *self.clip_mut(index, *clip) = changed;
             }
+            Command::SetKeyframes {
+                clip,
+                property,
+                keys,
+            } => {
+                let (index, mut changed) = self.editable(*clip)?;
+                let mut snapped: Vec<Keyframe> = Vec::with_capacity(keys.len());
+                for key in keys {
+                    let key = Keyframe {
+                        time: self.snap(key.time)?,
+                        ..*key
+                    };
+                    snapped.retain(|k| k.time != key.time);
+                    snapped.push(key);
+                }
+                snapped.sort_by_key(|key| key.time);
+                if snapped.is_empty() {
+                    changed.keyframes.remove(property);
+                } else {
+                    changed.keyframes.insert(property.clone(), snapped);
+                }
+                check_keyframes(&changed)?;
+                *self.clip_mut(index, *clip) = changed;
+            }
             Command::MoveKeyframes {
                 clip,
                 properties,
@@ -1608,7 +1632,8 @@ impl Edit {
         if self.project.tracks.iter().all(|t| t.transitions.is_empty()) {
             return;
         }
-        let frame = self.frame;
+        // The settings' frame: a frame rate change has just set it.
+        let frame = self.project.settings.frame_duration();
         let mut placed: BTreeMap<usize, Vec<Transition>> = BTreeMap::new();
         for transition in self
             .project

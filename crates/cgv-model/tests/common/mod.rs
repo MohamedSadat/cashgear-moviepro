@@ -563,6 +563,21 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
                 interpolation: interpolation(rng),
             }
         }
+        114 if rng.percent(50) => {
+            let property = property(project, any_clip, rng);
+            let keys = (0..rng.below(4))
+                .map(|_| Keyframe {
+                    time: Flicks(rng.range(-5, 90) * FRAME),
+                    value: key_value(&property, rng),
+                    interpolation: interpolation(rng),
+                })
+                .collect();
+            Command::SetKeyframes {
+                clip: any_clip,
+                property,
+                keys,
+            }
+        }
         114 => Command::ClearKeyframes {
             clip: any_clip,
             property: property(project, any_clip, rng),

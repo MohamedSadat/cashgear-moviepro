@@ -357,6 +357,14 @@ pub enum Command {
         property: String,
         times: Vec<Flicks>,
     },
+    /// Replaces every keyframe of `property` (an empty list stops animating it):
+    /// one step for a curve edit. Times snap to frames; keys landing on one frame
+    /// keep the last.
+    SetKeyframes {
+        clip: ClipId,
+        property: String,
+        keys: Vec<crate::animation::Keyframe>,
+    },
     /// Moves the keyframes at `times` by `delta`, for each of `properties` (every
     /// animated property when empty). A keyframe moved onto another replaces it.
     MoveKeyframes {
@@ -480,6 +488,7 @@ impl Command {
             Command::ResetEffect { .. } => "Reset effect",
             Command::SetKeyframe { .. } => "Set keyframe",
             Command::RemoveKeyframes { .. } => "Delete keyframes",
+            Command::SetKeyframes { .. } => "Change keyframes",
             Command::MoveKeyframes { .. } => "Move keyframes",
             Command::SetInterpolation { .. } => "Change interpolation",
             Command::ClearKeyframes { .. } => "Stop animating",

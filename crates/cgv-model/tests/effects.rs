@@ -407,6 +407,51 @@ fn keyframes_are_set_replaced_moved_eased_and_removed() {
 }
 
 #[test]
+fn a_property_s_keyframes_can_be_replaced_at_once() {
+    let mut s = session();
+    let clip = append(&mut s, 0, "v", 0, 90);
+    key(&mut s, clip, "opacity", 0, 0.0);
+    let key_at = |frames: i64, value: f64, interpolation| Keyframe {
+        time: Flicks(frames * FRAME + 3),
+        value: number(value),
+        interpolation,
+    };
+    run(
+        &mut s,
+        Command::SetKeyframes {
+            clip,
+            property: "opacity".into(),
+            keys: vec![
+                key_at(20, 1.0, Interpolation::Linear),
+                key_at(5, 0.2, Interpolation::EaseOut),
+                key_at(20, 0.9, Interpolation::Hold),
+            ],
+        },
+    );
+    let keys = &common::clip(&s, clip).keyframes["opacity"];
+    assert_eq!(times(&s, clip, "opacity"), [5, 20], "sorted and snapped");
+    assert_eq!(keys[1].value, number(0.9), "the last key on a frame wins");
+    fails(
+        &mut s,
+        Command::SetKeyframes {
+            clip,
+            property: "opacity".into(),
+            keys: vec![key_at(0, 3.0, Interpolation::Linear)],
+        },
+        "out of range",
+    );
+    run(
+        &mut s,
+        Command::SetKeyframes {
+            clip,
+            property: "opacity".into(),
+            keys: Vec::new(),
+        },
+    );
+    assert!(common::clip(&s, clip).keyframes.is_empty());
+}
+
+#[test]
 fn stopping_an_animation_keeps_the_value_at_the_playhead() {
     let mut s = session();
     let clip = append(&mut s, 0, "v", 0, 90);
