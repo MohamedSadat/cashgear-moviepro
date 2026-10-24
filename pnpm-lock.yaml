@@ -245,6 +245,9 @@ importers:
 
   packages/ui:
     dependencies:
+      '@cashgear/ui':
+        specifier: github:MohamedSadat/CashGear.React.UI#96d249949de69c777a95314e0796a4cc803b4f2f
+        version: https://codeload.github.com/MohamedSadat/CashGear.React.UI/tar.gz/96d249949de69c777a95314e0796a4cc803b4f2f(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@cgv/engine-client':
         specifier: workspace:*
         version: link:../engine-client
@@ -266,6 +269,14 @@ packages:
 
   '@cacheable/utils@2.5.0':
     resolution: {integrity: sha512-buipgOVDkkPXNR5+xBpDw7Zk2n1EvU7qBJCNUcL7rhQ//kfpOXPAvQ511Os0vpLYJ1pZnvudNytkQt2hst3wqA==}
+
+  '@cashgear/ui@https://codeload.github.com/MohamedSadat/CashGear.React.UI/tar.gz/96d249949de69c777a95314e0796a4cc803b4f2f':
+    resolution: {gitHosted: true, integrity: sha512-JqdGiAa3f/w0YSJd2+STDR+V5TVuEJ7Q7Gmu04lqHjw2TdByKefJQ1zphfYA+KsRCuMNszITHT6/jdjrbZRfZQ==, tarball: https://codeload.github.com/MohamedSadat/CashGear.React.UI/tar.gz/96d249949de69c777a95314e0796a4cc803b4f2f}
+    version: 0.1.0
+    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
+    peerDependencies:
+      react: ^19.0.0
+      react-dom: ^19.0.0
 
   '@eslint-community/eslint-utils@4.10.1':
     resolution: {integrity: sha512-cuadcxVFE8sDK6iWJbs8Sn0av2Nrh2QSGQhVlBW9AaAHqHwjWsZHT8LJ4hFGPh7ASBV2deFdM7H/DPjulmh8rg==}
@@ -1237,6 +1248,11 @@ snapshots:
     dependencies:
       hashery: 1.5.1
       keyv: 5.6.0
+
+  '@cashgear/ui@https://codeload.github.com/MohamedSadat/CashGear.React.UI/tar.gz/96d249949de69c777a95314e0796a4cc803b4f2f(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+    dependencies:
+      react: 19.3.1
+      react-dom: 19.3.1(react@19.3.1)
 
   '@eslint-community/eslint-utils@4.10.1(eslint@10.13.0)':
     dependencies:

@@ -17,6 +17,12 @@
     "BlueOak-1.0.0"
   ],
   "deny": ["GPL-", "AGPL-", "LGPL-", "SSPL-", "BUSL-"],
-  "exceptions": [],
-  "mustInclude": ["react", "react-dom", "comlink", "mediabunny", "@tauri-apps/api"]
+  "exceptions": [
+    {
+      "package": "@cashgear/ui",
+      "license": "UNLICENSED",
+      "reason": "First-party CashGear component library (decisions, 2026-10-24)"
+    }
+  ],
+  "mustInclude": ["react", "react-dom", "comlink", "mediabunny", "@tauri-apps/api", "@cashgear/ui"]
 }
