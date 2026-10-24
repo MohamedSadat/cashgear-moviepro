@@ -41,7 +41,10 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
 - `crates/cgv-model`: the project, every edit command, undo/redo and the `.cgvproj` format. `packages/ui/src/project`: opening, saving, autosave, recovery and relinking.
 - `crates/cgv-engine`: `plan_frame` (what a frame shows), the audio clip plan, transport, Auto quality and playback stats. `crates/cgv-audio`: the block mixer. `crates/cgv-render`: the compositor and WGSL.
 - `crates/cgv-media`: the media library model (Rust, via WASM). `crates/cgv-native`: the cgv-media protocol registry, byte ranges, ffprobe, proxies and the cache folder.
-- `packages/ui`: React components.
+- `packages/ui`: React components, on the CG component library (`@cashgear/ui`).
+  - `timeline/`: the canvas timeline. `controller.ts` owns the view, drawing and gestures outside React; `geometry.ts` and `draw.ts` are pure.
+  - `editing/`: selection, tools, the clipboard and every editing action (`useEditor`), and drag gestures (`Gesture`, one undo step each).
+  - `inspector/`, `shortcuts/` (the key map, presets and settings dialog), `workspace/` (resizable panels) and `settings/` (per-user settings in `localStorage`).
 - `apps/web`: Vite app.
 - `apps/desktop/src-tauri`: Tauri 2 shell.
 
@@ -84,4 +87,8 @@ Gotchas:
 - Stop `pnpm dev:web` before `pnpm build`: its watcher rebuilds the debug WASM into the same `src/pkg/`, and a mixed build fails with a LinkError.
 - The monitor shows the timeline. `?pattern=1` shows the Phase 0 test pattern for GPU checks.
 - Hardware decoders stall the browser's GPU process when a clip ends, so playback decodes up to 1080p in software. wgpu 30 cannot upload a VideoFrame on WebGL2 (it panics), so WebGL2 draws video from planes.
+- The main track is magnetic in new projects: edits there land on cuts and settle, so clips there never sit where a command's times alone put them. Model tests that need free placement turn magnetism off (`session()` in `crates/cgv-model/tests/common`).
+- A drag previews through `Session::preview`: every step re-applies the whole gesture to the state before it. Never send per-step deltas.
+- Keys go through the shortcut map (`shortcuts/keymap.ts`); add an action there rather than a `keydown` listener.
+- The CG library's overlays copy `data-cg-theme` from `<html>`; some of its styles read `--cg-color-*` tokens that only `styles.css` defines.
 - The sound card is the playback clock. Keep the worker's ticks short, or raise the mix-ahead lead, because starved sound stalls the picture too.

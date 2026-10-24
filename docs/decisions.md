@@ -2,6 +2,53 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-24: Phase 4 findings and defaults
+
+Choices made while building the timeline, the editing tools and the workspace.
+
+- **Magnetic main track rules** (`cgv-model`):
+  - The main track is a track id (`mainTrack`), so tracks added below it, such as detached sound, leave it the main track. It cannot be deleted.
+  - Insert, overwrite and moves onto the main track happen at the cut nearest the given time. A moved block is lifted out first and goes in whole.
+  - On the main track every trim ripples, whatever the command's ripple flag says. A delete closes the gap; so does a ripple delete, without moving other tracks.
+  - After each edit the main track settles: its clips are packed from 0 in the order the edit left them, and clips linked to a main-track clip move by the same amount. A link follows the first main-track clip it holds.
+  - Overlap checks wait until the main track has settled. Before that, a clip may overlap one that settling moves out of its way.
+  - Format 1 projects open with magnetism off, so their edits stay exactly as they were. Turning it on closes the gaps as one undo step.
+  - Sound cannot be detached onto the magnetic main track.
+- **Moves across tracks:** the clips moved take their linked partners along in time, but the partners keep their own tracks. Video dragged to an overlay track leaves its sound where it is. A clip may not land on a clip that moves with it.
+- **Clip property changes are patches:** a transform or crop change names only the values that change. The inspector sent whole transforms, and two quick edits (scale, then position) undid each other.
+- **Pasting:** each copy carries its speed, transform, crop, opacity and volume (`ClipSpec.speed`, `ClipSpec.properties`).
+  - Main-track copies go in one after another from the cut nearest the playhead. The other copies keep their offset to them, and copies that were linked are linked again.
+  - A copy whose track is gone goes on the main track. A paste is one undo step.
+- **Gestures:** a drag sends the whole gesture so far, and the engine applies it from where the gesture began (`Session::preview`). Steps are coalesced, so a slow engine is sent only the latest. A step that cannot apply keeps the last one that could, and releasing keeps that.
+- **Main-track drags** insert at the cut nearest the pointer (not the clip's edge), so a clip passes its neighbour when the pointer passes the neighbour's middle.
+- **Timeline geometry:**
+  - Tracks are 58 px tall, under a 28 px ruler.
+  - A 32 px drop zone above the top track makes a new track.
+  - Edges grab within 7 px (a third of a short clip).
+  - Zoom runs from 0.02 to 2,160 px a second (a frame at 30 fps is then 72 px).
+  - The view fits the whole edit, and keeps fitting it as the edit changes, until the user zooms or scrolls along the timeline. Shift+Z (zoom to fit) returns to that. While playing, the view turns a page when the playhead nears the right edge.
+  - The playhead is an element over the canvas, and playback state reaches only the components that show it, so playing never redraws the canvas or re-renders the workspace.
+- **Tools:** the blade splits the clip it clicks, or every track with Shift. Ripple trims from the keyboard (trim start or end to the playhead) ripple their own track, as in Premiere.
+- **Selection:** clicking a clip selects its linked clips too. Ctrl-click toggles, Shift-click adds, and dragging across empty space selects with a rectangle. Clips that disappear (undo, delete) leave the selection.
+- **Shortcuts:**
+  - Filmora-like: Ctrl+B splits; Alt+[ and Alt+] trim to the playhead; N snaps; Ctrl+= and Ctrl+- zoom; Shift+Z fits.
+  - Premiere-like: Ctrl+K splits; Q and W trim to the playhead; S snaps; = and - zoom; \ fits.
+  - Both: Space, J, K, L, the arrows (Up and Down move between edit points), Home, End, Delete, Shift+Delete, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+A, Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z, Ctrl+S, M for a marker, V and C for the tools, and Esc to clear the selection or cancel a drag.
+  - Keys do nothing while typing in a field or while a dialog or menu is open. Changing the preset starts from its own keys. Ctrl means Cmd on a Mac.
+- **Per-user settings** (shortcuts, snapping, panel sizes) are kept in `localStorage` (`cgv.settings.v1`) in the browser and in the desktop app's WebView2 profile.
+- **CG library integration:**
+  - The dark theme and compact density are set on `<html>`, so menus the library opens outside the app take them too.
+  - The editor's colours are mapped onto the library's tokens.
+  - Some library styles read tokens no theme defines (`--cg-color-text` and others), and fell back to dark text on dark menus. The app defines them; worth fixing upstream.
+  - The app's plain button and input styles sit in a CSS layer, so the library's own styles win.
+  - The Phase 2 dialogs keep their small `Dialog` component. Panels (`CgSplitter`), menus (`CgContextMenu`), buttons and number fields (`CgNumericEdit`) come from the library.
+- **Accessibility and tests:**
+  - A visually hidden list names every clip and marker on the canvas, and a clip can be selected from it.
+  - The canvas publishes its zoom and scroll as data attributes, so a time can be found on screen from the page alone.
+- **Inspector:**
+  - Scale is uniform. Crop goes to 95% a side. Speed takes presets or a value from 0.1× to 100×, as a reduced fraction to two decimals.
+  - Dragging a field's label scrubs it, as one undo step (Shift for ×10, Alt for ×0.1). Typing a value sets it on Enter or when the field loses focus.
+
 ## 2026-10-24: Phase 4 answers
 
 - **Main track:** magnetic, as in Filmora.
