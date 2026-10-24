@@ -28,6 +28,7 @@ export {
   type AutosaveTarget,
   type OpenPlan,
 } from './project/persistence';
+export { renderPreviews, type PreviewRequest } from './effects/previews';
 export { probeEncoders, type EncoderSupport } from './export/capabilities';
 export {
   clearOpfsExports,
