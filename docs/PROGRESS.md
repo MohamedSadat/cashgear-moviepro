@@ -2,6 +2,87 @@
 
 Newest phase first. Each phase lists the evidence for every exit criterion.
 
+## Phase 3: GPU compositor, audio engine, real-time playback (complete)
+
+- **Completed:** 2026-10-24, tag `phase-3`.
+- **CI:** [run 40083555684](https://github.com/MohamedSadat/cashgear-moviepro/actions/runs/40083555684) on commit `234f59b`, green (License gates 27 s; Windows build and test 12 min 46 s).
+  - It ran 141 Rust tests and 38 software-GPU browser tests, golden renders included; one Phase 0 test passed on retry (see Known gaps). The desktop smoke played the recovered project in WebView2 on software rendering: frame 103 reached on the audio clock, Auto at 1/4.
+  - The first run, [run 40082250051](https://github.com/MohamedSadat/cashgear-moviepro/actions/runs/40082250051) on `76c2ceb`, failed one timing check: three 1080p layers on the runner's software GPU take about a second a frame, too slow for the page to time playback to 10%. Sound and clock were fine (0 underruns). `234f59b` checks only function there.
+- **Reference machine:** as in Phase 0: Xeon E5-2680 v3, GTX 1650 (driver 457.51), Chrome 156, Edge and WebView2 155. Every performance number below comes from it; CI's software GPUs give functional results only.
+
+### Shipped
+
+- **One frame path, `renderFrame(t)`:**
+  - `plan_frame` (Rust, pure) lists the layers of a project frame, bottom track first, with source time, transform, crop and opacity.
+  - The worker gathers a source per layer, and the engine composes them on the GPU.
+  - Paused and seeking, sources are awaited. Playing, they come from decoders running ahead, and a late frame is dropped. Export (Phase 5) will await them, like a seek.
+- **Compositor (`cgv-render`, WGSL):**
+  - Frames become linear, premultiplied textures. GPU-backed decoder frames are copied by the browser. CPU frames upload their Y'CbCr planes and convert with their own matrix and range (BT.709, BT.601, BT.2020; simple PQ and HLG tone map).
+  - Layers blend in linear light into an `rgba16float` target (8-bit sRGB on WebGL2 without float targets).
+  - Transform (position, scale, clockwise rotation, anchor as pivot), crop and opacity, with analytic edge smoothing.
+  - Scale 1 fits the picture in the frame; media rotation shows it upright.
+  - Stills get a linear-light mip chain.
+  - The result is shown letterboxed over black, or read back as sRGB bytes.
+  - A texture pool is reused across frames.
+- **Audio (`cgv-audio`):**
+  - Decoded audio is kept in one-second blocks at the project rate, resampled with `rubato` 5 (sinc) when the source rate differs.
+  - Mixing applies clip volume, track mute and 5 ms fades at clip edges (none at seamless cuts), and maps mono, stereo and wider sources.
+  - The mixed sound goes to a SharedArrayBuffer ring that an AudioWorklet plays.
+- **Playback (`cgv-engine`, `engine-client`):**
+  - The clock is the sample the listener hears (worklet position plus `getOutputTimestamp`), with the wall clock as fallback.
+  - Pre-roll waits for the first frames, 0.3 s of sound and the GPU.
+  - Decoders are pooled per medium, warmed before the clock starts and passed from clip to clip; upcoming clips start 3 s ahead at one packet per tick. Playback decodes up to 1080p in software (see decisions).
+  - Auto quality, J/K/L at 1×, 2×, 4× and 8× each way, frame steps and 80 ms scrub snippets.
+  - Per-refresh A/V offset, drops and render times are kept for the dev overlay and the tests.
+- **Monitor UI:** transport buttons, timecode, a scrub bar, the quality menu (Auto, Full, 1/2, 1/4), keyboard shortcuts (Space, J/K/L, arrows, Home and End), a no-sound notice, and frame times in the dev overlay.
+- **Tests:**
+  - Golden renders of 7 fixtures on both backends, with negative controls.
+  - Barcode-exact `renderFrame(t)`.
+  - Playing-against-paused colour parity.
+  - Seek latency, three-track real-time playback and A/V sync.
+  - Shuttle and keys.
+  - Ring-buffer, mixer, plan, transport, governor and stats unit tests.
+  - Playback in the desktop smoke.
+
+### Exit criteria
+
+| Criterion                                                                                                | Result | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------------------------------------------------------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Three stacked 1080p30 H.264 tracks play in real time at full preview resolution on the reference machine | Passed | `three stacked 1080p30 tracks play in real time at full resolution`, quality forced to Full. Three tracks of the 1080p30 H.264 test clip (cut every 10 s on all three at once, the worst case), the top two at 50% opacity, 60 s on the audio clock. Chrome 156: 1,802 frames shown, 0 dropped, 0 late, worst A/V offset 28.6 ms. Edge 155: 1,803 shown, 0 dropped, 0 late, worst 20.7 ms. 0 sound underruns; render time 7.8 to 9.6 ms mean, 22.5 ms worst. Earlier runs of the same test also dropped none. The desktop smoke plays the recovered project in WebView2: 90 frames in 3 s, 0 dropped.                                                             |
+| A/V drift stays under one frame over 10 minutes of playback                                              | Passed | `picture and sound stay within one frame while playing` with `CGV_DRIFT_SECONDS=600`. The offset is the middle of the frame on screen minus the sound heard (worklet position and `getOutputTimestamp`), sampled at every display refresh. Chrome: 36,002 samples, worst 17.3 ms, p99 16.75 ms, mean +2.6 ms, 18,001 frames shown, 0 dropped, 0 underruns. Edge: 36,000 samples, worst 22.3 ms, p99 13.5 ms, mean +1.0 ms, 18,000 shown, 0 dropped, 0 underruns. One frame is 33.3 ms. The picture follows the sound clock, so the offset does not grow. The display pipeline after the next refresh is not visible to the page, which counts one refresh for it. |
+| Golden tests for transform, crop and opacity pass on both GPU backends                                   | Passed | `WebGPU golden renders of transform, crop and opacity match the references` and its WebGL2 twin. Seven fixtures from `tests/fixtures/golden.json`: fit, 9:16 letterbox, transform, anchor and rotation, crop, opacity, alpha. They pass on Chrome and Edge (GTX 1650, both backends; WebGPU matches the references exactly), SwiftShader WebGPU and WebGL2, and WARP WebGL2. The tolerance (decisions) is set from those runs. Renders at 55% instead of 50% opacity, and shifted by 2 pixels, must fail it, and do.                                                                                                                                              |
+| A seek on cached media shows the frame in under 100 ms                                                   | Passed | `seeks show the frame within 100 ms`: from the page's seek call until the frame is composed and presented. 30 cached frames: worst 8.5 ms (Chrome) and 9.1 ms (Edge), median 5.4 and 5.8 ms; across all runs never over 14 ms. The same 30 frames uncached, decoded from the key frame before them (one a second): median 60 and 68 ms, p95 97 and 101 ms, worst 115 and 143 ms. The test guards uncached seeks at 150 ms.                                                                                                                                                                                                                                        |
+
+Also checked: `renderFrame(t) shows the exact source frame at any seek` reads the frame-number barcode from the composition at 10 frames in any order, on both backends. Rendering the same time twice gives identical bytes. A 25 fps clip on a 30 fps timeline shows the right source frame. The same frame drawn while playing (hardware frame, converted by the browser) and paused (planes, converted by the compositor) differs by at most 2 levels, mean 0.07.
+
+### Local verification
+
+| Check                                             | Result                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| fmt, clippy `-D warnings` (native and wasm32)     | Clean                                                                                                                                                                                                                                                                                                                    |
+| `cargo test --workspace` (`CGV_REQUIRE_FFMPEG=1`) | 141 passed. New: render 18 (geometry, colour, both shaders translated to GLSL ES for WebGL2), audio 9 (blocks, resampling in tune and in phase across blocks, fades, channel mapping, budget), engine 15 (plan, audio plan, transport, Auto governor, stats).                                                            |
+| Vitest                                            | 49 passed, 6 of them for the audio ring (wrap-around, underruns, flush, heard-sample clock, mid-update readings)                                                                                                                                                                                                         |
+| Playwright, hardware: Chrome 156, Edge 155        | 66 passed                                                                                                                                                                                                                                                                                                                |
+| Playwright, software (`GPU_TEST_SOFTWARE=1`)      | 39 passed. Software rendering and decoding are no measure of speed: three 1080p layers show about 2 frames a second there, yet the sound clock keeps real time (9.83 s of 10.04 s, 0 underruns).                                                                                                                         |
+| Desktop smoke, WebView2 155                       | Passed on hardware (playback: 90 frames in 3 s, 0 dropped, audio clock, worst offset 14.4 ms, Full) and software (on time; Auto drops to 1/4)                                                                                                                                                                            |
+| Licenses                                          | cargo-deny ok. New: rubato 5.0.1, audioadapter 5, audioadapter-buffers 5.2, audioadapter-sample 5.2 and num-integer (MIT or Apache-2.0), audio-codec-algorithms (0BSD or Apache-2.0), visibility (Zlib, MIT or Apache-2.0), windowfunctions (MIT). npm 154 packages, unchanged. The GPL self-test rejects both fixtures. |
+| Release WASM                                      | 3,494,559 bytes in CI; gzip 1,295,298, within the 1,500,000 budget (Phase 2: 1,209,250)                                                                                                                                                                                                                                  |
+
+### Known gaps
+
+- Playback decodes up to 1080p in software, because hardware decoders stall the GPU process when a clip ends on this machine. Larger frames and HEVC still decode in hardware and can lose a frame at a cut. 4K on the web has no proxies yet; desktop proxies are 720p.
+- Video layers have no mipmaps: video shown at a small fraction of its size can alias. Stills have them.
+- Backwards playback reads each frame from its key frame, so it is smooth only for short GOPs.
+- Clips at other speeds play silent until Phase 9's time-stretch.
+- An uncached seek can take up to about 150 ms at the end of a one-second GOP.
+- WebGL2 reads every video frame back to the CPU: wgpu 30 has no VideoFrame upload there without unstable web-sys APIs.
+- Auto quality looks only at skipped frames. The browser gives no reliable GPU time without timestamp queries, which are not used.
+- The A/V measurement counts one display refresh for showing a frame. Browsers do not report when a canvas frame reaches the screen.
+- The monitor area is 16:9; other aspect ratios are letterboxed inside it.
+- A clip whose media is missing draws nothing; there is no offline slate yet.
+- HDR: CPU frames get a simple tone map; hardware frames are tone mapped by the browser.
+- CI marked the Phase 0 test `WebGL2 recovers from device loss and a Rust panic on retry` flaky once: a project notice appeared beside the engine error, and the test's `getByRole('alert')` matched both. It passed on retry and never failed locally. The test should look for the engine error by its test id.
+
 ## Phase 2: Project model, timeline core, undo/redo (complete)
 
 - **Completed:** 2026-10-23, tag `phase-2`.
