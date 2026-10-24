@@ -339,6 +339,35 @@ try {
     },
   });
 
+  // Playback: the recovered timeline (H.264 and the ProRes proxy) plays in WebView2.
+  const transport = page.getByTestId('transport');
+  await page.getByTestId('play-toggle').click();
+  await expect(transport).toHaveAttribute('data-playing', 'true');
+  await expect(transport).toHaveAttribute('data-starting', 'false', { timeout: 15000 });
+  await page.waitForTimeout(3000);
+  const playback = await page.evaluate(async () => {
+    const api = window.__cgv.client.api;
+    return { state: await api.playbackState(), stats: await api.playbackStats() };
+  });
+  await page.getByTestId('play-toggle').click();
+  await expect(transport).toHaveAttribute('data-playing', 'false');
+  // About 3 s played. Software rendering draws few frames (Auto drops to 1/4), so
+  // there it only has to keep time; on hardware nearly every frame must show.
+  const shownEnough = playback.stats.presented >= (software ? 5 : 80);
+  if (!shownEnough || playback.state.frame < 60)
+    throw new Error('Playback did not run: ' + JSON.stringify(playback));
+  results.push({
+    playback: {
+      presented: playback.stats.presented,
+      dropped: playback.stats.dropped,
+      clock: playback.stats.clock,
+      fallback: playback.stats.fallback,
+      offsetMaxMs: playback.stats.offset.maxAbsMs,
+      level: playback.stats.level,
+      reachedFrame: playback.state.frame,
+    },
+  });
+
   await page.screenshot({ path: join(root, 'bench/results/desktop.png') });
   await writeFile(
     join(root, 'bench/results/desktop-smoke.json'),
