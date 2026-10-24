@@ -110,9 +110,10 @@ export interface Project {
   nextId: number;
 }
 
+/** Clip values to change; missing ones stay as they are. */
 export interface ClipProperties {
-  transform?: Transform;
-  crop?: Crop;
+  transform?: Partial<Transform>;
+  crop?: Partial<Crop>;
   opacity?: number;
   volumeDb?: number;
 }

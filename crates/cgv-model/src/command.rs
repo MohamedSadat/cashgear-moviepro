@@ -37,14 +37,99 @@ pub struct ClipSpec {
     pub properties: Option<ClipProperties>,
 }
 
+/// Transform values to change; missing ones stay as they are, so edits of
+/// different values never undo each other.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TransformPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale_x: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale_y: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor_x: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor_y: Option<f64>,
+}
+
+impl TransformPatch {
+    pub fn apply(&self, t: Transform) -> Transform {
+        Transform {
+            x: self.x.unwrap_or(t.x),
+            y: self.y.unwrap_or(t.y),
+            scale_x: self.scale_x.unwrap_or(t.scale_x),
+            scale_y: self.scale_y.unwrap_or(t.scale_y),
+            rotation: self.rotation.unwrap_or(t.rotation),
+            anchor_x: self.anchor_x.unwrap_or(t.anchor_x),
+            anchor_y: self.anchor_y.unwrap_or(t.anchor_y),
+        }
+    }
+}
+
+impl From<Transform> for TransformPatch {
+    fn from(t: Transform) -> Self {
+        TransformPatch {
+            x: Some(t.x),
+            y: Some(t.y),
+            scale_x: Some(t.scale_x),
+            scale_y: Some(t.scale_y),
+            rotation: Some(t.rotation),
+            anchor_x: Some(t.anchor_x),
+            anchor_y: Some(t.anchor_y),
+        }
+    }
+}
+
+/// Crop sides to change; missing ones stay as they are.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CropPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub left: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub right: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bottom: Option<f64>,
+}
+
+impl CropPatch {
+    pub fn apply(&self, c: Crop) -> Crop {
+        Crop {
+            left: self.left.unwrap_or(c.left),
+            top: self.top.unwrap_or(c.top),
+            right: self.right.unwrap_or(c.right),
+            bottom: self.bottom.unwrap_or(c.bottom),
+        }
+    }
+}
+
+impl From<Crop> for CropPatch {
+    fn from(c: Crop) -> Self {
+        CropPatch {
+            left: Some(c.left),
+            top: Some(c.top),
+            right: Some(c.right),
+            bottom: Some(c.bottom),
+        }
+    }
+}
+
 /// Clip properties to change; missing fields stay as they are.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipProperties {
     #[serde(default)]
-    pub transform: Option<Transform>,
+    pub transform: Option<TransformPatch>,
     #[serde(default)]
-    pub crop: Option<Crop>,
+    pub crop: Option<CropPatch>,
     #[serde(default)]
     pub opacity: Option<f64>,
     #[serde(default)]

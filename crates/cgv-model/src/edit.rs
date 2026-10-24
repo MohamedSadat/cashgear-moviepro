@@ -1222,10 +1222,14 @@ fn check_marker_name(name: &str) -> Result<String, String> {
 
 /// Checks and applies clip property changes.
 fn apply_properties(clip: &mut Clip, properties: &ClipProperties) -> Result<(), String> {
-    if let Some(transform) = &properties.transform {
+    let transform = properties
+        .transform
+        .map(|patch| patch.apply(clip.transform));
+    let crop = properties.crop.map(|patch| patch.apply(clip.crop));
+    if let Some(transform) = &transform {
         check_transform(transform)?;
     }
-    if let Some(crop) = &properties.crop {
+    if let Some(crop) = &crop {
         check_crop(crop)?;
     }
     if let Some(opacity) = properties.opacity {
@@ -1234,10 +1238,10 @@ fn apply_properties(clip: &mut Clip, properties: &ClipProperties) -> Result<(), 
     if let Some(volume) = properties.volume_db {
         check_volume(volume)?;
     }
-    if let Some(transform) = properties.transform {
+    if let Some(transform) = transform {
         clip.transform = transform;
     }
-    if let Some(crop) = properties.crop {
+    if let Some(crop) = crop {
         clip.crop = crop;
     }
     if let Some(opacity) = properties.opacity {

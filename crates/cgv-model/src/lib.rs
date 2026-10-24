@@ -12,7 +12,7 @@ pub mod query;
 mod session;
 mod validate;
 
-pub use command::{ClipProperties, ClipSpec, Command, Edge, Outcome};
+pub use command::{ClipProperties, ClipSpec, Command, CropPatch, Edge, Outcome, TransformPatch};
 pub use edit::SOURCE_SLACK;
 pub use project::*;
 pub use session::{Session, Snapshot, HISTORY_LIMIT};

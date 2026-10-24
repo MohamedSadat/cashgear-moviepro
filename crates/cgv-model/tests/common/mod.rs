@@ -341,13 +341,17 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
             properties: ClipProperties {
                 opacity: Some(rng.below(11) as f64 / 10.0 + if rng.percent(5) { 2.0 } else { 0.0 }),
                 volume_db: Some(rng.range(-30, 6) as f64 * 0.37),
-                transform: rng.percent(50).then(|| Transform {
-                    x: rng.range(-500, 500) as f64 / 3.0,
-                    rotation: rng.range(-720, 720) as f64 * 0.1,
-                    scale_x: rng.range(1, 400) as f64 / 100.0,
-                    ..Transform::default()
+                // Only some values change; the rest stay.
+                transform: rng.percent(50).then(|| TransformPatch {
+                    x: rng.percent(70).then(|| rng.range(-500, 500) as f64 / 3.0),
+                    rotation: rng.percent(50).then(|| rng.range(-720, 720) as f64 * 0.1),
+                    scale_x: rng.percent(50).then(|| rng.range(1, 400) as f64 / 100.0),
+                    ..TransformPatch::default()
                 }),
-                crop: None,
+                crop: rng.percent(20).then(|| CropPatch {
+                    left: Some(rng.range(0, 40) as f64 / 100.0),
+                    ..CropPatch::default()
+                }),
             },
         },
         83..=85 => match rng.below(3) {

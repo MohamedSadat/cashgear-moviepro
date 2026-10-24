@@ -1230,8 +1230,8 @@ fn clip_properties_are_checked_and_set() {
         Command::SetClipProperties {
             clip: v,
             properties: ClipProperties {
-                transform: Some(transform),
-                crop: Some(crop),
+                transform: Some(transform.into()),
+                crop: Some(crop.into()),
                 opacity: Some(0.25),
                 volume_db: Some(-6.0),
             },
@@ -1242,6 +1242,36 @@ fn clip_properties_are_checked_and_set() {
         (c.transform, c.crop, c.opacity, c.volume_db),
         (transform, crop, 0.25, -6.0)
     );
+    // Changing one value keeps the others, so quick edits never undo each other.
+    run(
+        &mut s,
+        Command::SetClipProperties {
+            clip: v,
+            properties: ClipProperties {
+                transform: Some(TransformPatch {
+                    y: Some(-40.0),
+                    ..TransformPatch::default()
+                }),
+                crop: Some(CropPatch {
+                    top: Some(0.05),
+                    ..CropPatch::default()
+                }),
+                ..Default::default()
+            },
+        },
+    );
+    let c = clip(&s, v);
+    assert_eq!(
+        c.transform,
+        Transform {
+            y: -40.0,
+            ..transform
+        }
+    );
+    assert_eq!(c.crop, Crop { top: 0.05, ..crop });
+    let patch: ClipProperties = serde_json::from_str(r#"{"transform":{"scaleX":2}}"#).unwrap();
+    assert_eq!(patch.transform.unwrap().scale_x, Some(2.0));
+    assert!(serde_json::from_str::<ClipProperties>(r#"{"transform":{"size":2}}"#).is_err());
     for (properties, message) in [
         (
             ClipProperties {
@@ -1259,31 +1289,40 @@ fn clip_properties_are_checked_and_set() {
         ),
         (
             ClipProperties {
-                transform: Some(Transform {
-                    scale_x: 0.0,
-                    ..transform
-                }),
+                transform: Some(
+                    Transform {
+                        scale_x: 0.0,
+                        ..transform
+                    }
+                    .into(),
+                ),
                 ..Default::default()
             },
             "Scale",
         ),
         (
             ClipProperties {
-                transform: Some(Transform {
-                    x: f64::NAN,
-                    ..transform
-                }),
+                transform: Some(
+                    Transform {
+                        x: f64::NAN,
+                        ..transform
+                    }
+                    .into(),
+                ),
                 ..Default::default()
             },
             "numbers",
         ),
         (
             ClipProperties {
-                crop: Some(Crop {
-                    left: 0.6,
-                    right: 0.5,
-                    ..crop
-                }),
+                crop: Some(
+                    Crop {
+                        left: 0.6,
+                        right: 0.5,
+                        ..crop
+                    }
+                    .into(),
+                ),
                 ..Default::default()
             },
             "nothing",
@@ -1996,11 +2035,14 @@ fn save_then_load_gives_an_identical_project() {
         Command::SetClipProperties {
             clip: v,
             properties: ClipProperties {
-                transform: Some(Transform {
-                    x: 0.1 + 0.2,
-                    rotation: 1.0 / 3.0,
-                    ..Transform::default()
-                }),
+                transform: Some(
+                    Transform {
+                        x: 0.1 + 0.2,
+                        rotation: 1.0 / 3.0,
+                        ..Transform::default()
+                    }
+                    .into(),
+                ),
                 opacity: Some(0.7),
                 volume_db: Some(-3.0103),
                 crop: None,
