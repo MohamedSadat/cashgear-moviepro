@@ -63,7 +63,10 @@ interface Hooks {
   client: {
     api: Record<string, (...args: unknown[]) => Promise<unknown>>;
   };
-  project: { execute(command: unknown): Promise<{ created: number[] } | null> };
+  project: {
+    execute(command: unknown): Promise<{ created: number[] } | null>;
+    importLook(id: string): Promise<number | null>;
+  };
 }
 
 async function open(page: Page, query = '') {
@@ -339,6 +342,52 @@ test('three stacked 1080p30 tracks play in real time at full resolution', async 
     return;
   }
   // Real time on the reference machine: every frame shown.
+  expect(advanced).toBeGreaterThan(wall * 0.9);
+  expect(stats.dropped).toBe(0);
+  expect(stats.presented).toBeGreaterThanOrEqual(Math.floor(advanced * 30) - 1);
+});
+
+test('five stacked effects on a 1080p30 clip play in real time at full resolution', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout((realtimeSeconds + 120) * 1000);
+  await open(page, process.env.CGV_DECODE ? '&decode=' + process.env.CGV_DECODE : '');
+  const [h264] = await importFiles(page, ['h264-1080p30-aac.mp4']);
+  const [track] = await tracks(page, 1);
+  const clips = await fill(page, track, h264, Math.ceil((realtimeSeconds + 5) / 10));
+  const lut = await page.evaluate(() =>
+    (Reflect.get(window, '__cgv') as Hooks).project.importLook('teal-orange'),
+  );
+  expect(lut).not.toBeNull();
+  // Each clip blurs (about 11 pixels of deviation at 1080p, both passes), sharpens,
+  // grades through a LUT, darkens its corners and adds grain.
+  const stack = [
+    ['gaussian-blur', { radius: 0.03 }],
+    ['sharpen', { amount: 1 }],
+    ['lut', { lut: `lut-${lut}` }],
+    ['vignette', { amount: 0.5 }],
+    ['noise', { amount: 0.1 }],
+  ] as const;
+  for (const clip of clips)
+    for (const [kind, params] of stack)
+      await run(page, { type: 'addEffect', clip, effect: { kind, params } });
+  await call(page, 'setQuality', 'full');
+  const { stats, wall, advanced } = await playFor(page, realtimeSeconds);
+  await record(testInfo, 'realtime-5-effects-1080p30', {
+    seconds: realtimeSeconds,
+    wall,
+    advanced,
+    effects: stack.map(([kind]) => kind),
+    stats,
+    software,
+  });
+  expect(stats.level).toBe(0);
+  if (software) {
+    // Software GPUs and decoders check function only.
+    expect(advanced).toBeGreaterThan(wall * 0.5);
+    expect(stats.presented).toBeGreaterThanOrEqual(3);
+    return;
+  }
   expect(advanced).toBeGreaterThan(wall * 0.9);
   expect(stats.dropped).toBe(0);
   expect(stats.presented).toBeGreaterThanOrEqual(Math.floor(advanced * 30) - 1);
