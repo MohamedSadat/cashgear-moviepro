@@ -46,10 +46,10 @@ export function TransitionInspector({ editor }: { editor: EditorState }) {
           aria-label="Transition type"
           value={current?.key ?? ''}
           disabled={locked}
-          onChange={(event) => {
+          onChange={async (event) => {
             const item = items.find((entry) => entry.key === event.currentTarget.value);
             if (!item) return;
-            void editor.project.execute({
+            const outcome = await editor.project.execute({
               type: 'addTransition',
               track: track.id,
               from: transition.from,
@@ -63,6 +63,8 @@ export function TransitionInspector({ editor }: { editor: EditorState }) {
                 params: item.params,
               },
             });
+            // The new kind replaces the transition: keep the replacement selected.
+            if (outcome?.created.length) editor.selectTransition(outcome.created[0]);
           }}
         >
           {!current && <option value="">{name}</option>}
