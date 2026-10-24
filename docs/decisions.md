@@ -2,6 +2,66 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-24: Phase 3 findings and defaults
+
+Choices made while building the compositor, the audio engine and playback.
+
+- **One frame path.** `renderFrame(t)` is three steps:
+  - `plan_frame` in Rust (pure: the layers bottom first, each with its source time, transform, crop and opacity).
+  - A source per layer.
+  - Composition on the GPU.
+  - Paused, seeking and (in Phase 5) exporting await their sources. Playing takes them from decoders running ahead, and a frame that is not decoded in time is dropped, never waited for.
+- **Colour.**
+  - Video R'G'B' is treated as sRGB-encoded, as browsers display it, so an untouched clip keeps its values. There is no BT.709 or BT.1886 curve conversion.
+  - Hardware decoder frames are converted by the browser on the GPU; CPU frames by the compositor from their planes. The two agree within 2/255 (mean 0.07) on the same frame.
+- **Composition.**
+  - Layers become linear, premultiplied textures and blend into an `rgba16float` target. WebGL2 without float targets uses 8-bit sRGB storage, which still blends in linear light.
+  - The result is shown over black, letterboxed in the monitor.
+- **Geometry.**
+  - Rotation is clockwise.
+  - The anchor is the pivot for scale and rotation; moving it does not move the picture.
+  - Crop hides edges without moving the rest.
+  - Edges are smoothed analytically, so rotated layers have no jaggies on either backend.
+  - Scales stay positive as Phase 2 requires; flips come with Phase 6's mirror effect.
+- **Stills** are scaled down to the GPU's texture limit and get a mip chain averaged in linear light. Without mipmaps a still shown at an eighth of its size aliased, and differently on each GPU.
+- **Playback decoders.**
+  - Playback decodes frames up to 1080p in software where the browser can. Hardware decoders (Chrome and Edge on Windows, GTX 1650, driver 457.51) stall the browser's GPU process for 50 to 100 ms when a clip ends: they hand over their last frames at once.
+  - With three tracks cutting together, that cost 2 to 11 frames a minute despite pooling, pacing and spacing out flushes. Software decoding played the same minute with none.
+  - Larger frames, and codecs without a software decoder (HEVC), use hardware.
+  - Seeks use hardware where they can: they are faster there, and a paused monitor does not mind the stall.
+  - A hardware decoder the browser offers but cannot run (a software GPU process) falls back to the browser's choice.
+- **Decoder handling.**
+  - Playback decoders are pooled per medium, warmed up before the clock starts, and passed from clip to clip.
+  - Upcoming clips (3 s ahead) decode one packet per playback tick.
+  - Decoders ask for `optimizeForLatency`.
+  - A decoder goes back to the pool without a flush when nothing is queued.
+- **WebGL2** draws video frames from their planes: wgpu 30 copies VideoFrames into GL textures only with unstable web-sys APIs, and panics without them. Software WebGPU adapters do the same, since they cannot reach a hardware decoder's frames.
+- **Audio.**
+  - Decoded audio is kept in 1-second blocks at the project rate, decoded with 0.1 s of padding on each side, within a 64 MB budget.
+  - Sources at another rate are resampled per block with `rubato` 5 (128-tap sinc, no FFT feature, to keep the WASM small). Each block's input starts on a whole sample, so blocks join at the same sub-sample phase; the remaining fixed offset is under half a sample.
+  - The 5 ms edge fades are skipped where a clip continues the same audio (a split).
+  - Clips at other speeds are silent until Phase 9's time-stretch. Of more than two channels, the first two are kept.
+- **Sound output.**
+  - A 2-second ring buffer, with 250 ms mixed ahead.
+  - The heard sample comes from the worklet's (context time, ring frame) pairs and the page's `getOutputTimestamp`, both behind seqlocks. The last good reading covers a writer caught mid-update.
+  - Playback follows the wall clock if the device's clock stays unreadable for 600 ms, and says why in the playback stats.
+- **Pre-roll.** Playback starts when:
+  - every layer has its first two frames decoded, and 0.3 s of sound is ready;
+  - the first frame is drawn and the GPU has finished it.
+  - It starts anyway after 1.5 s (3 s for the GPU).
+  - A frame drawn now is taken to show one display refresh later.
+- **A/V offset** is measured at every display refresh as the middle of the frame on screen minus the sound heard. A frame shown late therefore counts against sync too, not just as a drop.
+- **Auto quality.**
+  - It drops a level when two or more frames in a second are skipped although they were decoded in time (drawing is behind). Frames skipped for decoding never lower quality.
+  - It steps back up after 3 calm seconds, doubling the wait each time a step up does not hold.
+  - The GPU time in the stats is the latency from submission to the work-done callback, which includes waiting for the display, so it is shown but not used.
+- **Shuttle.** Each J or L press restarts pre-roll at the new rate. Backwards playback reads each frame from its key frame through the seek path, so it is smooth only for short GOPs.
+- **Golden tolerance.**
+  - Mean difference at most 0.35 levels; at most 1.5% of pixels off by more than 8 and 1% by more than 16; no pixel off by more than 64.
+  - Measured on every backend: at most a mean of 0.2, 0.54% and 0.32%, and 44.
+  - Controls that must fail: 55% instead of 50% opacity (mean 0.77, 7.4% off by more than 8) and a 2-pixel shift (mean 2.6, 4.3% off by more than 16).
+- **Diagnostics.** `?pattern=1` shows the Phase 0 test pattern for GPU checks. `?decode=software` or `?decode=hardware` (with `?diagnostic=1`) forces playback decoders for tests.
+
 ## 2026-10-24: Phase 3 answers
 
 - **WebGL2 fallback:** stays in the MVP.
