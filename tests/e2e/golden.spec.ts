@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
+import { compare, passes, render, tolerance, type Comparison } from './golden-tools';
 
 // Golden renders: fixture projects rendered through renderFrame(t) and read back,
 // compared with reference PNGs on both GPU backends. References come from the
@@ -29,57 +30,6 @@ interface Fixture {
 const { fixtures, media: mediaFiles } = JSON.parse(
   readFileSync(join(root, 'tests/fixtures/golden.json'), 'utf8'),
 ) as { fixtures: Fixture[]; media: string[] };
-
-/**
- * What a render may differ by. GPUs pick mip levels and smooth edges a little
- * differently, so minified stills and rotated edges differ by a few levels. Measured
- * on Chrome and Edge (GTX 1650) and software WebGPU, WebGL2 on WARP and SwiftShader:
- * a mean difference of at most 0.2 levels, at most 0.54% of pixels off by more than
- * 8 and 0.32% by more than 16, never more than 44. A 55% instead of 50% opacity
- * gives a mean of 0.77 and 7.4% of pixels off by more than 8; a 2-pixel shift a
- * mean of 2.6 and 4.3% off by more than 16. Both fail; every real backend passes.
- */
-const tolerance = { mean: 0.35, over8: 0.015, over16: 0.01, worst: 64 };
-
-interface Comparison {
-  /** Mean channel difference, in 8-bit levels. */
-  mean: number;
-  /** Shares of pixels with a channel off by more than 3, 8 and 16 levels. */
-  over: [number, number, number];
-  worst: number;
-}
-
-function compare(actual: PNG, expected: PNG): Comparison {
-  expect([actual.width, actual.height]).toEqual([expected.width, expected.height]);
-  const bands = [0, 0, 0];
-  let worst = 0;
-  let total = 0;
-  for (let i = 0; i < actual.data.length; i += 4) {
-    let pixel = 0;
-    for (let c = 0; c < 3; c++) {
-      const difference = Math.abs(actual.data[i + c] - expected.data[i + c]);
-      pixel = Math.max(pixel, difference);
-      total += difference;
-    }
-    worst = Math.max(worst, pixel);
-    [3, 8, 16].forEach((level, band) => (bands[band] += pixel > level ? 1 : 0));
-  }
-  const pixels = actual.data.length / 4;
-  return {
-    mean: total / (pixels * 3),
-    over: bands.map((count) => count / pixels) as [number, number, number],
-    worst,
-  };
-}
-
-function passes({ mean, over, worst }: Comparison) {
-  return (
-    mean <= tolerance.mean &&
-    over[1] <= tolerance.over8 &&
-    over[2] <= tolerance.over16 &&
-    worst <= tolerance.worst
-  );
-}
 
 /** A 512×288 RGBA image whose alpha ramps left to right over a colour gradient. */
 function alphaPng() {
@@ -120,24 +70,6 @@ async function snapshot(page: Page) {
       tracks: { id: number; clips: { id: number }[] }[];
     };
   };
-}
-
-async function render(page: Page, time: number): Promise<PNG> {
-  const raw = await page.evaluate(async (time) => {
-    const api = (Reflect.get(window, '__cgv') as Hooks).client.api;
-    const pixels = (await api.renderPixels(time)) as {
-      width: number;
-      height: number;
-      data: Uint8Array;
-    };
-    let text = '';
-    for (let i = 0; i < pixels.data.length; i += 0x8000)
-      text += String.fromCharCode(...pixels.data.subarray(i, i + 0x8000));
-    return { width: pixels.width, height: pixels.height, data: btoa(text) };
-  }, time);
-  const png = new PNG({ width: raw.width, height: raw.height });
-  Buffer.from(raw.data, 'base64').copy(png.data);
-  return png;
 }
 
 /** Replaces the project's clips with `fixture` and renders its frame. */

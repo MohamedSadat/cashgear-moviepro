@@ -1,0 +1,66 @@
+{
+  "comment": "Golden renders of every effect and transition (tests/e2e/effects.spec.ts); tests/golden/effects/<name>.png is the reference. Projects are 480×270 at 30 fps. The pictures are synthetic (scenePng in tests/e2e/golden-tools.ts). Effects run on the sunset at frame 12; transitions go from the sunset to the city over 30 frames centred on the cut at frame 30, shown at frame 26. \"$look:<id>\" names a built-in look.",
+  "media": ["sunset.png", "city.png"],
+  "effects": [
+    { "name": "brightness-contrast", "params": { "brightness": 0.15, "contrast": 0.35 } },
+    { "name": "exposure", "params": { "stops": -1 } },
+    { "name": "saturation", "params": { "saturation": 1.6, "vibrance": 0.3 } },
+    { "name": "temperature-tint", "params": { "temperature": 0.6, "tint": -0.3 } },
+    { "name": "lut", "params": { "lut": "$look:teal-orange", "strength": 1 } },
+    { "name": "hue", "params": { "shift": 90 } },
+    { "name": "black-white", "params": { "amount": 1, "tone": "red" } },
+    { "name": "sepia", "params": { "amount": 0.9 } },
+    { "name": "invert", "params": { "amount": 1 } },
+    { "name": "posterize", "params": { "levels": 4 } },
+    { "name": "vignette", "params": { "amount": 0.8, "size": 0.4, "softness": 0.5 } },
+    { "name": "gaussian-blur", "params": { "radius": 0.02 } },
+    { "name": "sharpen", "params": { "amount": 2, "radius": 0.002 } },
+    { "name": "zoom-blur", "params": { "amount": 0.4, "center_x": 0.4, "center_y": 0.5 } },
+    { "name": "pixelate", "params": { "size": 0.05 } },
+    { "name": "mirror-flip", "params": { "mode": "mirror-left" } },
+    { "name": "noise", "params": { "amount": 0.3, "size": 2, "colored": true } },
+    { "name": "glitch", "params": { "amount": 0.9 } },
+    { "name": "old-film", "params": {} },
+    { "name": "chromatic-aberration", "params": { "amount": 0.015 } }
+  ],
+  "transitions": [
+    { "name": "cross-dissolve", "kind": "cross-dissolve", "params": {} },
+    {
+      "name": "dip-to-black",
+      "kind": "dip",
+      "params": { "color": { "r": 0, "g": 0, "b": 0, "a": 1 } }
+    },
+    {
+      "name": "dip-to-white",
+      "kind": "dip",
+      "params": { "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }
+    },
+    { "name": "wipe-left", "kind": "wipe", "params": { "direction": "left" } },
+    { "name": "wipe-right", "kind": "wipe", "params": { "direction": "right" } },
+    { "name": "wipe-up", "kind": "wipe", "params": { "direction": "up" } },
+    { "name": "wipe-down", "kind": "wipe", "params": { "direction": "down" } },
+    { "name": "slide-left", "kind": "slide", "params": { "direction": "left" } },
+    { "name": "slide-right", "kind": "slide", "params": { "direction": "right" } },
+    { "name": "slide-up", "kind": "slide", "params": { "direction": "up" } },
+    { "name": "slide-down", "kind": "slide", "params": { "direction": "down" } },
+    { "name": "push-left", "kind": "push", "params": { "direction": "left" } },
+    { "name": "push-right", "kind": "push", "params": { "direction": "right" } },
+    { "name": "push-up", "kind": "push", "params": { "direction": "up" } },
+    { "name": "push-down", "kind": "push", "params": { "direction": "down" } },
+    { "name": "zoom-in", "kind": "zoom", "params": { "mode": "in" } },
+    { "name": "zoom-out", "kind": "zoom", "params": { "mode": "out" } },
+    { "name": "spin-clockwise", "kind": "spin", "params": { "direction": "clockwise" } },
+    {
+      "name": "spin-counterclockwise",
+      "kind": "spin",
+      "params": { "direction": "counterclockwise" }
+    },
+    { "name": "blur-dissolve", "kind": "blur-dissolve", "params": { "amount": 0.04 } },
+    { "name": "luma-clock", "kind": "luma-wipe", "params": { "gradient": "clock" } },
+    { "name": "luma-iris", "kind": "luma-wipe", "params": { "gradient": "iris" } },
+    { "name": "luma-diamond", "kind": "luma-wipe", "params": { "gradient": "diamond" } },
+    { "name": "luma-diagonal", "kind": "luma-wipe", "params": { "gradient": "diagonal" } },
+    { "name": "luma-blinds", "kind": "luma-wipe", "params": { "gradient": "blinds" } },
+    { "name": "luma-clouds", "kind": "luma-wipe", "params": { "gradient": "clouds" } }
+  ]
+}
