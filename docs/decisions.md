@@ -2,6 +2,43 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-24: Phase 5 findings and defaults
+
+Choices made while building the export pipeline.
+
+- **Sound bitrate:** 96 kbit/s a channel for AAC and Opus, so 192 kbit/s stereo. This replaces the 256 kbit/s default: Windows' AAC encoder (Media Foundation, behind Chrome and Edge) takes at most 192 kbit/s and refuses more.
+- **Encoder delay:** Chrome and Edge time their AAC and Opus chunks with the encoder's start-up delay already accounted for, so the export adds no correction.
+  - Measured with a clip that flashes white at 1, 2.5 and 4 s and clicks at the same times. In MP4, WebM, MOV and MKV, decoded by FFmpeg, every click lands on its flash frame: 0.0 ms.
+- **Colour conversion:**
+  - The GPU writes NV12 as BT.709 limited range. Chroma is the mean of each 2×2 block, sited at its centre, as FFmpeg assumes when it decodes 4:2:0. Left-sited chroma, H.264's nominal default, decoded worse in FFmpeg (31.3 instead of 34.5 dB RGB on a sharp-edged frame).
+  - The target packs four bytes a texel (RGBA8), luma rows then chroma rows. One readback is then an NV12 frame on WebGPU and WebGL2 alike; WebGL2 cannot reliably read single- and two-channel targets back.
+- **Measuring PSNR:** on the Y'CbCr 4:2:0 planes, as codecs report it. FFmpeg converts the preview frame to the export's own format, and its `psnr` filter compares the planes.
+  - RGB PSNR cannot reach 40 dB on frames with sharp edges between saturated colours, in any 4:2:0 file. A lossless 4:2:0 copy of the fixture frames reaches only 34.4 to 45.4 dB, and the exports come within 0.1 to 1.7 dB of that.
+  - So the test also requires RGB PSNR within 3 dB of that ceiling, which catches a wrong matrix or a shifted picture.
+  - Comparing with the next frame of the moving clip, a control, gives 22.4 dB and must fail.
+- **Encoding:**
+  - The hardware encoder is used first (`prefer-hardware`), then whatever the browser offers. VBR, `latencyMode: 'quality'`, a key frame every 2 s.
+  - H.264 is High profile, HEVC Main, VP9 profile 0 and AV1 Main, all 8-bit, each at the lowest level that holds the frame size, rate and bitrate.
+  - Exports decode in hardware where they can.
+- **Quality and bitrates:**
+  - Presets use YouTube's recommended SDR bitrates: 1080p 8 Mbit/s (12 at 48 fps and up), 4K 40 (60), TikTok 8 (12), Instagram 6 (9).
+  - High, Medium and Low are 0.13, 0.08 and 0.05 bits per pixel per frame for H.264. HEVC, VP9 and AV1 get 0.65, 0.7 and 0.55 of the H.264 bitrate.
+- **Frame rates:** an export at another rate shows, at each of its frames, the project frame showing at that moment. Frames are not blended.
+- **Muxing:**
+  - MP4 and MOV reserve space for their index at the front from the packet counts, which are known in advance.
+  - WAV switches to RF64 past 4 GB.
+  - Sound may trail the picture by at most 2 s before the export waits for it.
+- **Saving on the web:** Chrome and Edge write through the save picker's file. Writes go to the browser's swap file until the end, so a failed export leaves an existing file as it was.
+  - Elsewhere, the export goes to OPFS (`exports/`) and is downloaded. The copy is removed at the next export, once its download has long finished.
+- **Saving on the desktop:**
+  - The muxed bytes reach the native side through raw-body IPC calls, because Tauri channels only carry messages from native code to the webview.
+  - They are written to a `.part` file beside the destination, renamed when complete.
+  - GIFs come from an H.264 intermediate at three times the High bitrate, by default 640 px wide at 15 fps. FFmpeg makes one palette for the clip (`palettegen=stats_mode=diff`, Sierra dithering).
+  - MP3s come from a WAV intermediate with `libmp3lame` at 128 to 320 kbit/s.
+- **UI:**
+  - Export sits in the header, with Ctrl+E for Filmora-like keys and Ctrl+M for Premiere-like keys.
+  - The project file's web download is now called "Download project", so it is not mistaken for exporting video.
+
 ## 2026-10-24: Phase 5 answers
 
 - **Codecs:** MP4 with H.264 and AAC is the default.
