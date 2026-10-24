@@ -218,6 +218,7 @@ async fn sleep_ms(ms: i32) {
 
 pub struct Compositor {
     comp_format: TextureFormat,
+    webgl: bool,
     align: u64,
     sampler: Sampler,
     texture_layout: BindGroupLayout,
@@ -227,6 +228,7 @@ pub struct Compositor {
     nv12_pipeline: RenderPipeline,
     i420_pipeline: RenderPipeline,
     premultiply_pipeline: RenderPipeline,
+    blit_pipeline: RenderPipeline,
     present_pipelines: HashMap<TextureFormat, RenderPipeline>,
     shader: ShaderModule,
     uniforms: Buffer,
@@ -308,6 +310,7 @@ impl Compositor {
             address_mode_v: AddressMode::ClampToEdge,
             mag_filter: FilterMode::Linear,
             min_filter: FilterMode::Linear,
+            mipmap_filter: MipmapFilterMode::Linear,
             ..Default::default()
         });
         let layer_uniform_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -383,11 +386,13 @@ impl Compositor {
         });
         Compositor {
             comp_format,
+            webgl: adapter.get_info().backend == Backend::Gl,
             align,
             sampler,
             nv12_pipeline: convert("fs_nv12"),
             i420_pipeline: convert("fs_i420"),
             premultiply_pipeline: convert("fs_premultiply"),
+            blit_pipeline: convert("fs_blit"),
 
             texture_layout,
             convert_layout,
@@ -532,6 +537,11 @@ impl Compositor {
                 LayerTexture::Still(key.to_string())
             }
             FrameSource::External(image) => {
+                // wgpu's WebGL2 backend copies VideoFrames only with unstable
+                // web-sys APIs (and panics without them): those take the planes path.
+                if self.webgl && matches!(image, ExternalImageSource::VideoFrame(_)) {
+                    return Err("WebGL2 draws video frames from their planes".into());
+                }
                 let (width, height) = (image.width(), image.height());
                 if width == 0 || height == 0 || width > limit || height > limit {
                     return Err(format!("A {width}×{height} frame does not fit on the GPU"));
@@ -779,6 +789,9 @@ impl Compositor {
                 depth_or_array_layers: 1,
             },
         );
+        // A full mip chain: stills are often shown far smaller than they are, and
+        // sampling them unfiltered would alias (and differ from GPU to GPU).
+        let levels = 32 - width.max(height).leading_zeros();
         let texture = device.create_texture(&TextureDescriptor {
             label: Some("Still"),
             size: Extent3d {
@@ -786,7 +799,7 @@ impl Compositor {
                 height,
                 depth_or_array_layers: 1,
             },
-            mip_level_count: 1,
+            mip_level_count: levels,
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: LAYER_FORMAT,
@@ -794,58 +807,27 @@ impl Compositor {
             view_formats: &[],
         });
         let view = texture.create_view(&TextureViewDescriptor::default());
-        // The premultiply pass only reads plane0; the other planes repeat it.
-        queue.write_buffer(&self.uniforms, 0, &floats(&[0.0; 16]));
-        let binding = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("Still conversion"),
-            layout: &self.convert_layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 10,
-                    resource: BindingResource::Buffer(BufferBinding {
-                        buffer: &self.uniforms,
-                        offset: 0,
-                        size: BufferSize::new(CONVERT_UNIFORM_SIZE),
-                    }),
-                },
-                BindGroupEntry {
-                    binding: 11,
-                    resource: BindingResource::TextureView(&staging.view),
-                },
-                BindGroupEntry {
-                    binding: 12,
-                    resource: BindingResource::TextureView(&staging.view),
-                },
-                BindGroupEntry {
-                    binding: 13,
-                    resource: BindingResource::TextureView(&staging.view),
-                },
-                BindGroupEntry {
-                    binding: 14,
-                    resource: BindingResource::Sampler(&self.sampler),
-                },
-            ],
-        });
+        let level = |mip: u32| {
+            texture.create_view(&TextureViewDescriptor {
+                base_mip_level: mip,
+                mip_level_count: Some(1),
+                ..Default::default()
+            })
+        };
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("Still upload"),
         });
-        {
-            let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
-                label: Some("Premultiply still"),
-                color_attachments: &[Some(RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: Operations {
-                        load: LoadOp::Clear(Color::TRANSPARENT),
-                        store: StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-            pass.set_pipeline(&self.premultiply_pipeline);
-            pass.set_bind_group(0, &binding, &[]);
-            pass.draw(0..3, 0..1);
+        // Level 0 is the image premultiplied; each further level halves the one above.
+        let mut source = staging.view.clone();
+        for mip in 0..levels {
+            let target = level(mip);
+            let pipeline = if mip == 0 {
+                &self.premultiply_pipeline
+            } else {
+                &self.blit_pipeline
+            };
+            self.record_pass(device, &mut encoder, &source, &target, pipeline);
+            source = target;
         }
         queue.submit([encoder.finish()]);
         self.pool.release(staging);
@@ -857,6 +839,65 @@ impl Compositor {
             old.texture.destroy();
         }
         Ok(())
+    }
+
+    /// A full-screen pass from `source` into `target` with a conversion pipeline.
+    fn record_pass(
+        &self,
+        device: &Device,
+        encoder: &mut CommandEncoder,
+        source: &TextureView,
+        target: &TextureView,
+        pipeline: &RenderPipeline,
+    ) {
+        // These passes read plane 0 only, and no uniforms; the layout wants all bound.
+        let entries = [
+            BindGroupEntry {
+                binding: 10,
+                resource: BindingResource::Buffer(BufferBinding {
+                    buffer: &self.uniforms,
+                    offset: 0,
+                    size: BufferSize::new(CONVERT_UNIFORM_SIZE),
+                }),
+            },
+            BindGroupEntry {
+                binding: 11,
+                resource: BindingResource::TextureView(source),
+            },
+            BindGroupEntry {
+                binding: 12,
+                resource: BindingResource::TextureView(source),
+            },
+            BindGroupEntry {
+                binding: 13,
+                resource: BindingResource::TextureView(source),
+            },
+            BindGroupEntry {
+                binding: 14,
+                resource: BindingResource::Sampler(&self.sampler),
+            },
+        ];
+        let binding = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Full-screen pass"),
+            layout: &self.convert_layout,
+            entries: &entries,
+        });
+        let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
+            label: Some("Full-screen pass"),
+            color_attachments: &[Some(RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: Operations {
+                    load: LoadOp::Clear(Color::TRANSPARENT),
+                    store: StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &binding, &[]);
+        pass.draw(0..3, 0..1);
     }
 
     pub fn has_still(&self, key: &str) -> bool {

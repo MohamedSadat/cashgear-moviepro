@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use wasm_bindgen::JsCast;
@@ -31,6 +31,8 @@ pub struct Renderer {
     stale: bool,
     /// Milliseconds from the last submission to the GPU finishing it (f64 bits).
     gpu_ms: Arc<AtomicU64>,
+    /// Composed frames submitted but not finished by the GPU yet.
+    in_flight: Arc<AtomicU32>,
 }
 
 async fn device_for(adapter: &Adapter) -> Result<(Device, Queue), String> {
@@ -195,6 +197,7 @@ impl Renderer {
             resized: true,
             stale: false,
             gpu_ms: Arc::new(AtomicU64::new(0)),
+            in_flight: Arc::new(AtomicU32::new(0)),
         };
         renderer.resize(width, height);
         Ok(renderer)
@@ -345,9 +348,20 @@ impl Renderer {
     fn time_submission(&self) {
         let started = now_ms();
         let gpu_ms = self.gpu_ms.clone();
+        let in_flight = self.in_flight.clone();
+        in_flight.fetch_add(1, Ordering::Relaxed);
         self.queue.on_submitted_work_done(move || {
             gpu_ms.store((now_ms() - started).to_bits(), Ordering::Relaxed);
+            in_flight.fetch_sub(1, Ordering::Relaxed);
         });
+    }
+
+    /// True while the GPU still works on a composed frame. The first frames of a
+    /// playback can take long (shaders, shared images); playback waits them out.
+    pub fn gpu_busy(&self) -> bool {
+        // WebGL2 runs completion callbacks only when polled.
+        let _ = self.device.poll(PollType::Poll);
+        self.in_flight.load(Ordering::Relaxed) > 0
     }
 
     /// Submits the composed frame, showing it on the monitor when `present` is set.

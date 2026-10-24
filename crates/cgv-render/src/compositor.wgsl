@@ -188,6 +188,12 @@ fn fs_premultiply(in: FullOut) -> @location(0) vec4<f32> {
     return vec4<f32>(c.rgb * c.a, c.a);
 }
 
+// One mip level from the level above. With sRGB storage the GPU averages in linear light.
+@fragment
+fn fs_blit(in: FullOut) -> @location(0) vec4<f32> {
+    return textureSample(plane0, plane_sampler, in.uv);
+}
+
 // ---- Present: the composition over black, sRGB-encoded when the target is not ----
 
 struct Present {
