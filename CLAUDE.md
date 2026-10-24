@@ -30,7 +30,9 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `cgv-engine`: clock and scheduler.
   - `cgv-wasm`: the only JS-facing API.
   - `cgv-native`: desktop-only native side.
+  - `cgv-effects`: the effect and transition catalogue: JSON schema, registry, shader assembly (`prelude.wgsl`) and settings packing.
   - `cgv-time`, `cgv-model`, `cgv-media`, `cgv-audio`.
+- `assets/`: the built-in pack, embedded at build time. One folder per effect or transition (`effect.json` and `effect.wgsl`, plus any images) in `effects/` and `transitions/`; looks in `luts/`. `assets/README.md` is the authoring guide; `scripts/make-effect-assets.mjs` makes the looks and gradients.
 - `packages/engine-client`: engine worker, comlink client, frame loop and capability probe. Generated bindings go in `src/pkg/` (gitignored).
   - `media/`: Mediabunny demuxing, WebCodecs decoder sessions, the decoder pool, the frame cache, frame-accurate seeks and probes.
   - `jobs/`: the thumbnail and waveform worker.
@@ -39,13 +41,16 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `playback/`: the playback controller (the one `renderFrame(t)` path, pre-roll, J/K/L, Auto quality) and the worker's sound player.
   - `audio/`: the SharedArrayBuffer ring, its AudioWorklet and the page's AudioContext.
   - `export/`: the export worker (its own engine and copy of the project), encoders, Mediabunny muxing, targets, and pure settings (formats, presets, codec levels, bitrates).
-- `crates/cgv-model`: the project, every edit command, undo/redo and the `.cgvproj` format. `packages/ui/src/project`: opening, saving, autosave, recovery and relinking.
+  - `effects/`: catalogue types, pack images and the worker that draws the browser's previews.
+- `crates/cgv-model`: the project, every edit command, undo/redo and the `.cgvproj` format, with effects, keyframes (`animation.rs`), transitions and LUTs (`lut.rs`). `packages/ui/src/project`: opening, saving, autosave, recovery and relinking.
 - `crates/cgv-engine`: `plan_frame` (what a frame shows), the audio clip plan, transport, Auto quality and playback stats. `crates/cgv-audio`: the block mixer. `crates/cgv-render`: the compositor and WGSL.
 - `crates/cgv-media`: the media library model (Rust, via WASM). `crates/cgv-native`: the cgv-media protocol registry, byte ranges, ffprobe, proxies, export files and their GIF and MP3 conversions, and the cache folder.
 - `packages/ui`: React components, on the CG component library (`@cashgear/ui`).
   - `timeline/`: the canvas timeline. `controller.ts` owns the view, drawing and gestures outside React; `geometry.ts` and `draw.ts` are pure.
   - `editing/`: selection, tools, the clipboard and every editing action (`useEditor`), and drag gestures (`Gesture`, one undo step each).
-  - `inspector/`, `shortcuts/` (the key map, presets and settings dialog), `workspace/` (resizable panels) and `settings/` (per-user settings in `localStorage`).
+  - `inspector/`: clip fields with stopwatches (`fields.tsx`), the effect stack, the curve lane and the transition inspector.
+  - `effects/`: the catalogue hook, the effects and transitions browser, and keyframe helpers. `editing/transitions.ts` finds cuts and transition windows.
+  - `shortcuts/` (the key map, presets and settings dialog), `workspace/` (resizable panels and library tabs) and `settings/` (per-user settings in `localStorage`).
   - `export/`: the export dialog, its form rules and `useExport`.
 - `apps/web`: Vite app.
 - `apps/desktop/src-tauri`: Tauri 2 shell.
@@ -98,4 +103,12 @@ Gotchas:
 - A hardware encoder `isConfigSupported` accepts may still fail to start (CI's WARP GPU process, where even "no preference" means hardware). `chooseVideoConfig` tries each on one frame; keep `prefer-software` last.
 - Windows' AAC encoder refuses more than 192 kbit/s.
 - Export PSNR is measured on Y'CbCr 4:2:0 planes with FFmpeg's `psnr` filter. RGB PSNR cannot reach 40 dB at sharp saturated edges in any 4:2:0 file.
+- A new effect is a folder in `assets/effects/` and nothing else, plus its fixture in `tests/fixtures/effects.json`. Make its golden with `UPDATE_GOLDEN=1` on the chrome project, then keep only the new PNG.
+- Effect shaders must give the same picture on every GPU: use the prelude's `hash`, `time_step`, `seed_step`, `cell_of` and `coverage`, not `sin` hashes or `floor(time * rate)`.
+- Golden scenes are made at the project's size: a minified source lets each GPU filter differently.
+- On WebGL2, wgpu copies an `ImageBitmap` at the next submit, so `upload_image` submits at once, before the bitmap closes.
+- Effects run at a layer's drawn size. Keyframed layers round it up to sixteenths of an octave, and the texture pool destroys textures unused for 30 frames: never key pooled textures on a size that changes every frame.
+- Every engine (monitor, export, previews) loads the pack's images at start.
+- An inspector field with a stopwatch is a `div`, not a `label`: a label passes clicks on it to its first button.
+- `cgv-model`, `cgv-effects` and `serde_json` build at `opt-level = "s"` to keep release WASM under 1.5 MB gzipped.
 - Every Playwright run empties `test-results/`. Copy exports you want to keep (player checks) elsewhere, such as `bench/results/`.
