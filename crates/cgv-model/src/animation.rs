@@ -354,6 +354,13 @@ impl Clip {
         self.keyframes.contains_key("volumeDb")
     }
 
+    /// True when the clip's size or framing is keyframed.
+    pub fn has_moving_keyframes(&self) -> bool {
+        self.keyframes
+            .keys()
+            .any(|name| name.starts_with("transform.") || name.starts_with("crop."))
+    }
+
     /// The settings of effect `index` at `offset`, with animated ones evaluated.
     pub fn effect_params_at(&self, index: usize, offset: Flicks) -> Params {
         let effect = &self.effects[index];

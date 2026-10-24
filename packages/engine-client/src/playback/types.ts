@@ -30,6 +30,8 @@ export interface LayerPlan {
   clipSeconds: number;
   seed: number;
   effects?: EffectPlan[];
+  /** Its transform or crop is keyframed, so its drawn size may change each frame. */
+  moving?: boolean;
 }
 
 /** How a frame is drawn, bottom first. */

@@ -151,6 +151,7 @@ impl Engine {
                         effect_run(registry, &plan.luts, e, layer.clip_seconds, layer.seed)
                     })
                     .collect(),
+                moving: layer.moving,
             })
         };
         let steps: Vec<Step> = plan

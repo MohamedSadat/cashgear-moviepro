@@ -227,15 +227,35 @@ pub fn layer_geometry(
 }
 
 /// The size in pixels to run a layer's effects at: its visible part as it is
-/// drawn, but never more than the picture's own pixels, nor `limit`.
-pub fn effect_size(geometry: &LayerGeometry, picture: &Picture, limit: u32) -> (u32, u32) {
+/// drawn, but never more than the picture's own pixels, nor `limit`. A `moving`
+/// layer's drawn size is rounded up by [`size_step`], so a frame-by-frame zoom
+/// reuses a few texture sizes instead of making new ones every frame.
+pub fn effect_size(
+    geometry: &LayerGeometry,
+    picture: &Picture,
+    limit: u32,
+    moving: bool,
+) -> (u32, u32) {
     let [u0, v0, u1, v1] = geometry.visible;
     let (width, height) = picture.upright();
-    let side = |drawn: f64, own: f64| (drawn.min(own).ceil().max(1.0) as u32).min(limit.max(1));
+    let side = |drawn: f64, own: f64| {
+        let drawn = if moving { size_step(drawn) } else { drawn };
+        (drawn.min(own).ceil().max(1.0) as u32).min(limit.max(1))
+    };
     (
         side(geometry.per_u * (u1 - u0), width * (u1 - u0)),
         side(geometry.per_v * (v1 - v0), height * (v1 - v0)),
     )
+}
+
+/// `side` rounded up to a sixteenth of its power of two (multiples of 64 from 1024
+/// to 2048, say): at most 1/16 more pixels, and 16 sizes an octave.
+pub fn size_step(side: f64) -> f64 {
+    if side <= 16.0 {
+        return side.ceil();
+    }
+    let step = 2f64.powi(side.log2().floor() as i32 - 4);
+    (side / step).ceil() * step
 }
 
 /// Upright `(u, v)` inside the visible part to coordinates of a texture that holds
@@ -432,7 +452,9 @@ mod tests {
         let pic = picture(3840.0, 2160.0, 0);
         // A 4K picture at quarter preview of a 1080p project: drawn 480 × 270.
         let quarter = layer_geometry(HD, 0.25, &pic, &Default::default(), &crop).unwrap();
-        assert_eq!(effect_size(&quarter, &pic, 8192), (360, 270));
+        assert_eq!(effect_size(&quarter, &pic, 8192, false), (360, 270));
+        // Keyframed, its size goes up in steps.
+        assert_eq!(effect_size(&quarter, &pic, 8192, true), (368, 272));
         // Scaled up 4×, it is drawn larger than it is: its own pixels are the limit.
         let big = LayerTransform {
             scale_x: 4.0,
@@ -440,13 +462,14 @@ mod tests {
             ..Default::default()
         };
         let zoomed = layer_geometry(HD, 1.0, &pic, &big, &crop).unwrap();
-        assert_eq!(effect_size(&zoomed, &pic, 8192), (2880, 2160));
-        assert_eq!(effect_size(&zoomed, &pic, 2048), (2048, 2048));
+        assert_eq!(effect_size(&zoomed, &pic, 8192, false), (2880, 2160));
+        assert_eq!(effect_size(&zoomed, &pic, 8192, true), (2880, 2160));
+        assert_eq!(effect_size(&zoomed, &pic, 2048, false), (2048, 2048));
         // A rotated phone clip runs upright.
         let portrait = picture(1920.0, 1080.0, 90);
         let full =
             layer_geometry(HD, 1.0, &portrait, &Default::default(), &Default::default()).unwrap();
-        assert_eq!(effect_size(&full, &portrait, 8192), (608, 1080));
+        assert_eq!(effect_size(&full, &portrait, 8192, false), (608, 1080));
         let map = visible_map(quarter.visible);
         close(map.apply(0.25, 0.0), (0.0, 0.0));
         close(map.apply(1.0, 1.0), (1.0, 1.0));

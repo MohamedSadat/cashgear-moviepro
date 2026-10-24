@@ -33,6 +33,9 @@ const UNIFORM_SLOTS: u64 = 2048;
 const DATA_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
 /// Free textures kept per size and format.
 const POOL_KEEP: usize = 6;
+/// Free textures unused for this many frames are destroyed: a layer whose size
+/// changes leaves textures of sizes no frame asks for again.
+const POOL_AGE: u64 = 30;
 
 /// How a CPU frame's bytes are arranged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,6 +106,8 @@ pub struct LayerStep<'a> {
     pub index: usize,
     pub draw: LayerDraw,
     pub effects: Vec<EffectRun<'a>>,
+    /// Its drawn size may change from frame to frame (see [`effect_size`]).
+    pub moving: bool,
 }
 
 /// How a frame is drawn, bottom first. A frame has a handful of steps, built
@@ -231,12 +236,15 @@ struct Pooled {
 
 #[derive(Default)]
 struct TexturePool {
-    free: HashMap<TextureKey, Vec<Pooled>>,
+    /// Free textures by key, each with the frame it was released in.
+    free: HashMap<TextureKey, Vec<(Pooled, u64)>>,
+    /// Frames trimmed so far.
+    frame: u64,
 }
 
 impl TexturePool {
     fn acquire(&mut self, device: &Device, key: TextureKey) -> Pooled {
-        if let Some(texture) = self.free.get_mut(&key).and_then(Vec::pop) {
+        if let Some((texture, _)) = self.free.get_mut(&key).and_then(Vec::pop) {
             return texture;
         }
         // Conversion and effect passes render into it; external copies require it too.
@@ -269,21 +277,32 @@ impl TexturePool {
     /// Returns a texture for reuse. Effect chains release textures while a frame
     /// is built, so nothing is destroyed until [`TexturePool::trim`].
     fn release(&mut self, texture: Pooled) {
-        self.free.entry(texture.key).or_default().push(texture);
+        let frame = self.frame;
+        self.free
+            .entry(texture.key)
+            .or_default()
+            .push((texture, frame));
     }
 
-    /// Keeps at most a few free textures of each size; call after a submission.
+    /// Keeps at most a few free textures of each size, and none that have gone
+    /// unused for long; call after a submission.
     fn trim(&mut self) {
-        for free in self.free.values_mut() {
-            while free.len() > POOL_KEEP {
-                free.pop().expect("texture").texture.destroy();
+        self.frame += 1;
+        let oldest = self.frame.saturating_sub(POOL_AGE);
+        self.free.retain(|_, free| {
+            // The most recently released are at the end.
+            let stale = free.iter().take_while(|(_, frame)| *frame < oldest).count();
+            let excess = free.len().saturating_sub(POOL_KEEP);
+            for (texture, _) in free.drain(..stale.max(excess)) {
+                texture.texture.destroy();
             }
-        }
+            !free.is_empty()
+        });
     }
 
     fn clear(&mut self) {
         for (_, textures) in self.free.drain() {
-            for texture in textures {
+            for (texture, _) in textures {
                 texture.texture.destroy();
             }
         }
@@ -1480,7 +1499,7 @@ impl Compositor {
             }));
         }
         let limit = device.limits().max_texture_dimension_2d;
-        let size = effect_size(&geometry, &draw.picture, limit);
+        let size = effect_size(&geometry, &draw.picture, limit, step.moving);
         let values = layer_values(&geometry, &geometry.to_texture, 1.0);
         let extract = Self::slot(frame, self.align, &values)?;
         let input = self.pool.acquire(device, self.target_key(size));

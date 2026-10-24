@@ -47,6 +47,9 @@ pub struct LayerPlan {
     /// Enabled effects, in order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<EffectPlan>,
+    /// The transform or crop is keyframed, so its drawn size may change each frame.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub moving: bool,
 }
 
 /// How a frame is drawn, bottom track first.
@@ -160,6 +163,7 @@ fn visual_layer(project: &Project, track: TrackId, clip: &Clip, time: Flicks) ->
         clip_seconds: offset.as_seconds(),
         seed: seed(clip.id),
         effects: effect_plans(clip, offset),
+        moving: clip.has_moving_keyframes(),
     })
 }
 
@@ -676,6 +680,11 @@ mod tests {
         let clip = append(&mut session, bottom, "video", 60);
         set_key(&mut session, clip, "opacity", 0, 0.0);
         set_key(&mut session, clip, "opacity", 30, 1.0);
+        let fading = plan_frame(session.project(), Flicks(FRAME * 15));
+        assert!(
+            !fading.layers[0].moving,
+            "opacity keys leave its size alone"
+        );
         set_key(&mut session, clip, "transform.x", 10, 200.0);
         let blur = add_effect(&mut session, clip, "gaussian-blur", Params::new());
         set_key(
@@ -704,6 +713,7 @@ mod tests {
         let layer = &plan.layers[0];
         assert_eq!(layer.opacity, 0.5);
         assert_eq!(layer.transform.x, 200.0);
+        assert!(layer.moving, "its position is keyframed");
         assert_eq!(layer.clip_seconds, 0.5);
         assert_eq!(layer.effects.len(), 1, "disabled effects are left out");
         assert_eq!(layer.effects[0].kind, "gaussian-blur");
