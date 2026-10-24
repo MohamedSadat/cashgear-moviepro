@@ -434,7 +434,7 @@ test('an exported project file imports as a copy with the same edit', async ({ p
   const original = await snapshot(page);
 
   const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Export file' }).click();
+  await page.getByRole('button', { name: 'Download project' }).click();
   const file = await download;
   expect(file.suggestedFilename()).toBe('Exported.cgvproj');
   const text = readFileSync((await file.path())!, 'utf8');

@@ -1,4 +1,6 @@
 import {
+  clearOpfsExports,
+  downloadOpfsExport,
   mediaStore,
   opfsCacheStore,
   opfsProjectFiles,
@@ -8,7 +10,14 @@ import {
   type MediaSourceRef,
   type ProjectEntry,
 } from '@cgv/engine-client';
-import { mediaAccept, newMediaId, type MediaPlatform, type ProjectStore } from '@cgv/ui';
+import {
+  mediaAccept,
+  newMediaId,
+  type ExportChoice,
+  type ExportDestination,
+  type MediaPlatform,
+  type ProjectStore,
+} from '@cgv/ui';
 
 type PermissionedHandle = FileSystemFileHandle & {
   queryPermission(options: { mode: 'read' }): Promise<PermissionState>;
@@ -24,7 +33,58 @@ const cache = opfsCacheStore();
 /** Remembered handles the browser wants permission for again, waiting for a click. */
 let waitingHandles: { id: string; handle: PermissionedHandle }[] = [];
 
+type SaveFilePicker = (options: {
+  suggestedName: string;
+  types: { description: string; accept: Record<string, string[]> }[];
+}) => Promise<FileSystemFileHandle>;
+
 const filePicker = () => Reflect.get(window, 'showOpenFilePicker') as OpenFilePicker | undefined;
+const savePicker = () => Reflect.get(window, 'showSaveFilePicker') as SaveFilePicker | undefined;
+
+/**
+ * Where an export goes: straight into a file picked in the save dialog (Chrome,
+ * Edge), or into OPFS and then the browser's downloads.
+ */
+async function chooseExport({
+  fileName,
+  format,
+  download,
+}: ExportChoice): Promise<ExportDestination | null> {
+  const picker = savePicker();
+  if (picker && !download) {
+    let handle: FileSystemFileHandle;
+    try {
+      handle = await picker({
+        suggestedName: fileName,
+        types: [
+          { description: format.label, accept: { [format.mimeType]: ['.' + format.extension] } },
+        ],
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return null;
+      throw error;
+    }
+    return {
+      target: { kind: 'handle', handle },
+      name: handle.name,
+      finish: async () => handle.name,
+      // The worker drops what it wrote.
+      discard: async () => {},
+    };
+  }
+  // Earlier exports' downloads have finished long ago.
+  await clearOpfsExports();
+  const stored = `${crypto.randomUUID()}.${format.extension}`;
+  return {
+    target: { kind: 'opfs', name: stored },
+    name: fileName,
+    async finish() {
+      await downloadOpfsExport(stored, fileName);
+      return 'Downloads';
+    },
+    discard: async () => {},
+  };
+}
 
 function pickWithInput(accept: string, multiple: boolean): Promise<File[]> {
   return new Promise((resolve) => {
@@ -234,6 +294,7 @@ export const webPlatform: MediaPlatform = {
     return file ? { id: media.id, source: { kind: 'file', file } } : null;
   },
 
+  chooseExport,
   cache,
   nativeInfo: async () => undefined,
 };

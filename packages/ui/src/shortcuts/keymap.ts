@@ -16,6 +16,7 @@ export type ActionId =
   | 'redo'
   | 'save'
   | 'saveAs'
+  | 'exportVideo'
   | 'split'
   | 'delete'
   | 'rippleDelete'
@@ -79,6 +80,7 @@ export const actions: readonly ActionInfo[] = [
   { id: 'bladeTool', label: 'Blade tool', group: 'Timeline' },
   { id: 'save', label: 'Save', group: 'File' },
   { id: 'saveAs', label: 'Save as', group: 'File' },
+  { id: 'exportVideo', label: 'Export video', group: 'File' },
 ];
 
 export type PresetId = 'filmora' | 'premiere';
@@ -124,6 +126,7 @@ export const presets: Record<PresetId, { label: string; keys: Keymap }> = {
     keys: {
       ...common,
       redo: ['Ctrl+Y', 'Ctrl+Shift+Z'],
+      exportVideo: ['Ctrl+E'],
       split: ['Ctrl+B'],
       trimStartToPlayhead: ['Alt+['],
       trimEndToPlayhead: ['Alt+]'],
@@ -138,6 +141,7 @@ export const presets: Record<PresetId, { label: string; keys: Keymap }> = {
     keys: {
       ...common,
       redo: ['Ctrl+Shift+Z', 'Ctrl+Y'],
+      exportVideo: ['Ctrl+M'],
       split: ['Ctrl+K'],
       trimStartToPlayhead: ['Q'],
       trimEndToPlayhead: ['W'],

@@ -9,6 +9,7 @@ const once = new Set<ActionId>([
   'shuttleForward',
   'save',
   'saveAs',
+  'exportVideo',
   'split',
   'delete',
   'rippleDelete',

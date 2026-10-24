@@ -8,7 +8,13 @@ import {
   type NativeProbe,
   type ProjectEntry,
 } from '@cgv/engine-client';
-import type { MediaPlatform, NativeInfo, ProjectStore } from '@cgv/ui';
+import type {
+  ExportChoice,
+  ExportDestination,
+  MediaPlatform,
+  NativeInfo,
+  ProjectStore,
+} from '@cgv/ui';
 
 /** A file the native side has registered for streaming through `cgv-media`. */
 interface RegisteredMedia {
@@ -23,6 +29,7 @@ interface RegisteredMedia {
   probeError?: string | null;
 }
 type ProxyEvent = { event: 'progress'; progress: number };
+type ExportEvent = ProxyEvent;
 interface ProjectFile {
   path: string;
   modified: number | null;
@@ -97,6 +104,46 @@ const projects: ProjectStore = {
     return opened && { text: opened.contents, path: opened.path };
   },
 };
+
+/**
+ * Where a desktop export goes: the native save dialog (opening in Videos) picks
+ * the file, the export worker's bytes are written into it through the native
+ * side, and FFmpeg converts it afterwards for GIF and MP3.
+ */
+async function chooseExport({
+  fileName,
+  format,
+  settings,
+  path,
+}: ExportChoice): Promise<ExportDestination | null> {
+  const opened = await invoke<{ id: string; path: string } | null>('export_open', {
+    name: fileName,
+    extension: format.extension,
+    path: path ?? null,
+    convert: format.convertedFrom ? format.id : null,
+  });
+  if (!opened) return null;
+  const { id } = opened;
+  return {
+    target: { kind: 'sink' },
+    name: opened.path.split(/[\\/]/).pop() ?? fileName,
+    write: (position, data) =>
+      invoke('export_write', data, {
+        headers: { 'x-export-id': id, 'x-position': String(position) },
+      }),
+    async finish(result, onProgress) {
+      const events = new Channel<ExportEvent>();
+      events.onmessage = (message) => onProgress(message.progress);
+      return invoke<string>('export_finish', {
+        id,
+        durationSeconds: result.durationSeconds,
+        audioBitrate: settings.audio?.bitrate ?? null,
+        events,
+      });
+    },
+    discard: () => invoke('export_cancel', { id }),
+  };
+}
 
 /**
  * The desktop app: native file dialog and drops give real paths, the native side
@@ -213,6 +260,7 @@ export const desktopPlatform: MediaPlatform = {
     return media.map(toRequest);
   },
 
+  chooseExport,
   cache: nativeCache,
   nativeInfo: () => invoke<NativeInfo>('native_info'),
 };

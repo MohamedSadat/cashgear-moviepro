@@ -1,11 +1,43 @@
 import type {
   CacheStore,
+  ExportResult,
+  ExportSettings,
+  ExportTarget,
+  FormatInfo,
   ImportRequest,
   MediaPlatformKind,
   MediaRef,
   MediaSourceRef,
   ProjectEntry,
 } from '@cgv/engine-client';
+
+/** Where an export goes, once the user has picked it. */
+export interface ExportDestination {
+  /** What the export worker writes to. */
+  target: ExportTarget;
+  /** The file's name as the user sees it. */
+  name: string;
+  /** Desktop: hands the worker's bytes to the native file. */
+  write?(position: number, data: Uint8Array): Promise<void>;
+  /**
+   * After the worker has written everything: closes the file, converts it on
+   * desktop (GIF, MP3), or starts the download. Resolves with where the file is.
+   */
+  finish(result: ExportResult, onProgress: (fraction: number) => void): Promise<string>;
+  /** Removes what was written after a failure or cancel. */
+  discard(): Promise<void>;
+}
+
+export interface ExportChoice {
+  /** The suggested file name. */
+  fileName: string;
+  format: FormatInfo;
+  settings: ExportSettings;
+  /** Desktop test support: write to this path without asking. */
+  path?: string;
+  /** Web test support: download the file (OPFS) instead of asking where to save it. */
+  download?: boolean;
+}
 
 export interface NativeInfo {
   product: string;
@@ -96,6 +128,8 @@ export interface MediaPlatform {
   dropProxy?(id: string): Promise<void>;
   /** Desktop test support: imports local paths as if they were dropped. */
   registerPaths?(paths: string[]): Promise<ImportRequest[]>;
+  /** Asks where to save an export. Null when the user cancels. */
+  chooseExport(choice: ExportChoice): Promise<ExportDestination | null>;
   cache: CacheStore;
   nativeInfo(): Promise<NativeInfo | undefined>;
 }

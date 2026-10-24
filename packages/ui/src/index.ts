@@ -10,6 +10,8 @@ export {
 export {
   mediaAccept,
   newMediaId,
+  type ExportChoice,
+  type ExportDestination,
   type LocatedMedia,
   type MediaPlatform,
   type NativeInfo,

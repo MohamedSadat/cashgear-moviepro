@@ -12,6 +12,8 @@ import {
 import { BlockedScreen, CapabilityNotice, CapabilityStrip } from './CapabilityReport';
 import { DevOverlay } from './DevOverlay';
 import { useEditor, type EditorState } from './editing/useEditor';
+import { ExportDialog } from './export/ExportDialog';
+import { useExport, type ExportState } from './export/useExport';
 import { icons } from './icons';
 import { Inspector } from './inspector/Inspector';
 import { MediaLibraryPanel } from './media/MediaLibraryPanel';
@@ -47,6 +49,7 @@ export interface DiagnosticHooks {
   project: ProjectState;
   playback: PlaybackControls;
   editor: EditorState;
+  exporter: ExportState;
   platform: MediaPlatform;
 }
 
@@ -93,9 +96,21 @@ export function AppShell({ platform }: Props) {
     snapping: settings.snapping,
     onSnapping: (snapping) => update({ snapping }),
   });
+  const exporter = useExport(client, project, platform, {
+    backend: options.backend,
+    decode: options.decode,
+  });
   const keymap = useMemo(() => effectiveKeymap(settings.shortcuts), [settings.shortcuts]);
-  useShortcuts(keymap, editor.run);
-  const [dialog, setDialog] = useState<'projects' | 'settings' | 'shortcuts' | null>(null);
+  const [dialog, setDialog] = useState<'projects' | 'settings' | 'shortcuts' | 'export' | null>(
+    null,
+  );
+  const editorRun = editor.run;
+  const runAction = useCallback(
+    (action: Parameters<typeof editorRun>[0]) =>
+      action === 'exportVideo' ? setDialog('export') : editorRun(action),
+    [editorRun],
+  );
+  useShortcuts(keymap, runAction);
 
   useEffect(() => {
     let live = true;
@@ -129,9 +144,17 @@ export function AppShell({ platform }: Props) {
 
   useEffect(() => {
     if (!options.diagnostic) return;
-    const hooks: DiagnosticHooks = { client, library, project, playback, editor, platform };
+    const hooks: DiagnosticHooks = {
+      client,
+      library,
+      project,
+      playback,
+      editor,
+      exporter,
+      platform,
+    };
     Reflect.set(window, '__cgv', hooks);
-  }, [options.diagnostic, client, library, project, playback, editor, platform]);
+  }, [options.diagnostic, client, library, project, playback, editor, exporter, platform]);
 
   const gpu: EngineGpu =
     engine.status === 'ready'
@@ -194,6 +217,19 @@ export function AppShell({ platform }: Props) {
           onOpenProjects={() => setDialog('projects')}
           onOpenSettings={() => setDialog('settings')}
         />
+        {exporter.status.state !== 'idle' && dialog !== 'export' && (
+          <ExportChip exporter={exporter} onOpen={() => setDialog('export')} />
+        )}
+        <button
+          type="button"
+          className="cgv-primary"
+          data-testid="open-export"
+          title="Export video (Ctrl+E)"
+          disabled={!project.snapshot}
+          onClick={() => setDialog('export')}
+        >
+          Export
+        </button>
         <button
           type="button"
           className="cgv-icon-button"
@@ -231,6 +267,14 @@ export function AppShell({ platform }: Props) {
       {dialog === 'settings' && project.snapshot && (
         <SettingsDialog project={project} onClose={() => setDialog(null)} />
       )}
+      {dialog === 'export' && project.snapshot && (
+        <ExportDialog
+          project={project}
+          exporter={exporter}
+          platform={platform.kind}
+          onClose={() => setDialog(null)}
+        />
+      )}
       {dialog === 'shortcuts' && (
         <ShortcutsDialog
           shortcuts={settings.shortcuts}
@@ -242,5 +286,31 @@ export function AppShell({ platform }: Props) {
       {project.relinking && !project.recovery && <RelinkDialog project={project} />}
       {report.status === 'blocked' && <BlockedScreen report={report} />}
     </div>
+  );
+}
+
+/** Shows a running or finished export while its dialog is hidden. */
+function ExportChip({ exporter, onOpen }: { exporter: ExportState; onOpen(): void }) {
+  const status = exporter.status;
+  const label =
+    status.state === 'running'
+      ? status.converting !== null
+        ? `Converting ${Math.round(status.converting * 100)}%`
+        : `Exporting ${Math.round((status.progress?.fraction ?? 0) * 100)}%`
+      : status.state === 'done'
+        ? 'Export finished'
+        : status.state === 'failed'
+          ? 'Export failed'
+          : 'Export cancelled';
+  return (
+    <button
+      type="button"
+      className={'cgv-export-chip' + (status.state === 'failed' ? ' cgv-export-chip-failed' : '')}
+      data-testid="export-chip"
+      data-state={status.state}
+      onClick={onOpen}
+    >
+      {label}
+    </button>
   );
 }

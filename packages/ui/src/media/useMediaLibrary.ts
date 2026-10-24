@@ -58,6 +58,8 @@ export interface MediaLibraryState {
 
   /** The source of an open item. */
   source(id: string): MediaSourceRef | null;
+  /** Desktop: the proxy an open item plays through, if it has one. */
+  proxy(id: string): MediaSourceRef | null;
   dismissNotice(index: number): void;
   notice(message: string): void;
 }
@@ -401,6 +403,7 @@ export function useMediaLibrary(
           return done.map((outcome) => outcome.media);
         }, [] as MediaRef[]),
       source: (id) => sources.current.get(id)?.source ?? null,
+      proxy: (id) => sources.current.get(id)?.proxy ?? null,
       dismissNotice: (index) => setNotices((list) => list.filter((_, i) => i !== index)),
       notice,
     }),

@@ -89,7 +89,7 @@ export function ProjectBar({ project, onOpenProjects, onOpenSettings }: Props) {
         {project.savesInPlace ? (
           project.canExport && (
             <button type="button" onClick={() => void project.exportFile()} disabled={disabled}>
-              Export file
+              Download project
             </button>
           )
         ) : (

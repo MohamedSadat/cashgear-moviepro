@@ -126,7 +126,8 @@ export function useEditor(
         edge === 'start' ? time - target.start : time - (target.start + target.duration);
       execute({ type: 'trim', clip: target.id, edge, delta, ripple: true });
     };
-    const handlers: Record<ActionId, () => void> = {
+    // Exporting opens a dialog: the app shell takes that key.
+    const handlers: Record<Exclude<ActionId, 'exportVideo'>, () => void> = {
       playPause: playback.toggle,
       shuttleBack: () => playback.shuttle('j'),
       shuttleStop: () => playback.shuttle('k'),
@@ -194,7 +195,7 @@ export function useEditor(
       selectTool: () => setTool('select'),
       bladeTool: () => setTool('blade'),
     };
-    handlers[action]();
+    if (action !== 'exportVideo') handlers[action]();
   }, []);
 
   return {
