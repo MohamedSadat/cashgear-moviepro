@@ -1,0 +1,66 @@
+{
+  "id": "old-film",
+  "name": "Old Film",
+  "category": "Stylize",
+  "type": "effect",
+  "version": 1,
+  "description": "Sepia, grain, flicker and scratches of worn film.",
+  "space": "srgb",
+  "params": [
+    {
+      "id": "sepia",
+      "name": "Sepia",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.6,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "grain",
+      "name": "Grain",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.3,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "scratches",
+      "name": "Scratches",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.5,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "flicker",
+      "name": "Flicker",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.3,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "vignette",
+      "name": "Vignette",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.4,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    }
+  ]
+}

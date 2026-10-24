@@ -1,0 +1,42 @@
+{
+  "id": "spin",
+  "name": "Spin",
+  "category": "Zoom",
+  "type": "transition",
+  "version": 1,
+  "description": "Spins into the next picture.",
+  "params": [
+    {
+      "id": "direction",
+      "name": "Direction",
+      "type": "choice",
+      "options": [
+        {
+          "id": "clockwise",
+          "name": "Clockwise"
+        },
+        {
+          "id": "counterclockwise",
+          "name": "Counterclockwise"
+        }
+      ],
+      "default": "clockwise"
+    }
+  ],
+  "variants": [
+    {
+      "id": "spin-clockwise",
+      "name": "Spin",
+      "params": {
+        "direction": "clockwise"
+      }
+    },
+    {
+      "id": "spin-counterclockwise",
+      "name": "Spin counterclockwise",
+      "params": {
+        "direction": "counterclockwise"
+      }
+    }
+  ]
+}

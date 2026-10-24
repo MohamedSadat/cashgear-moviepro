@@ -1,0 +1,43 @@
+{
+  "id": "noise",
+  "name": "Noise",
+  "category": "Stylize",
+  "type": "effect",
+  "version": 1,
+  "description": "Adds film grain.",
+  "space": "srgb",
+  "params": [
+    {
+      "id": "amount",
+      "name": "Amount",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.15,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "size",
+      "name": "Grain size",
+      "type": "number",
+      "min": 1,
+      "max": 4,
+      "default": 1,
+      "step": 0.1
+    },
+    {
+      "id": "colored",
+      "name": "Colour noise",
+      "type": "bool",
+      "default": false
+    },
+    {
+      "id": "animated",
+      "name": "Animate",
+      "type": "bool",
+      "default": true
+    }
+  ]
+}

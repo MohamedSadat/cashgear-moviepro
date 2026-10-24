@@ -1,0 +1,47 @@
+{
+  "id": "mirror-flip",
+  "name": "Mirror & Flip",
+  "category": "Stylize",
+  "type": "effect",
+  "version": 1,
+  "description": "Flips the picture, or mirrors one half onto the other.",
+  "space": "linear",
+  "params": [
+    {
+      "id": "mode",
+      "name": "Mode",
+      "type": "choice",
+      "options": [
+        {
+          "id": "flip-horizontal",
+          "name": "Flip horizontally"
+        },
+        {
+          "id": "flip-vertical",
+          "name": "Flip vertically"
+        },
+        {
+          "id": "flip-both",
+          "name": "Flip both ways"
+        },
+        {
+          "id": "mirror-left",
+          "name": "Mirror left half"
+        },
+        {
+          "id": "mirror-right",
+          "name": "Mirror right half"
+        },
+        {
+          "id": "mirror-top",
+          "name": "Mirror top half"
+        },
+        {
+          "id": "mirror-bottom",
+          "name": "Mirror bottom half"
+        }
+      ],
+      "default": "flip-horizontal"
+    }
+  ]
+}

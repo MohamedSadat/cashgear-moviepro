@@ -1,0 +1,21 @@
+{
+  "id": "blur-dissolve",
+  "name": "Blur Dissolve",
+  "category": "Dissolve",
+  "type": "transition",
+  "version": 1,
+  "description": "Blurs out and into the next picture.",
+  "params": [
+    {
+      "id": "amount",
+      "name": "Blur",
+      "type": "number",
+      "min": 0,
+      "max": 0.1,
+      "default": 0.03,
+      "step": 0.001,
+      "unit": "%",
+      "display": 100
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "id": "slide",
+  "name": "Slide",
+  "category": "Slide",
+  "type": "transition",
+  "version": 1,
+  "description": "The next picture slides in over this one.",
+  "params": [
+    {
+      "id": "direction",
+      "name": "Direction",
+      "type": "choice",
+      "options": [
+        {
+          "id": "left",
+          "name": "Left"
+        },
+        {
+          "id": "right",
+          "name": "Right"
+        },
+        {
+          "id": "up",
+          "name": "Up"
+        },
+        {
+          "id": "down",
+          "name": "Down"
+        }
+      ],
+      "default": "left"
+    }
+  ],
+  "variants": [
+    {
+      "id": "slide-left",
+      "name": "Slide left",
+      "params": {
+        "direction": "left"
+      }
+    },
+    {
+      "id": "slide-right",
+      "name": "Slide right",
+      "params": {
+        "direction": "right"
+      }
+    },
+    {
+      "id": "slide-up",
+      "name": "Slide up",
+      "params": {
+        "direction": "up"
+      }
+    },
+    {
+      "id": "slide-down",
+      "name": "Slide down",
+      "params": {
+        "direction": "down"
+      }
+    }
+  ]
+}

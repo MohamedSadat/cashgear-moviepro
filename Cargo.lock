@@ -410,14 +410,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "cgv-effects"
+version = "0.1.0"
+dependencies = [
+ "cgv-model",
+ "naga",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "cgv-engine"
 version = "0.1.0"
 dependencies = [
  "cgv-audio",
+ "cgv-effects",
  "cgv-model",
  "cgv-render",
  "cgv-time",
  "serde",
+ "serde_json",
  "web-sys",
  "wgpu",
 ]
@@ -453,6 +465,8 @@ dependencies = [
 name = "cgv-render"
 version = "0.1.0"
 dependencies = [
+ "cgv-effects",
+ "cgv-model",
  "js-sys",
  "naga",
  "wasm-bindgen",
@@ -473,6 +487,7 @@ name = "cgv-wasm"
 version = "0.1.0"
 dependencies = [
  "cgv-audio",
+ "cgv-effects",
  "cgv-engine",
  "cgv-media",
  "cgv-model",

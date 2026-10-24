@@ -1,0 +1,109 @@
+{
+  "id": "luma-wipe",
+  "name": "Luma Wipe",
+  "category": "Wipe",
+  "type": "transition",
+  "version": 1,
+  "description": "Reveals the next picture along a greyscale pattern.",
+  "params": [
+    {
+      "id": "gradient",
+      "name": "Pattern",
+      "type": "choice",
+      "options": [
+        {
+          "id": "clock",
+          "name": "Clock",
+          "image": "gradients/clock.png"
+        },
+        {
+          "id": "iris",
+          "name": "Iris",
+          "image": "gradients/iris.png"
+        },
+        {
+          "id": "diamond",
+          "name": "Diamond",
+          "image": "gradients/diamond.png"
+        },
+        {
+          "id": "diagonal",
+          "name": "Diagonal",
+          "image": "gradients/diagonal.png"
+        },
+        {
+          "id": "blinds",
+          "name": "Blinds",
+          "image": "gradients/blinds.png"
+        },
+        {
+          "id": "clouds",
+          "name": "Clouds",
+          "image": "gradients/clouds.png"
+        }
+      ],
+      "default": "clock"
+    },
+    {
+      "id": "softness",
+      "name": "Softness",
+      "type": "number",
+      "min": 0,
+      "max": 0.5,
+      "default": 0.1,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "invert",
+      "name": "Reverse",
+      "type": "bool",
+      "default": false
+    }
+  ],
+  "variants": [
+    {
+      "id": "luma-clock",
+      "name": "Clock wipe",
+      "params": {
+        "gradient": "clock"
+      }
+    },
+    {
+      "id": "luma-iris",
+      "name": "Iris wipe",
+      "params": {
+        "gradient": "iris"
+      }
+    },
+    {
+      "id": "luma-diamond",
+      "name": "Diamond wipe",
+      "params": {
+        "gradient": "diamond"
+      }
+    },
+    {
+      "id": "luma-diagonal",
+      "name": "Diagonal wipe",
+      "params": {
+        "gradient": "diagonal"
+      }
+    },
+    {
+      "id": "luma-blinds",
+      "name": "Blinds wipe",
+      "params": {
+        "gradient": "blinds"
+      }
+    },
+    {
+      "id": "luma-clouds",
+      "name": "Clouds wipe",
+      "params": {
+        "gradient": "clouds"
+      }
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "id": "sharpen",
+  "name": "Sharpen",
+  "category": "Blur",
+  "type": "effect",
+  "version": 1,
+  "description": "Brings out edges and fine detail.",
+  "space": "srgb",
+  "params": [
+    {
+      "id": "amount",
+      "name": "Amount",
+      "type": "number",
+      "min": 0,
+      "max": 3,
+      "default": 0.5,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "radius",
+      "name": "Radius",
+      "type": "number",
+      "min": 0.0005,
+      "max": 0.005,
+      "default": 0.001,
+      "step": 0.0001,
+      "unit": "%",
+      "display": 100
+    }
+  ]
+}

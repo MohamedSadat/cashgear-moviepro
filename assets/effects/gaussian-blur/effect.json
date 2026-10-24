@@ -1,0 +1,50 @@
+{
+  "id": "gaussian-blur",
+  "name": "Gaussian Blur",
+  "category": "Blur",
+  "type": "effect",
+  "version": 1,
+  "description": "Softens the picture evenly.",
+  "space": "linear",
+  "params": [
+    {
+      "id": "radius",
+      "name": "Radius",
+      "type": "number",
+      "min": 0,
+      "max": 0.1,
+      "default": 0.01,
+      "step": 0.001,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "direction",
+      "name": "Direction",
+      "type": "choice",
+      "options": [
+        {
+          "id": "both",
+          "name": "Both"
+        },
+        {
+          "id": "horizontal",
+          "name": "Horizontal"
+        },
+        {
+          "id": "vertical",
+          "name": "Vertical"
+        }
+      ],
+      "default": "both"
+    }
+  ],
+  "passes": [
+    {
+      "entry": "blur_horizontal"
+    },
+    {
+      "entry": "blur_vertical"
+    }
+  ]
+}

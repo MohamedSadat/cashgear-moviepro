@@ -1,0 +1,22 @@
+{
+  "id": "chromatic-aberration",
+  "name": "Chromatic Aberration",
+  "category": "Stylize",
+  "type": "effect",
+  "version": 1,
+  "description": "Splits red and blue towards the edges.",
+  "space": "linear",
+  "params": [
+    {
+      "id": "amount",
+      "name": "Amount",
+      "type": "number",
+      "min": 0,
+      "max": 0.02,
+      "default": 0.004,
+      "step": 0.0005,
+      "unit": "%",
+      "display": 100
+    }
+  ]
+}

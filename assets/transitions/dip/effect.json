@@ -1,0 +1,42 @@
+{
+  "id": "dip",
+  "name": "Dip to Colour",
+  "category": "Dissolve",
+  "type": "transition",
+  "version": 1,
+  "description": "Fades out to a colour, then in from it.",
+  "params": [
+    {
+      "id": "color",
+      "name": "Colour",
+      "type": "color",
+      "default": [0, 0, 0, 1]
+    }
+  ],
+  "variants": [
+    {
+      "id": "dip-to-black",
+      "name": "Dip to black",
+      "params": {
+        "color": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 1
+        }
+      }
+    },
+    {
+      "id": "dip-to-white",
+      "name": "Dip to white",
+      "params": {
+        "color": {
+          "r": 1,
+          "g": 1,
+          "b": 1,
+          "a": 1
+        }
+      }
+    }
+  ]
+}

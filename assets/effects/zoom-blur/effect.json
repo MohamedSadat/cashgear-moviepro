@@ -1,0 +1,44 @@
+{
+  "id": "zoom-blur",
+  "name": "Zoom Blur",
+  "category": "Blur",
+  "type": "effect",
+  "version": 1,
+  "description": "Streaks the picture towards a centre.",
+  "space": "linear",
+  "params": [
+    {
+      "id": "amount",
+      "name": "Amount",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.3,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "center_x",
+      "name": "Centre X",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.5,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "center_y",
+      "name": "Centre Y",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.5,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    }
+  ]
+}

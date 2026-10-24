@@ -1,0 +1,64 @@
+{
+  "id": "push",
+  "name": "Push",
+  "category": "Slide",
+  "type": "transition",
+  "version": 1,
+  "description": "The next picture pushes this one out.",
+  "params": [
+    {
+      "id": "direction",
+      "name": "Direction",
+      "type": "choice",
+      "options": [
+        {
+          "id": "left",
+          "name": "Left"
+        },
+        {
+          "id": "right",
+          "name": "Right"
+        },
+        {
+          "id": "up",
+          "name": "Up"
+        },
+        {
+          "id": "down",
+          "name": "Down"
+        }
+      ],
+      "default": "left"
+    }
+  ],
+  "variants": [
+    {
+      "id": "push-left",
+      "name": "Push left",
+      "params": {
+        "direction": "left"
+      }
+    },
+    {
+      "id": "push-right",
+      "name": "Push right",
+      "params": {
+        "direction": "right"
+      }
+    },
+    {
+      "id": "push-up",
+      "name": "Push up",
+      "params": {
+        "direction": "up"
+      }
+    },
+    {
+      "id": "push-down",
+      "name": "Push down",
+      "params": {
+        "direction": "down"
+      }
+    }
+  ]
+}

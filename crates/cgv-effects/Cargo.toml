@@ -1,0 +1,16 @@
+[package]
+name = "cgv-effects"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cgv-model.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+# glsl-out: every effect's shader is also translated for WebGL2 in the tests.
+naga = { workspace = true, features = ["glsl-out"] }

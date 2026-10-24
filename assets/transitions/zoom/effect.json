@@ -1,0 +1,42 @@
+{
+  "id": "zoom",
+  "name": "Zoom",
+  "category": "Zoom",
+  "type": "transition",
+  "version": 1,
+  "description": "Zooms through to the next picture.",
+  "params": [
+    {
+      "id": "mode",
+      "name": "Zoom",
+      "type": "choice",
+      "options": [
+        {
+          "id": "in",
+          "name": "In"
+        },
+        {
+          "id": "out",
+          "name": "Out"
+        }
+      ],
+      "default": "in"
+    }
+  ],
+  "variants": [
+    {
+      "id": "zoom-in",
+      "name": "Zoom in",
+      "params": {
+        "mode": "in"
+      }
+    },
+    {
+      "id": "zoom-out",
+      "name": "Zoom out",
+      "params": {
+        "mode": "out"
+      }
+    }
+  ]
+}

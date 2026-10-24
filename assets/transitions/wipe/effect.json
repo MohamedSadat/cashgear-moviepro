@@ -1,0 +1,75 @@
+{
+  "id": "wipe",
+  "name": "Wipe",
+  "category": "Wipe",
+  "type": "transition",
+  "version": 1,
+  "description": "An edge sweeps the next picture in.",
+  "params": [
+    {
+      "id": "direction",
+      "name": "Direction",
+      "type": "choice",
+      "options": [
+        {
+          "id": "left",
+          "name": "Left"
+        },
+        {
+          "id": "right",
+          "name": "Right"
+        },
+        {
+          "id": "up",
+          "name": "Up"
+        },
+        {
+          "id": "down",
+          "name": "Down"
+        }
+      ],
+      "default": "right"
+    },
+    {
+      "id": "softness",
+      "name": "Softness",
+      "type": "number",
+      "min": 0,
+      "max": 0.5,
+      "default": 0.05,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    }
+  ],
+  "variants": [
+    {
+      "id": "wipe-left",
+      "name": "Wipe left",
+      "params": {
+        "direction": "left"
+      }
+    },
+    {
+      "id": "wipe-right",
+      "name": "Wipe right",
+      "params": {
+        "direction": "right"
+      }
+    },
+    {
+      "id": "wipe-up",
+      "name": "Wipe up",
+      "params": {
+        "direction": "up"
+      }
+    },
+    {
+      "id": "wipe-down",
+      "name": "Wipe down",
+      "params": {
+        "direction": "down"
+      }
+    }
+  ]
+}

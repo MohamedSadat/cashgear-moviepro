@@ -1,0 +1,9 @@
+{
+  "id": "cross-dissolve",
+  "name": "Cross Dissolve",
+  "category": "Dissolve",
+  "type": "transition",
+  "version": 1,
+  "description": "Fades one picture into the next.",
+  "params": []
+}

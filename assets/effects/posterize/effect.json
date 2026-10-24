@@ -1,0 +1,20 @@
+{
+  "id": "posterize",
+  "name": "Posterize",
+  "category": "Color",
+  "type": "effect",
+  "version": 1,
+  "description": "Reduces each channel to a few flat levels.",
+  "space": "srgb",
+  "params": [
+    {
+      "id": "levels",
+      "name": "Levels",
+      "type": "number",
+      "min": 2,
+      "max": 32,
+      "default": 6,
+      "step": 1
+    }
+  ]
+}

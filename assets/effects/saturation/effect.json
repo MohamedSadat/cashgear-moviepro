@@ -1,0 +1,33 @@
+{
+  "id": "saturation",
+  "name": "Saturation",
+  "category": "Color",
+  "type": "effect",
+  "version": 1,
+  "description": "Makes colours richer or greyer; vibrance favours muted ones.",
+  "space": "srgb",
+  "params": [
+    {
+      "id": "saturation",
+      "name": "Saturation",
+      "type": "number",
+      "min": 0,
+      "max": 2,
+      "default": 1,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "vibrance",
+      "name": "Vibrance",
+      "type": "number",
+      "min": -1,
+      "max": 1,
+      "default": 0,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    }
+  ]
+}

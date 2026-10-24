@@ -1,0 +1,50 @@
+{
+  "id": "black-white",
+  "name": "Black & White",
+  "category": "Color",
+  "type": "effect",
+  "version": 1,
+  "description": "Turns the picture grey, as through a coloured filter.",
+  "space": "srgb",
+  "params": [
+    {
+      "id": "amount",
+      "name": "Amount",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 1,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "tone",
+      "name": "Filter",
+      "type": "choice",
+      "options": [
+        {
+          "id": "neutral",
+          "name": "Neutral"
+        },
+        {
+          "id": "red",
+          "name": "Red"
+        },
+        {
+          "id": "yellow",
+          "name": "Yellow"
+        },
+        {
+          "id": "green",
+          "name": "Green"
+        },
+        {
+          "id": "blue",
+          "name": "Blue"
+        }
+      ],
+      "default": "neutral"
+    }
+  ]
+}

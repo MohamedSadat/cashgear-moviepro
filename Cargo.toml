@@ -5,6 +5,7 @@ members = ["crates/*", "apps/desktop/src-tauri"]
 default-members = [
   "crates/cgv-time",
   "crates/cgv-model",
+  "crates/cgv-effects",
   "crates/cgv-media",
   "crates/cgv-render",
   "crates/cgv-audio",
@@ -31,6 +32,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 cgv-time = { path = "crates/cgv-time" }
 cgv-model = { path = "crates/cgv-model" }
+cgv-effects = { path = "crates/cgv-effects" }
 cgv-media = { path = "crates/cgv-media" }
 cgv-render = { path = "crates/cgv-render" }
 cgv-audio = { path = "crates/cgv-audio" }

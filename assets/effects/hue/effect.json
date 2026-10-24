@@ -1,0 +1,21 @@
+{
+  "id": "hue",
+  "name": "Hue",
+  "category": "Color",
+  "type": "effect",
+  "version": 1,
+  "description": "Turns colours around the colour wheel.",
+  "space": "srgb",
+  "params": [
+    {
+      "id": "shift",
+      "name": "Hue shift",
+      "type": "number",
+      "min": -180,
+      "max": 180,
+      "default": 0,
+      "step": 1,
+      "unit": "°"
+    }
+  ]
+}

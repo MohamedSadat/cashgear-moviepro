@@ -1,0 +1,22 @@
+{
+  "id": "sepia",
+  "name": "Sepia",
+  "category": "Color",
+  "type": "effect",
+  "version": 1,
+  "description": "Brown tones of an old photograph.",
+  "space": "srgb",
+  "params": [
+    {
+      "id": "amount",
+      "name": "Amount",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 1,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    }
+  ]
+}
