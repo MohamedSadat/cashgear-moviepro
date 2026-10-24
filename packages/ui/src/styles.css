@@ -21,6 +21,10 @@
   --cgv-clip-audio: #2b7350;
   --cgv-clip-image: #68498f;
   --cgv-clip-offline: #6e2b2b;
+  --cgv-clip-adjustment: #4f5566;
+  --cgv-transition: rgb(240 244 255 / 0.82);
+  --cgv-curve-bg: #15181d;
+  --cgv-curve-grid: #262b34;
   --cgv-clip-text: #eef1f6;
   --cgv-clip-border: rgb(255 255 255 / 0.16);
   --cgv-clip-selected: #f2b84b;
@@ -1029,9 +1033,15 @@ body,
 
 .cgv-field {
   display: grid;
-  grid-template-columns: 84px 1fr;
+  grid-template-columns: minmax(56px, 84px) minmax(0, 1fr);
   align-items: center;
   gap: 8px;
+}
+
+.cgv-field > select,
+.cgv-field > input:not([type='checkbox'], [type='color']) {
+  width: 100%;
+  min-width: 0;
 }
 
 .cgv-field-label {
@@ -1113,4 +1123,249 @@ body,
 .cgv-shortcut-actions button {
   padding: 1px 6px;
   font-size: 11px;
+}
+
+/* Library tabs: media, effects and transitions */
+
+.cgv-library-tabs {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--cgv-panel);
+}
+
+.cgv-tab-bar {
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px 0;
+  border-bottom: 1px solid var(--cgv-border);
+}
+
+.cgv-tab {
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--cgv-muted);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.cgv-tab:hover {
+  color: var(--cgv-text);
+}
+
+.cgv-tab[aria-selected='true'] {
+  color: var(--cgv-text);
+  border-bottom-color: var(--cgv-accent);
+}
+
+.cgv-tab-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cgv-tab-panel > * {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Effects and transitions browser */
+
+.cgv-effects {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  overflow: auto;
+}
+
+.cgv-effects-search {
+  width: 100%;
+}
+
+.cgv-effects-group h3 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cgv-muted);
+}
+
+.cgv-effects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cgv-effect-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 4px;
+  color: var(--cgv-text);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: grab;
+}
+
+.cgv-effect-item:hover,
+.cgv-effect-item:focus-visible {
+  background: rgb(255 255 255 / 0.04);
+  border-color: var(--cgv-border);
+}
+
+.cgv-effect-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #0f1115;
+  border-radius: 4px;
+}
+
+.cgv-effect-thumb-adjustment {
+  background: repeating-linear-gradient(45deg, #3a3f4c 0 8px, #2c303a 8px 16px);
+}
+
+.cgv-effect-name {
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Keyframes in the inspector */
+
+/* With keyframes: the stopwatch, the label and the value; stepping between keys below. */
+.cgv-field:has(> .cgv-stopwatch) {
+  grid-template-columns: 18px minmax(48px, 76px) minmax(0, 1fr);
+  gap: 2px 4px;
+}
+
+.cgv-field > .cgv-stopwatch {
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.cgv-key-nav {
+  display: inline-flex;
+  grid-row: 2;
+  grid-column: 2 / -1;
+  gap: 1px;
+  align-items: center;
+}
+
+.cgv-key-button {
+  width: 17px;
+  height: 20px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--cgv-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.cgv-key-button:hover:not(:disabled) {
+  color: var(--cgv-text);
+  border-color: var(--cgv-border);
+}
+
+.cgv-key-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.cgv-stopwatch[aria-pressed='true'] {
+  color: var(--cgv-accent);
+}
+
+.cgv-key-diamond[aria-pressed='true'] {
+  color: var(--cgv-clip-selected);
+}
+
+.cgv-curve {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.cgv-curve-canvas {
+  width: 100%;
+  border: 1px solid var(--cgv-border);
+  border-radius: 4px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.cgv-curve-tools {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+/* Effects on a clip */
+
+.cgv-effect-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--cgv-border);
+  border-radius: 6px;
+}
+
+.cgv-effect-header {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.cgv-effect-title {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 4px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cgv-text);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.cgv-color {
+  width: 48px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--cgv-border);
+}
+
+.cgv-link-button {
+  padding: 0;
+  font-size: 12px;
+  color: var(--cgv-accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
 }

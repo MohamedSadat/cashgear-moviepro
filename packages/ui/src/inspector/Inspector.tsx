@@ -1,94 +1,21 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { CgButton, CgNumericEdit } from '@cashgear/ui';
+import { useState, type ReactNode } from 'react';
+import { CgButton } from '@cashgear/ui';
 import type { Clip, ClipProperties, Command, Speed } from '@cgv/engine-client';
-import type { Gesture } from '../editing/gesture';
 import type { EditorState } from '../editing/useEditor';
-
-interface FieldProps {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  /** Change per pixel of scrubbing, and per arrow step. */
-  step: number;
-  precision: number;
-  unit: string;
-  testId: string;
-  /** The command that sets the field to `value`. */
-  command(value: number): Command;
-  editor: EditorState;
-  disabled?: boolean;
-}
-
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-
-/**
- * A number with a label that scrubs: dragging the label changes the value live,
- * as one undo step. Typing a value and pressing Enter (or leaving) sets it.
- */
-function ScrubField(props: FieldProps) {
-  const { label, value, min, max, step, precision, unit, testId, command, editor, disabled } =
-    props;
-  const [scrubbing, setScrubbing] = useState<number | null>(null);
-  const drag = useRef<{ x: number; start: number; gesture: Gesture | null } | null>(null);
-  const round = (next: number) => Number(clamp(next, min, max).toFixed(precision));
-  const shown = scrubbing ?? value;
-
-  const down = (event: ReactPointerEvent<HTMLSpanElement>) => {
-    if (disabled || event.button !== 0) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    drag.current = { x: event.clientX, start: value, gesture: null };
-  };
-  const move = (event: ReactPointerEvent<HTMLSpanElement>) => {
-    const current = drag.current;
-    if (!current) return;
-    const dx = event.clientX - current.x;
-    if (!current.gesture && Math.abs(dx) < 2) return;
-    current.gesture ??= editor.project.gesture(`Change ${label.toLowerCase()}`);
-    const factor = event.shiftKey ? 10 : event.altKey ? 0.1 : 1;
-    const next = round(current.start + dx * step * factor);
-    setScrubbing(next);
-    current.gesture?.step(command(next));
-  };
-  const up = async () => {
-    const current = drag.current;
-    drag.current = null;
-    if (current?.gesture) await editor.project.finish(current.gesture);
-    setScrubbing(null);
-  };
-
-  return (
-    <label className="cgv-field" data-testid={testId}>
-      <span
-        className="cgv-field-label"
-        title={`Drag to change ${label.toLowerCase()}; Shift for bigger steps, Alt for finer ones`}
-        onPointerDown={down}
-        onPointerMove={move}
-        onPointerUp={() => void up()}
-        onPointerCancel={() => void up()}
-      >
-        {label}
-      </span>
-      <CgNumericEdit
-        size="small"
-        aria-label={label}
-        value={shown}
-        min={min}
-        max={max}
-        step={step * 10}
-        precision={precision}
-        useGrouping={false}
-        commitMode="blur"
-        disabled={disabled}
-        suffix={unit}
-        onValueChange={(next, details) => {
-          if (next === null || details.reason === 'reset' || next === value) return;
-          void editor.project.execute(command(round(next)));
-        }}
-      />
-    </label>
-  );
-}
+import { isAnimated, numberAt } from '../effects/animation';
+import { frameDuration } from '../timeline/geometry';
+import { CurveLane } from './CurveLane';
+import { EffectStack } from './EffectStack';
+import {
+  KeyControls,
+  ScrubField,
+  clamp,
+  keyCommand,
+  keyContext,
+  usePausedTime,
+  type KeyContext,
+} from './fields';
+import { TransitionInspector } from './TransitionInspector';
 
 const speeds: Speed[] = [
   { num: 1, den: 4 },
@@ -121,32 +48,145 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/** Picture, sound and speed of the selected clip. Every change is an undoable command. */
+interface PropertyField {
+  label: string;
+  /** Keyframe properties set together; the first one's value shows. */
+  properties: string[];
+  /** The static value, in the model's units. */
+  base: number;
+  /** Shown value per model unit (100 for a fraction shown as %). */
+  display: number;
+  min: number;
+  max: number;
+  step: number;
+  precision: number;
+  unit: string;
+  testId: string;
+  /** The static change, when not animated, in the model's units. */
+  set(value: number): Command;
+}
+
+/** A clip property with its keyframe controls and, when asked, its curve. */
+function AnimatedField({
+  editor,
+  context,
+  field,
+  disabled,
+}: {
+  editor: EditorState;
+  context: KeyContext;
+  field: PropertyField;
+  disabled: boolean;
+}) {
+  const [curve, setCurve] = useState(false);
+  const lead = field.properties[0];
+  const animated = isAnimated(context.clip, lead);
+  const value = animated ? numberAt(context.clip, lead, context.offset, field.base) : field.base;
+  return (
+    <>
+      <ScrubField
+        label={field.label}
+        value={value * field.display}
+        min={field.min * field.display}
+        max={field.max * field.display}
+        step={field.step}
+        precision={field.precision}
+        unit={field.unit}
+        testId={field.testId}
+        editor={editor}
+        disabled={disabled}
+        command={(shown) =>
+          animated
+            ? keyCommand(context, field.properties, shown / field.display)
+            : field.set(shown / field.display)
+        }
+        keys={
+          <KeyControls
+            editor={editor}
+            context={context}
+            properties={field.properties}
+            label={field.label}
+            value={value}
+            disabled={disabled}
+            curve={{ open: curve, toggle: () => setCurve(!curve) }}
+          />
+        }
+      />
+      {animated && curve && (
+        <CurveLane
+          editor={editor}
+          context={context}
+          properties={field.properties}
+          label={field.label}
+          min={field.min}
+          max={field.max}
+          disabled={disabled}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * The selected clip's picture, sound, speed and effects, or the selected
+ * transition. Every change is an undoable command; animated properties take
+ * keyframes at the playhead.
+ */
 export function Inspector({ editor }: { editor: EditorState }) {
+  const playhead = usePausedTime(editor.playback);
   const clip: Clip | null = editor.focused;
   const snapshot = editor.project.snapshot;
+  if (editor.transition && snapshot)
+    return (
+      <aside className="cgv-inspector" data-testid="inspector" aria-label="Inspector">
+        <h2>Transition</h2>
+        <TransitionInspector editor={editor} />
+      </aside>
+    );
   if (!clip || !snapshot)
     return (
       <aside className="cgv-inspector" data-testid="inspector" aria-label="Inspector">
         <h2>Inspector</h2>
-        <p className="cgv-muted">Select a clip to change its picture, sound and speed.</p>
+        <p className="cgv-muted">Select a clip to change its picture, sound, speed and effects.</p>
       </aside>
     );
+  const adjustment = clip.kind === 'adjustment';
   const media = snapshot.project.media.find((item) => item.id === clip.media);
-  const still = media?.kind === 'image';
+  const still = media?.kind === 'image' || adjustment;
   const locked = snapshot.project.tracks.some(
     (track) => track.locked && track.clips.some((c) => c.id === clip.id),
   );
+  const frame = frameDuration(snapshot.project.settings.frameRate);
+  const context = keyContext(clip, playhead, frame);
   const set = (properties: ClipProperties): Command => ({
     type: 'setClipProperties',
     clip: clip.id,
     properties,
   });
+  const field = (props: PropertyField) => (
+    <AnimatedField
+      key={props.testId}
+      editor={editor}
+      context={context}
+      field={props}
+      disabled={locked}
+    />
+  );
   const transform = clip.transform;
   const crop = clip.crop;
-  const field = (props: Omit<FieldProps, 'editor' | 'disabled'>) => (
-    <ScrubField key={props.testId} {...props} editor={editor} disabled={locked} />
-  );
+  const opacity = field({
+    label: 'Opacity',
+    properties: ['opacity'],
+    base: clip.opacity,
+    display: 100,
+    min: 0,
+    max: 1,
+    step: 0.5,
+    precision: 1,
+    unit: '%',
+    testId: 'field-opacity',
+    set: (opacity) => set({ opacity }),
+  });
   const speed = clip.speed;
   return (
     <aside
@@ -155,65 +195,69 @@ export function Inspector({ editor }: { editor: EditorState }) {
       data-clip-id={clip.id}
       aria-label="Inspector"
     >
-      <h2 title={media?.name}>{media?.name ?? 'Clip'}</h2>
+      <h2 title={media?.name}>{adjustment ? 'Adjustment layer' : (media?.name ?? 'Clip')}</h2>
       {locked && <p className="cgv-muted">This clip is on a locked track.</p>}
-      {clip.video && (
+      {adjustment && (
+        <Section title="Adjustment">
+          <p className="cgv-muted">Its effects apply to every track below it.</p>
+          {opacity}
+        </Section>
+      )}
+      {clip.video && !adjustment && (
         <Section title="Transform">
           {field({
             label: 'Position X',
-            value: transform.x,
+            properties: ['transform.x'],
+            base: transform.x,
+            display: 1,
             min: -100000,
             max: 100000,
             step: 1,
             precision: 1,
             unit: 'px',
             testId: 'field-x',
-            command: (x) => set({ transform: { x } }),
+            set: (x) => set({ transform: { x } }),
           })}
           {field({
             label: 'Position Y',
-            value: transform.y,
+            properties: ['transform.y'],
+            base: transform.y,
+            display: 1,
             min: -100000,
             max: 100000,
             step: 1,
             precision: 1,
             unit: 'px',
             testId: 'field-y',
-            command: (y) => set({ transform: { y } }),
+            set: (y) => set({ transform: { y } }),
           })}
           {field({
             label: 'Scale',
-            value: Number((transform.scaleX * 100).toFixed(1)),
-            min: 1,
-            max: 10000,
+            properties: ['transform.scaleX', 'transform.scaleY'],
+            base: transform.scaleX,
+            display: 100,
+            min: 0.01,
+            max: 100,
             step: 0.5,
             precision: 1,
             unit: '%',
             testId: 'field-scale',
-            command: (scale) => set({ transform: { scaleX: scale / 100, scaleY: scale / 100 } }),
+            set: (scale) => set({ transform: { scaleX: scale, scaleY: scale } }),
           })}
           {field({
             label: 'Rotation',
-            value: transform.rotation,
+            properties: ['transform.rotation'],
+            base: transform.rotation,
+            display: 1,
             min: -3600,
             max: 3600,
             step: 0.5,
             precision: 1,
             unit: '°',
             testId: 'field-rotation',
-            command: (rotation) => set({ transform: { rotation } }),
+            set: (rotation) => set({ transform: { rotation } }),
           })}
-          {field({
-            label: 'Opacity',
-            value: Number((clip.opacity * 100).toFixed(1)),
-            min: 0,
-            max: 100,
-            step: 0.5,
-            precision: 1,
-            unit: '%',
-            testId: 'field-opacity',
-            command: (opacity) => set({ opacity: opacity / 100 }),
-          })}
+          {opacity}
           <CgButton
             appearance="ghost"
             size="small"
@@ -239,19 +283,21 @@ export function Inspector({ editor }: { editor: EditorState }) {
           </CgButton>
         </Section>
       )}
-      {clip.video && (
+      {clip.video && !adjustment && (
         <Section title="Crop">
           {(['left', 'top', 'right', 'bottom'] as const).map((side) =>
             field({
               label: side[0].toUpperCase() + side.slice(1),
-              value: Number((crop[side] * 100).toFixed(1)),
+              properties: [`crop.${side}`],
+              base: crop[side],
+              display: 100,
               min: 0,
-              max: 95,
+              max: 0.95,
               step: 0.25,
               precision: 1,
               unit: '%',
               testId: `field-crop-${side}`,
-              command: (value) => set({ crop: { [side]: value / 100 } }),
+              set: (value) => set({ crop: { [side]: value } }),
             }),
           )}
         </Section>
@@ -260,14 +306,16 @@ export function Inspector({ editor }: { editor: EditorState }) {
         <Section title="Audio">
           {field({
             label: 'Volume',
-            value: clip.volumeDb,
+            properties: ['volumeDb'],
+            base: clip.volumeDb,
+            display: 1,
             min: -96,
             max: 24,
             step: 0.1,
             precision: 1,
             unit: 'dB',
             testId: 'field-volume',
-            command: (volumeDb) => set({ volumeDb }),
+            set: (volumeDb) => set({ volumeDb }),
           })}
         </Section>
       )}
@@ -293,22 +341,25 @@ export function Inspector({ editor }: { editor: EditorState }) {
               );
             })}
           </div>
-          {field({
-            label: 'Speed',
-            value: Number((speed.num / speed.den).toFixed(2)),
-            min: 0.1,
-            max: 100,
-            step: 0.01,
-            precision: 2,
-            unit: '×',
-            testId: 'field-speed',
-            command: (value) => ({ type: 'setSpeed', clip: clip.id, speed: speedOf(value) }),
-          })}
+          <ScrubField
+            label="Speed"
+            value={Number((speed.num / speed.den).toFixed(2))}
+            min={0.1}
+            max={100}
+            step={0.01}
+            precision={2}
+            unit="×"
+            testId="field-speed"
+            editor={editor}
+            disabled={locked}
+            command={(value) => ({ type: 'setSpeed', clip: clip.id, speed: speedOf(value) })}
+          />
           {speed.num !== speed.den && clip.audio && (
             <p className="cgv-muted">Sound plays only at normal speed for now.</p>
           )}
         </Section>
       )}
+      {clip.video && <EffectStack editor={editor} context={context} disabled={locked} />}
     </aside>
   );
 }

@@ -11,6 +11,9 @@ import {
 } from '@cgv/engine-client';
 import { BlockedScreen, CapabilityNotice, CapabilityStrip } from './CapabilityReport';
 import { DevOverlay } from './DevOverlay';
+import { useCatalog } from './effects/catalog';
+import { EffectsBrowser } from './effects/EffectsBrowser';
+import { usePreviews } from './effects/usePreviews';
 import { useEditor, type EditorState } from './editing/useEditor';
 import { ExportDialog } from './export/ExportDialog';
 import { useExport, type ExportState } from './export/useExport';
@@ -35,6 +38,7 @@ import { effectiveKeymap } from './shortcuts/keymap';
 import { ShortcutsDialog } from './shortcuts/ShortcutsDialog';
 import { useShortcuts } from './shortcuts/useShortcuts';
 import { Timeline } from './timeline/Timeline';
+import { LibraryTabs } from './workspace/LibraryTabs';
 import { Workspace } from './workspace/Workspace';
 import './styles.css';
 
@@ -92,14 +96,19 @@ export function AppShell({ platform }: Props) {
   const library = project.library;
   const playback = usePlayback(client, project);
   const { settings, update, saveLayout } = useAppSettings();
+  const catalog = useCatalog(client);
   const editor = useEditor(project, playback, {
     snapping: settings.snapping,
     onSnapping: (snapping) => update({ snapping }),
+    catalog,
   });
   const exporter = useExport(client, project, platform, {
     backend: options.backend,
     decode: options.decode,
   });
+  // Previews render once someone opens the effects or transitions.
+  const [browsing, setBrowsing] = useState(false);
+  const previews = usePreviews(browsing ? catalog : null);
   const keymap = useMemo(() => effectiveKeymap(settings.shortcuts), [settings.shortcuts]);
   const [dialog, setDialog] = useState<'projects' | 'settings' | 'shortcuts' | 'export' | null>(
     null,
@@ -252,7 +261,30 @@ export function AppShell({ platform }: Props) {
         )}
       </header>
       <Workspace
-        library={<MediaLibraryPanel project={project} />}
+        library={
+          <LibraryTabs
+            onSelect={(id) => id !== 'media' && setBrowsing(true)}
+            tabs={[
+              {
+                id: 'media',
+                label: 'Media',
+                render: () => <MediaLibraryPanel project={project} />,
+              },
+              {
+                id: 'effects',
+                label: 'Effects',
+                render: () => <EffectsBrowser kind="effect" editor={editor} previews={previews} />,
+              },
+              {
+                id: 'transitions',
+                label: 'Transitions',
+                render: () => (
+                  <EffectsBrowser kind="transition" editor={editor} previews={previews} />
+                ),
+              },
+            ]}
+          />
+        }
         monitor={monitor}
         inspector={<Inspector editor={editor} />}
         timeline={<Timeline editor={editor} diagnostic={options.diagnostic} />}

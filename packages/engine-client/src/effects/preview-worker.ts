@@ -113,7 +113,9 @@ const api: PreviewWorkerApi = {
         }
       }
       // The LUT effect previews a built-in look.
-      const outcome = JSON.parse(session.import_lut('Teal & Orange', await lookText('teal-orange')));
+      const outcome = JSON.parse(
+        session.import_lut('Teal & Orange', await lookText('teal-orange')),
+      );
       const lutId = outcome.created[0] as number;
       const values = session.lut_values(lutId);
       if (values) engine.upload_lut('preview-look', '3d', 17, values);

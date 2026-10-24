@@ -48,6 +48,10 @@ export interface ProjectState {
   execute(command: Command): Promise<Outcome | null>;
   /** Runs commands as one undo step. On failure, shows why and returns null. */
   executeGroup(label: string, commands: Command[]): Promise<Outcome[] | null>;
+  /** Reads a `.cube` file into the project's LUTs; returns the new LUT's id, or null. */
+  importLut(name: string, text: string): Promise<number | null>;
+  /** Copies built-in look `id` into the project's LUTs; returns its id, or null. */
+  importLook(id: string): Promise<number | null>;
   /**
    * Runs commands one at a time as one undo step, each able to use what the
    * earlier ones created (`step` returns the new ids). On failure, undoes them
@@ -410,6 +414,33 @@ export function useProject(
     [api, notice, show],
   );
 
+  const importLut = useCallback(
+    async (name: string, text: string) => {
+      try {
+        const { outcome, snapshot: next } = await api().projectImportLut(name, text);
+        show(next);
+        return outcome.created[0] ?? null;
+      } catch (error) {
+        notice(`${name} could not be imported: ${message(error)}`);
+        return null;
+      }
+    },
+    [api, notice, show],
+  );
+  const importLook = useCallback(
+    async (id: string) => {
+      try {
+        const { outcome, snapshot: next } = await api().projectImportLook(id);
+        show(next);
+        return outcome.created[0] ?? null;
+      } catch (error) {
+        notice(message(error));
+        return null;
+      }
+    },
+    [api, notice, show],
+  );
+
   const executeGroup = useCallback(
     async (label: string, commands: Command[]) => {
       try {
@@ -550,6 +581,8 @@ export function useProject(
     canSearchFolder: !!platform.searchFolder,
     execute,
     executeGroup,
+    importLut,
+    importLook,
     transaction,
     gesture,
     finish,

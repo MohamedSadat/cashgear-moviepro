@@ -27,6 +27,7 @@ export type ActionId =
   | 'deselect'
   | 'trimStartToPlayhead'
   | 'trimEndToPlayhead'
+  | 'addTransition'
   | 'addMarker'
   | 'toggleSnapping'
   | 'toggleMagnetic'
@@ -68,6 +69,7 @@ export const actions: readonly ActionInfo[] = [
   { id: 'deselect', label: 'Select nothing', group: 'Editing' },
   { id: 'trimStartToPlayhead', label: 'Trim start to the playhead', group: 'Editing' },
   { id: 'trimEndToPlayhead', label: 'Trim end to the playhead', group: 'Editing' },
+  { id: 'addTransition', label: 'Add the default transition at the playhead', group: 'Editing' },
   { id: 'undo', label: 'Undo', group: 'Editing' },
   { id: 'redo', label: 'Redo', group: 'Editing' },
   { id: 'addMarker', label: 'Add a marker', group: 'Timeline' },
@@ -111,6 +113,7 @@ const common = {
   selectAll: ['Ctrl+A'],
   deselect: ['Escape'],
   addMarker: ['M'],
+  addTransition: ['Ctrl+D'],
   toggleMagnetic: [],
   selectTool: ['V'],
   bladeTool: ['C'],

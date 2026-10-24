@@ -15,7 +15,10 @@ export interface PreviewRequest {
 }
 
 export interface PreviewWorkerApi {
-  render(requests: PreviewRequest[], size: { width: number; height: number }): Promise<(Blob | null)[]>;
+  render(
+    requests: PreviewRequest[],
+    size: { width: number; height: number },
+  ): Promise<(Blob | null)[]>;
 }
 
 /**

@@ -8,10 +8,27 @@ import {
   type MediaRef,
   type Project,
   type ProjectSnapshot,
+  type Transition,
 } from '@cgv/engine-client';
 import type { MediaVisuals } from '../media/useMediaLibrary';
 import type { Gesture } from '../editing/gesture';
-import { drawTimeline, readPalette, type DropPreview, type Palette } from './draw';
+import {
+  adjustmentDuration,
+  cutNear,
+  defaultTransitionDuration,
+  durationForEdge,
+  type CutTarget,
+} from '../editing/transitions';
+import type { CatalogItem } from '../effects/catalog';
+import type { DraggedEffect } from '../effects/dragging';
+import { effectDragType } from '../effects/dragging';
+import {
+  drawTimeline,
+  readPalette,
+  type DropPreview,
+  type EffectDropPreview,
+  type Palette,
+} from './draw';
 import {
   aboveRows,
   clampView,
@@ -68,6 +85,13 @@ export interface TimelineHost {
   gesture(label: string): Gesture | null;
   finish(gesture: Gesture): Promise<void>;
   openMenu(hit: Hit, clientX: number, clientY: number): void;
+  /** The selected transition, and selecting one (which clears the clips). */
+  selectedTransition(): number | null;
+  selectTransition(id: number | null): void;
+  transitionLabel(transition: Transition): string;
+  applyEffect(item: CatalogItem, clip: number): Promise<void>;
+  applyTransition(item: CatalogItem, target: { track: number } & CutTarget): Promise<void>;
+  addAdjustmentLayer(time: number, track: number | null): Promise<void>;
   /** Vertical scroll, for the track headers. */
   scrolled(scrollTop: number): void;
   /** The zoom changed, in pixels per second. */
@@ -111,6 +135,23 @@ type Drag =
       origin: number;
       x: number;
       time: number;
+    }
+  | {
+      kind: 'transition';
+      gesture: Gesture | null;
+      transition: Transition;
+      edge: 'start' | 'end';
+      cut: number;
+      x: number;
+    }
+  | {
+      kind: 'keyframe';
+      gesture: Gesture | null;
+      clip: Clip;
+      /** The keyframe's time from the clip's start. */
+      offset: number;
+      x: number;
+      time: number;
     };
 
 export interface DrawStats {
@@ -136,6 +177,7 @@ export class TimelineController {
   private invalid = false;
   private hover: { clip: number; edge: 'start' | 'end' | null } | null = null;
   private drop: DropPreview | null = null;
+  private effectDrop: EffectDropPreview | null = null;
   private marquee: { x0: number; y0: number; x1: number; y1: number } | null = null;
   private marqueeSelection: Set<number> | null = null;
   /** The project the view was last fitted to. */
@@ -347,6 +389,9 @@ export class TimelineController {
         guide: this.guide,
         invalid: this.invalid,
         drop: this.drop,
+        effectDrop: this.effectDrop,
+        transition: this.host.selectedTransition(),
+        transitionLabel: (transition) => this.host.transitionLabel(transition),
         marquee: this.marquee,
         hover: this.drag ? null : this.hover,
         media: this.media,
@@ -382,10 +427,11 @@ export class TimelineController {
     if (!snapshot || this.drag) return;
     const { x, y } = this.local(event);
     const project = snapshot.project;
-    const hit = hitTest(project, this.rows, this.view, x, y);
+    const hit = hitTest(project, this.rows, this.view, x, y, this.host.selected());
     if (event.button === 2) {
       if (hit.kind === 'clip' && !this.host.selected().has(hit.clip.id))
         this.host.select([hit.clip.id], 'replace');
+      if (hit.kind === 'transition') this.host.selectTransition(hit.transition.id);
       this.host.openMenu(hit, event.clientX, event.clientY);
       return;
     }
@@ -403,6 +449,31 @@ export class TimelineController {
         id: hit.marker.id,
         gesture: null,
         origin: hit.marker.time,
+        x,
+        time,
+      };
+      return;
+    }
+    if (hit.kind === 'transition') {
+      this.host.selectTransition(hit.transition.id);
+      if (hit.edge && !hit.row.track.locked && !this.host.locked())
+        this.drag = {
+          kind: 'transition',
+          gesture: null,
+          transition: hit.transition,
+          edge: hit.edge,
+          cut: hit.cut,
+          x,
+        };
+      return;
+    }
+    if (hit.kind === 'keyframe') {
+      if (hit.row.track.locked || this.host.locked()) return;
+      this.drag = {
+        kind: 'keyframe',
+        gesture: null,
+        clip: hit.clip,
+        offset: hit.time,
         x,
         time,
       };
@@ -457,7 +528,7 @@ export class TimelineController {
     const drag = this.drag;
     if (!snapshot) return;
     if (!drag) {
-      const hit = hitTest(snapshot.project, this.rows, this.view, x, y);
+      const hit = hitTest(snapshot.project, this.rows, this.view, x, y, this.host.selected());
       const hover = hit.kind === 'clip' ? { clip: hit.clip.id, edge: hit.edge } : null;
       this.canvas.style.cursor =
         hit.kind === 'clip'
@@ -466,9 +537,13 @@ export class TimelineController {
             : hit.edge
               ? 'ew-resize'
               : 'grab'
-          : hit.kind === 'marker'
+          : hit.kind === 'marker' || hit.kind === 'keyframe'
             ? 'ew-resize'
-            : 'default';
+            : hit.kind === 'transition'
+              ? hit.edge
+                ? 'ew-resize'
+                : 'pointer'
+              : 'default';
       if (hover?.clip !== this.hover?.clip || hover?.edge !== this.hover?.edge) {
         this.hover = hover;
         this.redraw();
@@ -525,6 +600,34 @@ export class TimelineController {
         return this.updateMove(drag, x, y);
       case 'trim':
         return this.updateTrim(drag, x);
+      case 'transition': {
+        if (!drag.gesture && Math.abs(x - drag.x) < 2) return;
+        drag.gesture ??= this.host.gesture('Change transition');
+        if (!drag.gesture) return;
+        const frame = this.frame(snapshot.project);
+        const duration = durationForEdge(drag.transition, drag.cut, drag.edge, time, frame);
+        drag.gesture.step({ type: 'setTransition', transition: drag.transition.id, duration });
+        return;
+      }
+      case 'keyframe': {
+        if (!drag.gesture && Math.abs(x - drag.x) < 2) return;
+        drag.gesture ??= this.host.gesture('Move keyframes');
+        if (!drag.gesture) return;
+        const frame = this.frame(snapshot.project);
+        const clip = drag.clip;
+        const target = Math.min(
+          clip.duration - frame,
+          Math.max(0, snapToFrame(drag.offset + time - drag.time, frame)),
+        );
+        this.guide = clip.start + target;
+        drag.gesture.step({
+          type: 'moveKeyframes',
+          clip: clip.id,
+          times: [drag.offset],
+          delta: target - drag.offset,
+        });
+        return;
+      }
     }
   }
 
@@ -635,7 +738,16 @@ export class TimelineController {
       }
     } else if (drag.kind === 'marker' && !drag.gesture) {
       this.host.seek(drag.origin, false);
-    } else if (drag.kind === 'move' || drag.kind === 'trim' || drag.kind === 'marker') {
+    } else if (drag.kind === 'keyframe' && !drag.gesture) {
+      // A click on a keyframe goes to it.
+      this.host.seek(drag.clip.start + drag.offset, false);
+    } else if (
+      drag.kind === 'move' ||
+      drag.kind === 'trim' ||
+      drag.kind === 'marker' ||
+      drag.kind === 'transition' ||
+      drag.kind === 'keyframe'
+    ) {
       if (drag.gesture) await this.host.finish(drag.gesture);
     }
     this.redraw();
@@ -726,7 +838,85 @@ export class TimelineController {
 
   dragLeave() {
     this.drop = null;
+    this.effectDrop = null;
     this.redraw();
+  }
+
+  // ---- Drops from the effects browser ----------------------------------------------
+
+  /** Where `dragged` would go if dropped at the pointer. */
+  private effectAt(dragged: DraggedEffect, event: DragEvent) {
+    const snapshot = this.live;
+    if (!snapshot) return null;
+    const project = snapshot.project;
+    const { x, y } = this.local(event);
+    const time = xToTime(this.view, x);
+    const row = rowAt(this.rows, this.view, y);
+    if (dragged.kind === 'adjustment') {
+      const frame = this.frame(project);
+      const above = aboveRows(this.rows, this.view, y);
+      if (!above && (!row || row.track.locked)) return null;
+      const main = row?.track.id === project.mainTrack;
+      const start = Math.max(0, snapToFrame(time, frame));
+      return { adjustment: { row: main ? null : row, start } };
+    }
+    if (!row || row.track.locked) return null;
+    if (dragged.item.entry.type === 'effect') {
+      const clip = visibleClips(row.track.clips, time, time + 1).find(
+        (c) => c.start <= time && c.video,
+      );
+      return clip ? { effect: { kind: 'clip' as const, row, clip } } : null;
+    }
+    const tolerance = (40 / this.view.scale) * FLICKS_PER_SECOND;
+    const target = cutNear(row.track, time, tolerance);
+    return target ? { transition: { row, target } } : null;
+  }
+
+  dragOverEffect(event: DragEvent, dragged: DraggedEffect | null) {
+    if (!event.dataTransfer?.types.includes(effectDragType)) return;
+    event.preventDefault();
+    const at = dragged ? this.effectAt(dragged, event) : null;
+    event.dataTransfer.dropEffect = at ? 'copy' : 'none';
+    this.drop = null;
+    this.effectDrop = null;
+    if (at?.effect) this.effectDrop = at.effect;
+    if (at?.transition)
+      this.effectDrop = {
+        kind: 'cut',
+        row: at.transition.row,
+        cut: at.transition.target.cut,
+        duration: defaultTransitionDuration,
+      };
+    if (at?.adjustment)
+      this.drop = {
+        row: at.adjustment.row,
+        start: at.adjustment.start,
+        duration: adjustmentDuration,
+        insert: false,
+      };
+    this.redraw();
+  }
+
+  async dropEffect(event: DragEvent, dragged: DraggedEffect | null): Promise<void> {
+    this.drop = null;
+    this.effectDrop = null;
+    this.redraw();
+    if (!dragged || !event.dataTransfer?.types.includes(effectDragType)) return;
+    event.preventDefault();
+    const at = this.effectAt(dragged, event);
+    if (!at) return;
+    if (at.adjustment)
+      return this.host.addAdjustmentLayer(at.adjustment.start, at.adjustment.row?.track.id ?? null);
+    if (dragged.kind !== 'item') return;
+    if (at.effect) {
+      this.host.select([at.effect.clip.id], 'replace');
+      return this.host.applyEffect(dragged.item, at.effect.clip.id);
+    }
+    if (at.transition)
+      return this.host.applyTransition(dragged.item, {
+        track: at.transition.row.track.id,
+        ...at.transition.target,
+      });
   }
 
   async dropMedia(event: DragEvent): Promise<void> {

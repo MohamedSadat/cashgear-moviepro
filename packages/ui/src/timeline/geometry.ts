@@ -7,7 +7,10 @@ import {
   type Marker,
   type Project,
   type Track,
+  type Transition,
 } from '@cgv/engine-client';
+import { transitionCut, transitionWindow } from '../editing/transitions';
+import { keyTimes } from '../effects/animation';
 
 export const rulerHeight = 28;
 export const trackHeight = 58;
@@ -17,6 +20,10 @@ export const dropZoneHeight = 32;
 export const edgeGrab = 7;
 /** Pixels within which edges snap. */
 export const snapPixels = 8;
+/** Transitions sit in the lower part of a row, so the clips' edges above stay grabbable. */
+export const transitionBand = 0.46;
+/** The clip's name bar, where the keyframes of selected clips show. */
+export const nameBar = 15;
 /** The closest zoom: one frame at 30 fps is 72 pixels wide. */
 export const maxScale = 2160;
 export const minScale = 0.02;
@@ -115,12 +122,49 @@ export function visibleClips(clips: Clip[], start: number, end: number): Clip[] 
 
 export type Hit =
   | { kind: 'clip'; clip: Clip; row: Row; edge: 'start' | 'end' | null }
+  | {
+      kind: 'transition';
+      transition: Transition;
+      row: Row;
+      /** A draggable end of the transition (one at its cut does not move). */
+      edge: 'start' | 'end' | null;
+      window: [number, number];
+      cut: number;
+    }
+  | { kind: 'keyframe'; clip: Clip; row: Row; time: number }
   | { kind: 'marker'; marker: Marker }
   | { kind: 'ruler'; time: number }
   | { kind: 'empty'; row: Row | null; time: number };
 
-/** What is under canvas point (`x`, `y`). */
-export function hitTest(project: Project, rows: Row[], view: View, x: number, y: number): Hit {
+/** Where a row's transitions are drawn: their window and the band's top and height. */
+export function transitionBox(
+  view: View,
+  row: Row,
+  window: [number, number],
+): { x: number; y: number; w: number; h: number } {
+  const top = rowTop(view, row) + 2;
+  const height = row.height - 4;
+  const h = Math.round(height * transitionBand);
+  return {
+    x: timeToX(view, window[0]),
+    y: top + height - h,
+    w: Math.max(4, span(view, window[1] - window[0])),
+    h,
+  };
+}
+
+/**
+ * What is under canvas point (`x`, `y`). `selected` clips show their keyframes,
+ * which can then be grabbed.
+ */
+export function hitTest(
+  project: Project,
+  rows: Row[],
+  view: View,
+  x: number,
+  y: number,
+  selected?: Set<number>,
+): Hit {
   const time = xToTime(view, x);
   if (y < rulerHeight) {
     const marker = project.markers.find((m) => Math.abs(timeToX(view, m.time) - x) <= 5);
@@ -128,6 +172,28 @@ export function hitTest(project: Project, rows: Row[], view: View, x: number, y:
   }
   const row = rowAt(rows, view, y);
   if (!row) return { kind: 'empty', row: null, time };
+  const frame = frameDuration(project.settings.frameRate);
+  for (const transition of row.track.transitions ?? []) {
+    const window = transitionWindow(row.track, transition, frame);
+    const cut = transitionCut(row.track, transition);
+    if (!window || cut === null) continue;
+    const box = transitionBox(view, row, window);
+    if (y < box.y || y > box.y + box.h || x < box.x - 3 || x > box.x + box.w + 3) continue;
+    // An end that sits on the cut (a transition starting or ending there) stays put.
+    const start = window[0] !== cut && x - box.x <= 5;
+    const end = window[1] !== cut && box.x + box.w - x <= 5;
+    const edge = start ? 'start' : end ? 'end' : null;
+    return { kind: 'transition', transition, row, edge, window, cut };
+  }
+  const top = rowTop(view, row);
+  if (selected && y <= top + 2 + nameBar)
+    for (const clip of visibleClips(row.track.clips, time - 1, time + 1)) {
+      if (!selected.has(clip.id)) continue;
+      const key = keyTimes(clip).find(
+        (offset) => Math.abs(timeToX(view, clip.start + offset) - x) <= 5,
+      );
+      if (key !== undefined) return { kind: 'keyframe', clip, row, time: key };
+    }
   const clips = row.track.clips;
   const index = firstEndingAfter(clips, time);
   const clip = clips[index];

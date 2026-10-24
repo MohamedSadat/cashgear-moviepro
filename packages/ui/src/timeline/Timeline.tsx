@@ -10,6 +10,8 @@ import type { EditorState } from '../editing/useEditor';
 import { usePlaybackState, type PlaybackControls } from '../monitor/usePlayback';
 import { icons } from '../icons';
 import { draggedMedia } from '../media/dragging';
+import { nameOf } from '../effects/catalog';
+import { draggedEffect, effectDragType } from '../effects/dragging';
 import { formatTime } from '../project/format';
 import { TimelineController, findClip, projectEnd, type TimelineHost } from './controller';
 import {
@@ -252,12 +254,17 @@ const ClipList = memo(function ClipList({
             data-start={clip.start}
             data-duration={clip.duration}
             data-offline={missing.has(clip.media)}
+            data-kind={clip.kind ?? 'media'}
+            data-effects={(clip.effects ?? []).map((effect) => effect.kind).join(' ')}
             aria-selected={selected.has(clip.id)}
           >
             <button type="button" onClick={() => onSelect(clip.id)}>
               {missing.has(clip.media) && 'Missing: '}
-              {names.get(clip.media) ?? clip.media}, {formatTime(clip.start)} to{' '}
-              {formatTime(clip.start + clip.duration)} on {trackLabel(track, index)}
+              {clip.kind === 'adjustment'
+                ? 'Adjustment layer'
+                : (names.get(clip.media) ?? clip.media)}
+              , {formatTime(clip.start)} to {formatTime(clip.start + clip.duration)} on{' '}
+              {trackLabel(track, index)}
             </button>
           </li>
         )),
@@ -361,6 +368,16 @@ export function Timeline({ editor, diagnostic }: { editor: EditorState; diagnost
         ),
       finish: (gesture) => editorRef.current.project.finish(gesture),
       openMenu: (hit, x, y) => openMenu.current(hit, x, y),
+      selectedTransition: () => editorRef.current.transition?.transition.id ?? null,
+      selectTransition: (id) => editorRef.current.selectTransition(id),
+      transitionLabel: (transition) => {
+        const entry = editorRef.current.catalog?.find(transition.pack, transition.kind);
+        return entry ? nameOf(entry, transition.params) : transition.kind;
+      },
+      applyEffect: (item, clip) => editorRef.current.applyEffect(item, [clip]),
+      applyTransition: (item, target) => editorRef.current.applyTransition(item, target),
+      addAdjustmentLayer: (time, track) =>
+        editorRef.current.addAdjustmentLayer(time, track ?? undefined),
       scrolled: (top) => {
         if (headers.current) headers.current.style.transform = `translateY(${-top}px)`;
       },
@@ -403,7 +420,14 @@ export function Timeline({ editor, diagnostic }: { editor: EditorState; diagnost
   useEffect(() => onLive((next) => controller.current?.show(next)), [onLive]);
   useEffect(
     () => controller.current?.redraw(),
-    [editor.selected, project.library.visuals, missing, editor.tool],
+    [
+      editor.selected,
+      editor.transition,
+      editor.catalog,
+      project.library.visuals,
+      missing,
+      editor.tool,
+    ],
   );
 
   const tracks = useMemo(() => snapshot?.project.tracks ?? [], [snapshot]);
@@ -567,11 +591,17 @@ export function Timeline({ editor, diagnostic }: { editor: EditorState; diagnost
         <div
           ref={area}
           className="cgv-timeline-canvas"
-          onDragOver={(event) => controller.current?.dragOver(event.nativeEvent, draggedMedia.id)}
+          onDragOver={(event) => {
+            if (event.dataTransfer.types.includes(effectDragType))
+              controller.current?.dragOverEffect(event.nativeEvent, draggedEffect.current);
+            else controller.current?.dragOver(event.nativeEvent, draggedMedia.id);
+          }}
           onDragLeave={() => controller.current?.dragLeave()}
           onDrop={(event) => {
             event.preventDefault();
-            void controller.current?.dropMedia(event.nativeEvent);
+            if (event.dataTransfer.types.includes(effectDragType))
+              void controller.current?.dropEffect(event.nativeEvent, draggedEffect.current);
+            else void controller.current?.dropMedia(event.nativeEvent);
           }}
         >
           <canvas
@@ -595,6 +625,28 @@ export function Timeline({ editor, diagnostic }: { editor: EditorState; diagnost
         selected={editor.selected}
         onSelect={select}
       />
+      <ul className="cgv-sr-only" aria-label="Transitions">
+        {tracks.flatMap((track, index) =>
+          (track.transitions ?? []).map((transition) => (
+            <li
+              key={transition.id}
+              data-testid="transition"
+              data-transition-id={transition.id}
+              data-track-id={track.id}
+              data-kind={transition.kind}
+              data-from={transition.from ?? ''}
+              data-to={transition.to ?? ''}
+              data-duration={transition.duration}
+              data-alignment={transition.alignment}
+              aria-selected={editor.transition?.transition.id === transition.id}
+            >
+              <button type="button" onClick={() => editor.selectTransition(transition.id)}>
+                {transition.kind} on {trackLabel(track, index)}
+              </button>
+            </li>
+          )),
+        )}
+      </ul>
       <ul className="cgv-sr-only" aria-label="Markers">
         {(snapshot?.project.markers ?? []).map((marker) => (
           <li
@@ -630,6 +682,39 @@ function menuFor(editor: EditorState, hit: Hit): MenuItem[] {
     disabled: !editor.clipboard.length,
     command: () => run('paste'),
   };
+  if (hit.kind === 'transition') {
+    const transition = hit.transition;
+    return [
+      {
+        key: 'remove',
+        text: 'Delete transition',
+        command: () =>
+          void project.execute({ type: 'removeTransition', transition: transition.id }),
+      },
+    ];
+  }
+  if (hit.kind === 'keyframe') {
+    const { clip, time: offset } = hit;
+    const properties = Object.entries(clip.keyframes ?? {})
+      .filter(([, keys]) => keys.some((key) => key.time === offset))
+      .map(([property]) => property);
+    return [
+      {
+        key: 'remove',
+        text: 'Delete these keyframes',
+        command: () =>
+          void project.executeGroup(
+            'Delete keyframes',
+            properties.map((property) => ({
+              type: 'removeKeyframes',
+              clip: clip.id,
+              property,
+              times: [offset],
+            })),
+          ),
+      },
+    ];
+  }
   if (hit.kind === 'marker') {
     const marker = hit.marker;
     return [

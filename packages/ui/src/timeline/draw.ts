@@ -8,15 +8,21 @@ import {
   type MarkerColor,
   type MediaRef,
   type Project,
+  type Transition,
 } from '@cgv/engine-client';
+import { transitionWindow } from '../editing/transitions';
+import { keyTimes } from '../effects/animation';
 import type { MediaVisuals } from '../media/useMediaLibrary';
 import {
   dropZoneHeight,
+  frameDuration,
+  nameBar,
   rowTop,
   rulerHeight,
   rulerTicks,
   span,
   timeToX,
+  transitionBox,
   visibleClips,
   xToTime,
   type Row,
@@ -37,7 +43,9 @@ export interface Palette {
   clipVideo: string;
   clipAudio: string;
   clipImage: string;
+  clipAdjustment: string;
   clipOffline: string;
+  transition: string;
   clipText: string;
   clipBorder: string;
   selection: string;
@@ -61,7 +69,9 @@ const defaults: Palette = {
   clipVideo: '#2c5a8c',
   clipAudio: '#2b7350',
   clipImage: '#68498f',
+  clipAdjustment: '#4f5566',
   clipOffline: '#6e2b2b',
+  transition: 'rgba(240, 244, 255, 0.82)',
   clipText: '#eef1f6',
   clipBorder: 'rgba(255, 255, 255, 0.16)',
   selection: '#f2b84b',
@@ -92,7 +102,9 @@ const tokenNames: Record<Exclude<keyof Palette, 'markers'>, string> = {
   clipVideo: '--cgv-clip-video',
   clipAudio: '--cgv-clip-audio',
   clipImage: '--cgv-clip-image',
+  clipAdjustment: '--cgv-clip-adjustment',
   clipOffline: '--cgv-clip-offline',
+  transition: '--cgv-transition',
   clipText: '--cgv-clip-text',
   clipBorder: '--cgv-clip-border',
   selection: '--cgv-clip-selected',
@@ -124,6 +136,10 @@ export interface DropPreview {
   insert: boolean;
 }
 
+/** Where a dragged effect or transition would go. */
+export type EffectDropPreview =
+  { kind: 'clip'; row: Row; clip: Clip } | { kind: 'cut'; row: Row; cut: number; duration: number };
+
 export interface DrawInput {
   project: Project;
   rows: Row[];
@@ -136,6 +152,11 @@ export interface DrawInput {
   /** The last gesture step could not apply. */
   invalid: boolean;
   drop: DropPreview | null;
+  effectDrop: EffectDropPreview | null;
+  /** The selected transition. */
+  transition: number | null;
+  /** A transition's name, as the browser lists it. */
+  transitionLabel(transition: Transition): string;
   marquee: { x0: number; y0: number; x1: number; y1: number } | null;
   hover: { clip: number; edge: 'start' | 'end' | null } | null;
   media: Map<string, MediaRef>;
@@ -146,7 +167,6 @@ export interface DrawInput {
 }
 
 const font = '11px system-ui, -apple-system, "Segoe UI", sans-serif';
-const nameBar = 15;
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
   const r = Math.min(4, w / 2, h / 2);
@@ -259,14 +279,17 @@ function drawClip(
   const y = top + 2;
   const h = row.height - 4;
   const media = input.media.get(clip.media);
-  const offline = input.missing.has(clip.media);
+  const adjustment = clip.kind === 'adjustment';
+  const offline = !adjustment && input.missing.has(clip.media);
   ctx.fillStyle = offline
     ? palette.clipOffline
-    : !clip.video
-      ? palette.clipAudio
-      : media?.kind === 'image'
-        ? palette.clipImage
-        : palette.clipVideo;
+    : adjustment
+      ? palette.clipAdjustment
+      : !clip.video
+        ? palette.clipAudio
+        : media?.kind === 'image'
+          ? palette.clipImage
+          : palette.clipVideo;
   if (w < 3) {
     ctx.fillRect(x, y, w, h);
     return;
@@ -285,7 +308,7 @@ function drawClip(
         ? Math.round((h - nameBar) * 0.38)
         : h - nameBar
       : 0;
-    if (visuals && !offline) {
+    if (visuals && !offline && !adjustment) {
       if (clip.video && visuals.thumbnails.length)
         drawFilmstrip(ctx, input, clip, visuals, x, y + nameBar, w, h - nameBar - waveHeight);
       if (clip.audio)
@@ -305,7 +328,11 @@ function drawClip(
       ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
       ctx.fillRect(x, y, w, nameBar);
       ctx.fillStyle = palette.clipText;
-      const name = (offline ? 'Missing: ' : '') + speedLabel(clip) + (media?.name ?? clip.media);
+      const name =
+        (offline ? 'Missing: ' : '') +
+        (clip.effects?.length ? 'fx ' : '') +
+        speedLabel(clip) +
+        (adjustment ? 'Adjustment layer' : (media?.name ?? clip.media));
       ctx.fillText(name, Math.max(x, 0) + 5, y + nameBar / 2 + 0.5);
     }
     ctx.restore();
@@ -327,6 +354,74 @@ function drawClip(
     ctx.fillStyle = palette.selection;
     const handle = input.hover.edge === 'start' ? x : x + w - 4;
     ctx.fillRect(handle, y, 4, h);
+  }
+  if (selected && w >= 8) drawKeyframes(ctx, input, clip, y);
+}
+
+/** A selected clip's keyframes, as diamonds along its name bar. */
+function drawKeyframes(ctx: CanvasRenderingContext2D, input: DrawInput, clip: Clip, y: number) {
+  const times = keyTimes(clip);
+  if (!times.length) return;
+  ctx.fillStyle = input.palette.selection;
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+  ctx.lineWidth = 1;
+  const middle = y + nameBar / 2;
+  for (const time of times) {
+    const kx = Math.round(timeToX(input.view, clip.start + time)) + 0.5;
+    if (kx < -6 || kx > input.view.width + 6) continue;
+    ctx.beginPath();
+    ctx.moveTo(kx, middle - 5);
+    ctx.lineTo(kx + 5, middle);
+    ctx.lineTo(kx, middle + 5);
+    ctx.lineTo(kx - 5, middle);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+/** A row's transitions: boxes over their windows, in the lower part of the row. */
+function drawTransitions(ctx: CanvasRenderingContext2D, input: DrawInput, row: Row) {
+  const { view, palette } = input;
+  const transitions = row.track.transitions;
+  if (!transitions?.length) return;
+  const frame = frameDuration(input.project.settings.frameRate);
+  for (const transition of transitions) {
+    const window = transitionWindow(row.track, transition, frame);
+    if (!window) continue;
+    const box = transitionBox(view, row, window);
+    if (box.x > view.width || box.x + box.w < 0) continue;
+    const selected = input.transition === transition.id;
+    ctx.fillStyle = 'rgba(10, 12, 16, 0.55)';
+    roundRect(ctx, box.x, box.y, box.w, box.h);
+    ctx.fill();
+    ctx.strokeStyle = selected ? palette.selection : palette.transition;
+    ctx.lineWidth = selected ? 2 : 1;
+    roundRect(ctx, box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
+    ctx.stroke();
+    // A bow tie: one picture narrowing as the other widens.
+    ctx.fillStyle = selected ? palette.selection : palette.transition;
+    ctx.globalAlpha = 0.35;
+    ctx.beginPath();
+    ctx.moveTo(box.x + 2, box.y + 2);
+    ctx.lineTo(box.x + box.w - 2, box.y + box.h - 2);
+    ctx.lineTo(box.x + box.w - 2, box.y + 2);
+    ctx.lineTo(box.x + 2, box.y + box.h - 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    if (box.w >= 48) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(box.x + 2, box.y, box.w - 4, box.h);
+      ctx.clip();
+      ctx.fillStyle = palette.clipText;
+      ctx.textBaseline = 'middle';
+      const label = input.transitionLabel(transition);
+      const width = ctx.measureText(label).width;
+      ctx.fillText(label, box.x + Math.max(4, (box.w - width) / 2), box.y + box.h / 2 + 0.5);
+      ctx.restore();
+    }
   }
 }
 
@@ -351,6 +446,7 @@ function drawRows(ctx: CanvasRenderingContext2D, input: DrawInput) {
     ctx.textBaseline = 'middle';
     for (const clip of visibleClips(row.track.clips, start, end))
       drawClip(ctx, input, clip, row, top);
+    drawTransitions(ctx, input, row);
     ctx.globalAlpha = 1;
     if (row.track.locked) {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
@@ -359,7 +455,32 @@ function drawRows(ctx: CanvasRenderingContext2D, input: DrawInput) {
   });
 }
 
+function drawEffectDrop(ctx: CanvasRenderingContext2D, input: DrawInput) {
+  const { effectDrop: drop, view, palette } = input;
+  if (!drop) return;
+  const top = rowTop(view, drop.row);
+  ctx.strokeStyle = palette.drop;
+  ctx.fillStyle = palette.drop;
+  ctx.lineWidth = 2;
+  if (drop.kind === 'clip') {
+    const x = timeToX(view, drop.clip.start);
+    const w = Math.max(2, span(view, drop.clip.duration));
+    ctx.globalAlpha = 0.25;
+    ctx.fillRect(x, top + 2, w, drop.row.height - 4);
+    ctx.globalAlpha = 1;
+    ctx.strokeRect(x + 1, top + 3, w - 2, drop.row.height - 6);
+    return;
+  }
+  const half = span(view, drop.duration) / 2;
+  const x = timeToX(view, drop.cut);
+  ctx.globalAlpha = 0.3;
+  ctx.fillRect(x - half, top + 2, 2 * half, drop.row.height - 4);
+  ctx.globalAlpha = 1;
+  ctx.fillRect(x - 1, top, 3, drop.row.height);
+}
+
 function drawDrop(ctx: CanvasRenderingContext2D, input: DrawInput) {
+  drawEffectDrop(ctx, input);
   const { drop, view, palette } = input;
   if (!drop) return;
   const x = timeToX(view, drop.start);
