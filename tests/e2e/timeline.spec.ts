@@ -683,25 +683,25 @@ test('effects drop onto clips, stack in the inspector and animate with the stopw
   const x = inspector.getByTestId('field-x').locator('input');
   await x.fill('200');
   await x.press('Enter');
-  let keys = (await clipOf(page, row.id)).keyframes?.['transform.x'];
-  expect(keys?.map((key) => [key.time, key.value])).toEqual([
-    [0, 0],
-    [30 * FRAME, 200],
-  ]);
+  const keys = async () => (await clipOf(page, row.id)).keyframes?.['transform.x'] ?? [];
+  await expect
+    .poll(async () => (await keys()).map((key) => [key.time, key.value]))
+    .toEqual([
+      [0, 0],
+      [30 * FRAME, 200],
+    ]);
 
   // The selected clip shows its keys on the canvas; dragging one moves it in time.
   const top = (await rowBox(page, row.track)).y;
   const from = (await xAt(page, 30 * FRAME)) | 0;
   await drag(page, [from, top + 9], [((await xAt(page, 60 * FRAME)) | 0) + 1, top + 9]);
-  keys = (await clipOf(page, row.id)).keyframes?.['transform.x'];
-  expect(keys?.map((key) => key.value)).toEqual([0, 200]);
-  expect(keys![1].time).toBeGreaterThan(45 * FRAME);
+  await expect.poll(async () => (await keys())[1]?.time).toBeGreaterThan(45 * FRAME);
+  expect((await keys()).map((key) => key.value)).toEqual([0, 200]);
 
   // Each step undoes: the move, the key, the stopwatch, the switch, the amount, both effects.
   for (let i = 0; i < 7; i++) await press(page, 'Control+z');
-  const clip = await clipOf(page, row.id);
-  expect(clip.effects ?? []).toEqual([]);
-  expect(clip.keyframes ?? {}).toEqual({});
+  await expect.poll(kinds).toEqual([]);
+  expect((await clipOf(page, row.id)).keyframes ?? {}).toEqual({});
 });
 
 test('transitions drop on cuts, change length at their edges, and Ctrl+D adds the default', async ({
@@ -743,7 +743,9 @@ test('transitions drop on cuts, change length at their edges, and Ctrl+D adds th
   const band = box.y + box.height - 8;
   const start = (await xAt(page, b.start - SECOND)) | 0;
   await drag(page, [start + 2, band], [start - 60, band]);
-  expect(Number(await first.getAttribute('data-duration'))).toBeGreaterThan(SECOND);
+  await expect
+    .poll(async () => Number(await first.getAttribute('data-duration')))
+    .toBeGreaterThan(SECOND);
   expect((await snapshot(page)).undoLabel).toMatch(/transition/i);
 
   // Delete removes the selected transition; undo brings it back.
@@ -812,7 +814,9 @@ test('an adjustment layer grades the tracks below through an imported LUT', asyn
     .poll(async () => (await snapshot(page)).project.luts.map((lut) => lut.name))
     .toEqual(['invert.cube']);
   const { luts } = (await snapshot(page)).project;
-  expect((await clipOf(page, layer.id)).effects?.[0].params.lut).toBe(`lut-${luts[0].id}`);
+  await expect
+    .poll(async () => (await clipOf(page, layer.id)).effects?.[0].params.lut)
+    .toBe(`lut-${luts[0].id}`);
   // The picture below is inverted: its mean red turns around.
   expect(Math.abs((await red()) - (255 - plain))).toBeLessThan(3);
 });
