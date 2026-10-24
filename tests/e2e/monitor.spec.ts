@@ -83,12 +83,12 @@ for (const backend of ['WebGPU', 'WebGL2'] as const) {
     await page.goto('/?diagnostic=1&' + query.slice(1));
     await engineReady(page, backend);
     await page.getByRole('button', { name: 'Simulate device loss' }).click();
-    await expect(page.getByRole('alert')).toContainText('GPU device lost');
+    await expect(page.getByTestId('engine-error')).toContainText('GPU device lost');
     await page.getByRole('button', { name: 'Retry engine' }).click();
     await engineReady(page, backend);
     await expect(page.getByTestId('program-monitor')).toHaveCount(1);
     await page.getByRole('button', { name: 'Simulate Rust panic' }).click();
-    await expect(page.getByRole('alert')).toContainText('Rust panic');
+    await expect(page.getByTestId('engine-error')).toContainText('Rust panic');
     await page.getByRole('button', { name: 'Retry engine' }).click();
     await engineReady(page, backend);
     expect(barMismatches(await capture(page))).toEqual([]);
