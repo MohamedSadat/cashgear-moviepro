@@ -7,14 +7,14 @@ use crate::validate::validate;
 
 pub const FORMAT: &str = "cashgear-video-project";
 /// The format version this build writes. Older files are migrated when opened.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 pub const EXTENSION: &str = "cgvproj";
 
 /// Upgrades the `project` object of a file from one version to the next.
 type Migration = fn(Value) -> Result<Value, String>;
 
 /// `MIGRATIONS[n - 1]` upgrades version `n` to `n + 1`. Version 1 is the first.
-const MIGRATIONS: &[Migration] = &[main_track];
+const MIGRATIONS: &[Migration] = &[main_track, effect_ids];
 
 /// Format 2 adds the main track. A format 1 project's bottom track becomes its main
 /// track, with magnetism off, so the edit stays exactly as it was.
@@ -31,6 +31,39 @@ fn main_track(mut project: Value) -> Result<Value, String> {
         .ok_or("the project is not an object")?;
     object.insert("mainTrack".into(), bottom);
     object.insert("magnetic".into(), Value::Bool(false));
+    Ok(project)
+}
+
+/// Format 3 gives effects an id, a pack and a version, and adds transitions,
+/// adjustment layers and LUTs. Format 2 effects (no command made them) get ids
+/// from the project's counter and the built-in pack.
+fn effect_ids(mut project: Value) -> Result<Value, String> {
+    let mut next = project
+        .get("nextId")
+        .and_then(Value::as_u64)
+        .ok_or("it has no id counter")?;
+    let tracks = project
+        .get_mut("tracks")
+        .and_then(Value::as_array_mut)
+        .ok_or("it has no tracks")?;
+    for track in tracks {
+        let Some(clips) = track.get_mut("clips").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for clip in clips {
+            let Some(effects) = clip.get_mut("effects").and_then(Value::as_array_mut) else {
+                continue;
+            };
+            for effect in effects {
+                let object = effect.as_object_mut().ok_or("an effect is not an object")?;
+                object.insert("id".into(), next.into());
+                object.insert("pack".into(), crate::effects::BUILTIN_PACK.into());
+                object.insert("version".into(), 1.into());
+                next += 1;
+            }
+        }
+    }
+    project["nextId"] = next.into();
     Ok(project)
 }
 
@@ -103,7 +136,7 @@ mod tests {
     fn round_trips_a_new_project() {
         let project = Project::new("p-1", "Holiday");
         let text = to_json(&project);
-        assert!(text.starts_with("{\n  \"format\": \"cashgear-video-project\",\n  \"version\": 2,"));
+        assert!(text.starts_with("{\n  \"format\": \"cashgear-video-project\",\n  \"version\": 3,"));
         let loaded = from_json(&text).unwrap();
         assert_eq!(loaded, project);
         assert_eq!(to_json(&loaded), text);
@@ -129,6 +162,46 @@ mod tests {
             },
             project
         );
+    }
+
+    #[test]
+    fn format_2_effects_get_ids_from_the_counter() {
+        let mut project = Project::new("p-1", "Holiday");
+        project.media.push(crate::MediaRef {
+            id: "v".into(),
+            name: "v.mp4".into(),
+            kind: crate::MediaKind::Video,
+            duration: cgv_time::Flicks::ONE_SECOND,
+            has_video: true,
+            has_audio: false,
+            width: 16,
+            height: 16,
+            frame_rate: None,
+            size: 1,
+            modified: None,
+            location: crate::MediaLocation::Browser,
+        });
+        let mut old = serde_json::to_value(&project).unwrap();
+        old["tracks"][0]["clips"] = json!([{
+            "id": 3, "media": "v", "start": 0, "duration": 23520000, "sourceIn": 0,
+            "speed": { "num": 1, "den": 1 }, "video": true, "audio": false, "link": null,
+            "transform": serde_json::to_value(crate::Transform::default()).unwrap(),
+            "crop": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
+            "opacity": 1, "volumeDb": 0,
+            "effects": [{ "kind": "gaussian-blur", "enabled": true, "params": { "radius": 0.5 } }],
+            "keyframes": {
+                "opacity": [{ "time": 0, "value": 0.5, "interpolation": { "kind": "hold" } }]
+            }
+        }]);
+        old["nextId"] = json!(4);
+        let file = json!({ "format": FORMAT, "version": 2, "project": old });
+        let opened = from_json(&file.to_string()).unwrap();
+        let clip = &opened.tracks[0].clips[0];
+        assert_eq!(clip.effects[0].id, crate::EffectId(4));
+        assert_eq!(clip.effects[0].pack, "builtin");
+        assert_eq!(clip.effects[0].version, 1);
+        assert_eq!(opened.next_id, 5);
+        assert_eq!(clip.opacity_at(cgv_time::Flicks::ZERO), 0.5);
     }
 
     #[test]

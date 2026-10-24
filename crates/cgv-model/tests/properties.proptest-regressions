@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc 07a8d91ccdbd6b67fc9bac557ae312b607babd73abaf25eca56c7c631b1e9119 # linked clips with a gap on one track: sliding one made the other its neighbour
 cc 1ebec517faff467a46876e386d08988ecfb38726126f2e13445a6b93cf8a3cc6 # a clip moved with overwrite onto the track of a clip following the main track trimmed it
+cc ef4960c200e7162cd44cb337ba152dfaddd1ef4492397daa7688208efb43645d # a split copied its effect ids into the right half

@@ -33,6 +33,10 @@ fn check_rules(project: &Project, frame_rate_changed: bool) {
                 clip.id
             );
         }
+        if clip.is_adjustment() {
+            assert!(clip.media.is_empty() && clip.source_in == Flicks::ZERO);
+            continue;
+        }
         let media = project.media(&clip.media).unwrap();
         if !media.is_still() {
             assert!(
@@ -410,7 +414,11 @@ fn random_history(session: &mut Session, rng: &mut Rng, target: usize) -> (Vec<P
         let before = session.project().clone();
         let command = random_command(&before, rng);
         match session.execute(&command) {
-            Err(_) => {
+            Err(error) => {
+                assert!(
+                    !error.starts_with("Internal"),
+                    "{command:?} broke a rule: {error}"
+                );
                 assert_eq!(
                     session.project(),
                     &before,

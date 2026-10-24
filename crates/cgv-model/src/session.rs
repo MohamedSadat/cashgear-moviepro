@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use serde::Serialize;
 
 use crate::command::{Command, Outcome};
-use crate::project::{MediaRef, Project};
+use crate::project::{MediaRef, Project, ProjectView};
 
 /// Undo steps kept before the oldest is dropped.
 pub const HISTORY_LIMIT: usize = 10_000;
@@ -46,7 +46,7 @@ pub struct Session {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot<'a> {
-    pub project: &'a Project,
+    pub project: ProjectView<'a>,
     pub generation: u64,
     pub dirty: bool,
     pub needs_autosave: bool,
@@ -86,7 +86,7 @@ impl Session {
 
     pub fn snapshot(&self) -> Snapshot<'_> {
         Snapshot {
-            project: &self.state,
+            project: self.state.view(),
             generation: self.generation,
             dirty: self.is_dirty(),
             needs_autosave: self.needs_autosave(),

@@ -4,12 +4,16 @@ use std::sync::Arc;
 
 use cgv_time::Flicks;
 
+use crate::animation::{property_effect, value_at, Keyframe, Keyframes, Property};
 use crate::command::{ClipProperties, ClipSpec, Command, Edge, Outcome};
-use crate::project::{
-    Clip, ClipId, Crop, LinkId, Marker, MarkerId, Project, Speed, Track, TrackId, Transform,
-    MAX_TIME,
+use crate::effects::{
+    parse_lut_ref, Alignment, EffectSpec, ParamValue, Transition, TransitionSpec, MAX_EFFECTS,
 };
-use crate::validate::{check_name, validate};
+use crate::project::{
+    Clip, ClipId, ClipKind, Crop, EffectId, LinkId, LutId, Marker, MarkerId, Project, Speed, Track,
+    TrackId, Transform, TransitionId, MAX_TIME,
+};
+use crate::validate::{check_effects, check_keyframes, check_name, validate};
 
 /// Source ranges may end this many flicks past the media's end, to absorb the
 /// rounding of fractional speeds. About 1.4 µs.
@@ -25,9 +29,16 @@ impl Project {
             project: self.clone(),
             created: Vec::new(),
             deferred: BTreeSet::new(),
+            required: None,
         };
         edit.run(command)?;
         edit.settle()?;
+        edit.normalize_transitions();
+        if let Some(id) = edit.required {
+            if edit.find_transition(id).is_err() {
+                return Err("There is no room for a transition there".into());
+            }
+        }
         edit.normalize_links();
         validate(&edit.project).map_err(|error| format!("Internal edit error: {error}"))?;
         Ok((
@@ -46,6 +57,8 @@ struct Edit {
     /// Tracks to check for overlaps once the magnetic main track has settled: until
     /// then, a clip may overlap one that settling moves out of its way.
     deferred: BTreeSet<TrackId>,
+    /// A transition the command added, which must still fit once the edit settles.
+    required: Option<TransitionId>,
 }
 
 fn div_round(numerator: i128, denominator: i128) -> i128 {
@@ -157,6 +170,232 @@ impl Edit {
             Command::SetClipProperties { clip, properties } => {
                 self.set_properties(*clip, properties)?
             }
+            Command::AddEffect {
+                clip,
+                effect,
+                index,
+            } => self.add_effect(*clip, effect, *index)?,
+            Command::RemoveEffect { clip, effect } => {
+                let (index, mut changed) = self.editable(*clip)?;
+                let position = effect_position(&changed, *effect)?;
+                changed.effects.remove(position);
+                changed
+                    .keyframes
+                    .retain(|name, _| property_effect(name) != Some(*effect));
+                *self.clip_mut(index, *clip) = changed;
+            }
+            Command::MoveEffect {
+                clip,
+                effect,
+                index: to,
+            } => {
+                let (index, mut changed) = self.editable(*clip)?;
+                let position = effect_position(&changed, *effect)?;
+                if *to >= changed.effects.len() {
+                    return Err(format!("There is no effect position {}", to + 1));
+                }
+                let moved = changed.effects.remove(position);
+                changed.effects.insert(*to, moved);
+                *self.clip_mut(index, *clip) = changed;
+            }
+            Command::SetEffectEnabled {
+                clip,
+                effect,
+                enabled,
+            } => {
+                let (index, mut changed) = self.editable(*clip)?;
+                let position = effect_position(&changed, *effect)?;
+                changed.effects[position].enabled = *enabled;
+                *self.clip_mut(index, *clip) = changed;
+            }
+            Command::SetEffectParams {
+                clip,
+                effect,
+                params,
+            } => {
+                let (index, mut changed) = self.editable(*clip)?;
+                let position = effect_position(&changed, *effect)?;
+                let target = &mut changed.effects[position];
+                for (name, value) in params {
+                    target.params.insert(name.clone(), value.clone());
+                }
+                target.check()?;
+                *self.clip_mut(index, *clip) = changed;
+            }
+            Command::ResetEffect {
+                clip,
+                effect,
+                params,
+            } => {
+                let (index, mut changed) = self.editable(*clip)?;
+                let position = effect_position(&changed, *effect)?;
+                changed.effects[position].params = params.clone();
+                changed.effects[position].check()?;
+                changed
+                    .keyframes
+                    .retain(|name, _| property_effect(name) != Some(*effect));
+                *self.clip_mut(index, *clip) = changed;
+            }
+            Command::SetKeyframe {
+                clip,
+                property,
+                time,
+                value,
+                interpolation,
+            } => {
+                let time = self.snap(*time)?;
+                let (index, mut changed) = self.editable(*clip)?;
+                let keys = changed.keyframes.entry(property.clone()).or_default();
+                let position = keys.partition_point(|key| key.time < time);
+                let replaced = keys.get(position).filter(|key| key.time == time).copied();
+                let key = Keyframe {
+                    time,
+                    value: *value,
+                    interpolation: interpolation
+                        .or(replaced.map(|key| key.interpolation))
+                        .unwrap_or_default(),
+                };
+                if replaced.is_some() {
+                    keys[position] = key;
+                } else {
+                    keys.insert(position, key);
+                }
+                check_keyframes(&changed)?;
+                *self.clip_mut(index, *clip) = changed;
+            }
+            Command::RemoveKeyframes {
+                clip,
+                property,
+                times,
+            } => {
+                let (index, mut changed) = self.editable(*clip)?;
+                if let Some(keys) = changed.keyframes.get_mut(property) {
+                    keys.retain(|key| !times.contains(&key.time));
+                    if keys.is_empty() {
+                        changed.keyframes.remove(property);
+                    }
+                }
+                *self.clip_mut(index, *clip) = changed;
+            }
+            Command::MoveKeyframes {
+                clip,
+                properties,
+                times,
+                delta,
+            } => {
+                let delta = self.snap(*delta)?;
+                let (index, mut changed) = self.editable(*clip)?;
+                for (name, keys) in changed.keyframes.iter_mut() {
+                    if !properties.is_empty() && !properties.contains(name) {
+                        continue;
+                    }
+                    let (mut moved, rest): (Vec<Keyframe>, Vec<Keyframe>) =
+                        keys.iter().partition(|key| times.contains(&key.time));
+                    for key in moved.iter_mut() {
+                        key.time += delta;
+                    }
+                    let mut merged: Vec<Keyframe> = rest
+                        .into_iter()
+                        .filter(|key| !moved.iter().any(|m| m.time == key.time))
+                        .collect();
+                    merged.extend(moved);
+                    merged.sort_by_key(|key| key.time);
+                    *keys = merged;
+                }
+                check_keyframes(&changed)?;
+                *self.clip_mut(index, *clip) = changed;
+            }
+            Command::SetInterpolation {
+                clip,
+                property,
+                times,
+                interpolation,
+            } => {
+                interpolation.check()?;
+                let (index, mut changed) = self.editable(*clip)?;
+                let keys = changed
+                    .keyframes
+                    .get_mut(property)
+                    .ok_or_else(|| format!("{property} is not animated"))?;
+                for key in keys.iter_mut().filter(|key| times.contains(&key.time)) {
+                    key.interpolation = *interpolation;
+                }
+                *self.clip_mut(index, *clip) = changed;
+            }
+            Command::ClearKeyframes { clip, property, at } => {
+                let (index, mut changed) = self.editable(*clip)?;
+                if !changed.keyframes.contains_key(property) {
+                    return Ok(());
+                }
+                if let Some(at) = at {
+                    freeze(&mut changed, property, *at)?;
+                }
+                changed.keyframes.remove(property);
+                *self.clip_mut(index, *clip) = changed;
+            }
+            Command::AddTransition {
+                track,
+                from,
+                to,
+                transition,
+            } => self.add_transition(*track, *from, *to, transition)?,
+            Command::SetTransition {
+                transition,
+                duration,
+                alignment,
+                params,
+            } => {
+                let (index, position) = self.find_transition(*transition)?;
+                self.unlocked(index)?;
+                let duration = duration.map(|d| self.snap(d)).transpose()?;
+                let mut changed = self.project.tracks[index].transitions[position].clone();
+                if let Some(duration) = duration {
+                    if duration < self.frame {
+                        return Err("A transition lasts at least one frame".into());
+                    }
+                    changed.duration = duration;
+                }
+                if let Some(alignment) = alignment {
+                    changed.alignment = *alignment;
+                }
+                if let Some(params) = params {
+                    for (name, value) in params {
+                        changed.params.insert(name.clone(), value.clone());
+                    }
+                }
+                changed.check()?;
+                self.track_mut(index).transitions[position] = changed;
+            }
+            Command::RemoveTransition { transition } => {
+                let (index, position) = self.find_transition(*transition)?;
+                self.unlocked(index)?;
+                self.track_mut(index).transitions.remove(position);
+            }
+            Command::AddLut { lut } => {
+                let lut = lut.build(LutId(self.alloc()))?;
+                self.created.push(lut.id.0);
+                self.project.luts.push(Arc::new(lut));
+            }
+            Command::RemoveLut { lut } => {
+                let position = self
+                    .project
+                    .luts
+                    .iter()
+                    .position(|entry| entry.id == *lut)
+                    .ok_or_else(|| format!("No LUT {lut}"))?;
+                let names = |value: &ParamValue| matches!(value, ParamValue::Text(text) if parse_lut_ref(text) == Some(*lut));
+                let used = self
+                    .project
+                    .clips()
+                    .any(|clip| clip.effects.iter().any(|e| e.params.values().any(names)));
+                if used {
+                    return Err(format!(
+                        "{} is used by an effect",
+                        self.project.luts[position].name
+                    ));
+                }
+                self.project.luts.remove(position);
+            }
             Command::AddMarker { at, name, color } => {
                 let marker = Marker {
                     id: MarkerId(self.alloc()),
@@ -251,8 +490,32 @@ impl Edit {
         &mut track.clips[position]
     }
 
+    /// Stills and adjustment layers (no media) have no source position or speed.
     fn is_still(&self, media: &str) -> bool {
-        self.project.media(media).is_some_and(|m| m.is_still())
+        media.is_empty() || self.project.media(media).is_some_and(|m| m.is_still())
+    }
+
+    /// The track index and a copy of clip `id`, whose track must be unlocked.
+    fn editable(&self, id: ClipId) -> Result<(usize, Clip), String> {
+        let (index, clip) = self.find(id)?;
+        self.unlocked(index)?;
+        Ok((index, clip))
+    }
+
+    /// The track index and position of transition `id`.
+    fn find_transition(&self, id: TransitionId) -> Result<(usize, usize), String> {
+        self.project
+            .tracks
+            .iter()
+            .enumerate()
+            .find_map(|(index, track)| {
+                track
+                    .transitions
+                    .iter()
+                    .position(|t| t.id == id)
+                    .map(|position| (index, position))
+            })
+            .ok_or_else(|| format!("No transition {id}"))
     }
 
     /// `ids` plus every clip linked to one of them, in id order.
@@ -336,6 +599,9 @@ impl Edit {
         if clip.end() > MAX_TIME {
             return Err(format!("Clip {} would end too late", clip.id));
         }
+        if clip.is_adjustment() {
+            return Ok(());
+        }
         let media = self
             .project
             .media(&clip.media)
@@ -415,10 +681,26 @@ impl Edit {
                 key.time -= offset;
             }
         }
+        // The right half's effects are its own, and its keyframes follow them.
+        let renamed: BTreeMap<EffectId, EffectId> = right
+            .effects
+            .iter()
+            .map(|effect| (effect.id, EffectId(self.alloc())))
+            .collect();
+        for effect in right.effects.iter_mut() {
+            effect.id = renamed[&effect.id];
+        }
+        right.keyframes = rename_effects(&right.keyframes, &renamed);
         let track = self.track_mut(index);
         let position = track.position(id).expect("clip on its track");
         track.clips[position].duration = offset;
         track.clips.insert(position + 1, right);
+        // The clip's end is now the right half's.
+        for transition in track.transitions.iter_mut() {
+            if transition.from == Some(id) {
+                transition.from = Some(right_id);
+            }
+        }
         Ok(right_id)
     }
 
@@ -432,6 +714,7 @@ impl Edit {
         if !still {
             clip.source_in += clip.speed.source_span(delta);
         }
+        shift_keys(clip, -delta);
     }
 
     /// Empties `start..end` on track `index`, trimming, splitting or removing clips.
@@ -488,32 +771,50 @@ impl Edit {
     }
 
     fn new_clip(&mut self, spec: &ClipSpec, start: Flicks) -> Result<Clip, String> {
-        let media = self
-            .project
-            .media(&spec.media)
-            .ok_or_else(|| format!("No media {} in the project", spec.media))?
-            .clone();
-        let video = spec.video.unwrap_or(media.has_video);
-        let audio = spec.audio.unwrap_or(media.has_audio);
-        if video && !media.has_video {
-            return Err(format!("{} has no picture", media.name));
-        }
-        if audio && !media.has_audio {
-            return Err(format!("{} has no sound", media.name));
-        }
-        if !video && !audio {
-            return Err("A clip needs its picture, its sound or both".into());
-        }
         let speed = spec.speed.unwrap_or(Speed::NORMAL);
         if Speed::new(speed.num, speed.den) != Some(speed) {
             return Err("Speed must be a reduced fraction from 0.1× to 100×".into());
         }
-        if media.is_still() && speed != Speed::NORMAL {
-            return Err("Stills have no speed".into());
-        }
+        let (media, video, audio) = match spec.kind {
+            ClipKind::Adjustment => {
+                if !spec.media.is_empty() {
+                    return Err("An adjustment layer has no media".into());
+                }
+                if spec.audio == Some(true) || spec.video == Some(false) {
+                    return Err("An adjustment layer changes only the picture".into());
+                }
+                if speed != Speed::NORMAL || spec.source_in != Flicks::ZERO {
+                    return Err("Adjustment layers have no speed or source position".into());
+                }
+                (String::new(), true, false)
+            }
+            ClipKind::Media => {
+                let media = self
+                    .project
+                    .media(&spec.media)
+                    .ok_or_else(|| format!("No media {} in the project", spec.media))?
+                    .clone();
+                let video = spec.video.unwrap_or(media.has_video);
+                let audio = spec.audio.unwrap_or(media.has_audio);
+                if video && !media.has_video {
+                    return Err(format!("{} has no picture", media.name));
+                }
+                if audio && !media.has_audio {
+                    return Err(format!("{} has no sound", media.name));
+                }
+                if !video && !audio {
+                    return Err("A clip needs its picture, its sound or both".into());
+                }
+                if media.is_still() && speed != Speed::NORMAL {
+                    return Err("Stills have no speed".into());
+                }
+                (media.id, video, audio)
+            }
+        };
         let mut clip = Clip {
             id: ClipId(self.alloc()),
-            media: media.id,
+            kind: spec.kind,
+            media,
             start,
             duration: self.snap(spec.duration)?,
             source_in: spec.source_in,
@@ -531,6 +832,28 @@ impl Edit {
         if let Some(properties) = &spec.properties {
             apply_properties(&mut clip, properties)?;
         }
+        // Copied effects get new ids, and their keyframes follow them.
+        if spec.effects.len() > MAX_EFFECTS {
+            return Err(format!("A clip has at most {MAX_EFFECTS} effects"));
+        }
+        let mut renamed: BTreeMap<EffectId, EffectId> = BTreeMap::new();
+        for effect in &spec.effects {
+            let id = EffectId(self.alloc());
+            if let Some(old) = effect.id {
+                renamed.insert(old, id);
+            }
+            clip.effects.push(effect.build(id)?);
+        }
+        if let Some(name) = spec
+            .keyframes
+            .keys()
+            .find(|name| property_effect(name).is_some_and(|old| !renamed.contains_key(&old)))
+        {
+            return Err(format!("{name} animates an effect the clip lacks"));
+        }
+        clip.keyframes = rename_effects(&spec.keyframes, &renamed);
+        check_effects(&clip)?;
+        check_keyframes(&clip)?;
         self.check_clip(&clip)?;
         Ok(clip)
     }
@@ -685,6 +1008,7 @@ impl Edit {
                     if !still {
                         changed.source_in += changed.speed.source_span(delta);
                     }
+                    shift_keys(changed, -delta);
                 }
                 (Edge::Start, false) => {
                     let start = clip.start + delta;
@@ -702,6 +1026,7 @@ impl Edit {
                     if !still {
                         changed.source_in += changed.speed.source_span(delta);
                     }
+                    shift_keys(changed, -delta);
                     self.shift_after(index, target, clip.end(), -delta)?;
                 }
                 (Edge::End, true) => {
@@ -911,7 +1236,11 @@ impl Edit {
     }
 
     fn slip(&mut self, id: ClipId, delta: Flicks) -> Result<(), String> {
-        if self.is_still(&self.find(id)?.1.media) {
+        let (_, target) = self.find(id)?;
+        if target.is_adjustment() {
+            return Err("Adjustment layers have nothing to slip".into());
+        }
+        if self.is_still(&target.media) {
             return Err("Stills have nothing to slip".into());
         }
         let delta = self.snap(delta)?;
@@ -1047,6 +1376,12 @@ impl Edit {
             Some(link) => link,
             None => LinkId(self.alloc()),
         };
+        // Volume keyframes go with the sound; the rest stay with the picture.
+        let (sound_keys, picture_keys): (Keyframes, Keyframes) = clip
+            .keyframes
+            .clone()
+            .into_iter()
+            .partition(|(name, _)| name == "volumeDb");
         let audio = Clip {
             id: audio_id,
             video: false,
@@ -1056,7 +1391,7 @@ impl Edit {
             crop: Crop::default(),
             opacity: 1.0,
             effects: Vec::new(),
-            keyframes: BTreeMap::new(),
+            keyframes: sound_keys,
             ..clip.clone()
         };
         // A new track below the clip moved the clip's track up by one.
@@ -1064,6 +1399,7 @@ impl Edit {
         let video = self.clip_mut(video_index, id);
         video.audio = false;
         video.link = Some(link);
+        video.keyframes = picture_keys;
         self.track_mut(to).insert_sorted(audio);
         self.check_track(to)
     }
@@ -1072,7 +1408,11 @@ impl Edit {
         if Speed::new(speed.num, speed.den) != Some(speed) {
             return Err("Speed must be a reduced fraction from 0.1× to 100×".into());
         }
-        if self.is_still(&self.find(id)?.1.media) {
+        let (_, target) = self.find(id)?;
+        if target.is_adjustment() {
+            return Err("Adjustment layers have no speed".into());
+        }
+        if self.is_still(&target.media) {
             return Err("Stills have no speed".into());
         }
         for target in self.with_partners(&[id])? {
@@ -1091,6 +1431,95 @@ impl Edit {
             self.check_clip_id(target)?;
             self.check_track(index)?;
         }
+        Ok(())
+    }
+
+    fn add_effect(
+        &mut self,
+        id: ClipId,
+        spec: &EffectSpec,
+        index: Option<usize>,
+    ) -> Result<(), String> {
+        let (track, mut clip) = self.editable(id)?;
+        if !clip.video {
+            return Err(format!("Clip {id} has no picture for effects to change"));
+        }
+        if clip.effects.len() >= MAX_EFFECTS {
+            return Err(format!("A clip has at most {MAX_EFFECTS} effects"));
+        }
+        let index = index.unwrap_or(clip.effects.len());
+        if index > clip.effects.len() {
+            return Err(format!("There is no effect position {}", index + 1));
+        }
+        let effect = spec.build(EffectId(self.alloc()))?;
+        self.created.push(effect.id.0);
+        clip.effects.insert(index, effect);
+        *self.clip_mut(track, id) = clip;
+        Ok(())
+    }
+
+    fn add_transition(
+        &mut self,
+        track: TrackId,
+        from: Option<ClipId>,
+        to: Option<ClipId>,
+        spec: &TransitionSpec,
+    ) -> Result<(), String> {
+        let index = self.track_index(track)?;
+        self.unlocked(index)?;
+        let name = self.track_name(index);
+        let on_track = |id: Option<ClipId>| -> Result<Option<Clip>, String> {
+            id.map(|id| {
+                self.project.tracks[index]
+                    .clip(id)
+                    .cloned()
+                    .ok_or_else(|| format!("Clip {id} is not on {name}"))
+            })
+            .transpose()
+        };
+        let (before, after) = (on_track(from)?, on_track(to)?);
+        match (&before, &after) {
+            (None, None) => return Err("A transition needs a clip".into()),
+            (Some(a), Some(b)) if a.end() != b.start => {
+                return Err(format!("Clips {} and {} do not touch", a.id, b.id))
+            }
+            _ => {}
+        }
+        for clip in before.iter().chain(&after) {
+            if clip.is_adjustment() {
+                return Err("Adjustment layers fade with their opacity, not transitions".into());
+            }
+            if !clip.video {
+                return Err(format!("Clip {} has no picture to transition", clip.id));
+            }
+        }
+        let duration = self.snap(spec.duration)?;
+        if duration < self.frame {
+            return Err("A transition lasts at least one frame".into());
+        }
+        let alignment = match (from, to) {
+            (Some(_), Some(_)) => spec.alignment.unwrap_or_default(),
+            (None, _) => Alignment::Start,
+            (_, None) => Alignment::End,
+        };
+        let transition = Transition {
+            id: TransitionId(self.alloc()),
+            kind: spec.kind.clone(),
+            pack: spec.pack.clone(),
+            version: spec.version,
+            from,
+            to,
+            duration,
+            alignment,
+            params: spec.params.clone(),
+        };
+        transition.check()?;
+        self.created.push(transition.id.0);
+        self.required = Some(transition.id);
+        // A transition already on either edge is replaced.
+        let transitions = &mut self.track_mut(index).transitions;
+        transitions.retain(|t| !(from.is_some() && t.from == from || to.is_some() && t.to == to));
+        transitions.push(transition);
         Ok(())
     }
 
@@ -1168,6 +1597,116 @@ impl Edit {
         Ok(())
     }
 
+    /// Keeps every transition where its clips are and within the room they leave.
+    ///
+    /// A transition goes to the track that holds its clips, and is dropped when
+    /// they are gone, apart, or no longer touch. One at a free edge that another
+    /// clip now touches becomes a transition between the two. Transitions that no
+    /// longer fit get shorter, earlier ones first keeping their length, and are
+    /// dropped when not even a frame fits.
+    fn normalize_transitions(&mut self) {
+        if self.project.tracks.iter().all(|t| t.transitions.is_empty()) {
+            return;
+        }
+        let frame = self.frame;
+        let mut placed: BTreeMap<usize, Vec<Transition>> = BTreeMap::new();
+        for transition in self
+            .project
+            .tracks
+            .iter()
+            .flat_map(|t| t.transitions.iter())
+        {
+            let mut transition = transition.clone();
+            let homes: Vec<Option<usize>> = [transition.from, transition.to]
+                .into_iter()
+                .flatten()
+                .map(|id| self.project.clip(id).map(|(index, _)| index))
+                .collect();
+            let Some(Some(index)) = homes.first().copied() else {
+                continue;
+            };
+            if homes.iter().any(|&home| home != Some(index)) {
+                continue;
+            }
+            let track = &self.project.tracks[index];
+            let clip = |id: ClipId| track.clip(id).expect("clip on the track");
+            let usable = |c: &Clip| c.video && !c.is_adjustment();
+            if [transition.from, transition.to]
+                .into_iter()
+                .flatten()
+                .any(|id| !usable(clip(id)))
+            {
+                continue;
+            }
+            match (transition.from, transition.to) {
+                (Some(a), Some(b)) => {
+                    if clip(a).end() != clip(b).start {
+                        continue;
+                    }
+                }
+                (None, Some(b)) => {
+                    let start = clip(b).start;
+                    if let Some(before) = track.clips.iter().find(|c| c.end() == start) {
+                        if !usable(before) {
+                            continue;
+                        }
+                        transition.from = Some(before.id);
+                    }
+                }
+                (Some(a), None) => {
+                    let end = clip(a).end();
+                    if let Some(after) = track.clips.iter().find(|c| c.start == end) {
+                        if !usable(after) {
+                            continue;
+                        }
+                        transition.to = Some(after.id);
+                    }
+                }
+                (None, None) => continue,
+            }
+            placed.entry(index).or_default().push(transition);
+        }
+        for index in 0..self.project.tracks.len() {
+            let mut candidates = placed.remove(&index).unwrap_or_default();
+            // One transition per edge: the oldest stays.
+            candidates.sort_by_key(|t| t.id);
+            let mut kept: Vec<Transition> = Vec::new();
+            for t in candidates {
+                let taken = kept.iter().any(|k| {
+                    (t.from.is_some() && k.from == t.from) || (t.to.is_some() && k.to == t.to)
+                });
+                if !taken {
+                    kept.push(t);
+                }
+            }
+            let track = &self.project.tracks[index];
+            kept.sort_by_key(|t| (track.cut(t), t.id));
+            // How much of each clip's start the transition before it takes.
+            let mut taken: BTreeMap<ClipId, Flicks> = BTreeMap::new();
+            let mut fitted = Vec::new();
+            for mut t in kept {
+                let cut = track.cut(&t).expect("placed transitions have a cut");
+                let room_before = t.from.map_or(Flicks::ZERO, |a| {
+                    let clip = track.clip(a).expect("clip");
+                    clip.duration - taken.get(&a).copied().unwrap_or(Flicks::ZERO)
+                });
+                let room_after =
+                    t.to.map_or(Flicks::ZERO, |b| track.clip(b).expect("clip").duration);
+                t.duration = fit(&t, room_before, room_after, frame);
+                if t.duration < frame {
+                    continue;
+                }
+                if let Some(b) = t.to {
+                    taken.insert(b, t.window(cut, frame).1 - cut);
+                }
+                fitted.push(t);
+            }
+            if fitted != track.transitions {
+                self.track_mut(index).transitions = fitted;
+            }
+        }
+    }
+
     fn sort_markers(&mut self) {
         self.project.markers.sort_by_key(|m| (m.time, m.id));
     }
@@ -1202,6 +1741,95 @@ impl Edit {
             }
         }
     }
+}
+
+/// The longest duration up to `t`'s own that leaves at most `before` of it
+/// before the cut and `after` after.
+fn fit(t: &Transition, before: Flicks, after: Flicks, frame: Flicks) -> Flicks {
+    let (start, end) = t.window(Flicks::ZERO, frame);
+    if -start <= before && end <= after {
+        return t.duration;
+    }
+    let (b, a) = (before.0 / frame.0, after.0 / frame.0);
+    let frames = match t.alignment {
+        Alignment::Start => a,
+        Alignment::End => b,
+        // A centred transition of n frames puts n / 2 (rounded down) before the cut.
+        Alignment::Center => (2 * b + 1).min(2 * a),
+    };
+    Flicks(frames.min(t.duration.0 / frame.0).max(0) * frame.0)
+}
+
+/// `keyframes` with the effect settings renamed from each old effect id to its new one.
+fn rename_effects(keyframes: &Keyframes, renamed: &BTreeMap<EffectId, EffectId>) -> Keyframes {
+    keyframes
+        .iter()
+        .map(|(name, keys)| {
+            let name = match property_effect(name).and_then(|old| Some((old, renamed.get(&old)?))) {
+                Some((old, new)) => {
+                    name.replacen(&format!("effects.{old}."), &format!("effects.{new}."), 1)
+                }
+                None => name.clone(),
+            };
+            (name, keys.clone())
+        })
+        .collect()
+}
+
+fn effect_position(clip: &Clip, id: EffectId) -> Result<usize, String> {
+    clip.effects
+        .iter()
+        .position(|effect| effect.id == id)
+        .ok_or_else(|| format!("Clip {} has no effect {id}", clip.id))
+}
+
+/// Keyframes count from the clip's start: when the start moves over the same
+/// content, they move by `delta` to stay with it.
+fn shift_keys(clip: &mut Clip, delta: Flicks) {
+    if delta == Flicks::ZERO {
+        return;
+    }
+    for keys in clip.keyframes.values_mut() {
+        for key in keys.iter_mut() {
+            key.time += delta;
+        }
+    }
+}
+
+/// Gives `property` the value its keyframes have at `at`, as its static value.
+fn freeze(clip: &mut Clip, property: &str, at: Flicks) -> Result<(), String> {
+    let (which, param) =
+        Property::parse(property).ok_or_else(|| format!("{property} is not a clip property"))?;
+    let transform = clip.transform_at(at);
+    let crop = clip.crop_at(at);
+    match which {
+        Property::X => clip.transform.x = transform.x,
+        Property::Y => clip.transform.y = transform.y,
+        Property::ScaleX => clip.transform.scale_x = transform.scale_x,
+        Property::ScaleY => clip.transform.scale_y = transform.scale_y,
+        Property::Rotation => clip.transform.rotation = transform.rotation,
+        Property::AnchorX => clip.transform.anchor_x = transform.anchor_x,
+        Property::AnchorY => clip.transform.anchor_y = transform.anchor_y,
+        Property::Opacity => clip.opacity = clip.opacity_at(at),
+        Property::CropLeft => clip.crop.left = crop.left,
+        Property::CropTop => clip.crop.top = crop.top,
+        Property::CropRight => clip.crop.right = crop.right,
+        Property::CropBottom => clip.crop.bottom = crop.bottom,
+        Property::VolumeDb => clip.volume_db = clip.volume_db_at(at),
+        Property::Effect(id) => {
+            let value = clip
+                .keyframes
+                .get(property)
+                .and_then(|keys| value_at(keys, at));
+            if let (Some(value), Some(param)) = (value, param) {
+                let position = effect_position(clip, id)?;
+                clip.effects[position]
+                    .params
+                    .insert(param.to_string(), value.param());
+            }
+        }
+    }
+    check_crop(&clip.crop)
 }
 
 fn check_track_name(name: &str) -> Result<String, String> {

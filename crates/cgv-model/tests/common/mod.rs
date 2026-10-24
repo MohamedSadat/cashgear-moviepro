@@ -77,6 +77,7 @@ pub fn spec(media: &str, source_in: i64, frames: i64) -> ClipSpec {
         audio: None,
         speed: None,
         properties: None,
+        ..Default::default()
     }
 }
 
@@ -211,6 +212,13 @@ fn some_clips(project: &Project, rng: &mut Rng) -> Vec<ClipId> {
 
 fn random_spec(project: &Project, rng: &mut Rng) -> ClipSpec {
     let frame = frame(project);
+    if rng.percent(4) {
+        return ClipSpec {
+            kind: ClipKind::Adjustment,
+            duration: Flicks(rng.range(1, 90) * frame),
+            ..Default::default()
+        };
+    }
     let ids: Vec<&str> = project.media.iter().map(|m| m.id.as_str()).collect();
     let id = rng.pick(&ids).unwrap_or("none");
     let media = project.media(id);
@@ -227,6 +235,28 @@ fn random_spec(project: &Project, rng: &mut Rng) -> ClipSpec {
         0 => (Some(false), Some(true)),
         1 => (Some(true), Some(false)),
         _ => (None, None),
+    };
+    // Pasted copies bring their effects and keyframes along.
+    let (effects, keyframes) = if rng.percent(5) && video != Some(false) {
+        let effect = EffectSpec {
+            id: Some(EffectId(7)),
+            kind: "vignette".into(),
+            pack: BUILTIN_PACK.into(),
+            version: 1,
+            enabled: true,
+            params: [("amount".to_string(), ParamValue::Number(0.4))].into(),
+        };
+        let keys = vec![Keyframe {
+            time: Flicks::ZERO,
+            value: KeyValue::Number(0.2),
+            interpolation: Interpolation::EaseOut,
+        }];
+        (
+            vec![effect],
+            [("effects.7.amount".to_string(), keys)].into(),
+        )
+    } else {
+        (Vec::new(), Keyframes::new())
     };
     // Pasted copies bring their speed and properties along.
     let speed = rng
@@ -245,6 +275,201 @@ fn random_spec(project: &Project, rng: &mut Rng) -> ClipSpec {
         audio,
         speed,
         properties,
+        effects,
+        keyframes,
+        ..Default::default()
+    }
+}
+
+/// Every effect in the project, with its clip.
+fn effects(project: &Project) -> Vec<(ClipId, EffectId)> {
+    project
+        .clips()
+        .flat_map(|c| c.effects.iter().map(move |e| (c.id, e.id)))
+        .collect()
+}
+
+/// A property of `clip` to animate: usually one it has, sometimes one it lacks.
+fn property(project: &Project, clip: ClipId, rng: &mut Rng) -> String {
+    let mut names: Vec<String> = [
+        "opacity",
+        "transform.x",
+        "transform.scaleX",
+        "transform.rotation",
+        "crop.left",
+        "volumeDb",
+    ]
+    .iter()
+    .map(|name| name.to_string())
+    .collect();
+    if let Some((_, c)) = project.clip(clip) {
+        for effect in &c.effects {
+            names.push(effect_property(effect.id, "amount"));
+            names.push(effect_property(effect.id, "tint"));
+        }
+    }
+    if rng.percent(3) {
+        return "transform.bogus".into();
+    }
+    names[rng.below(names.len() as u64) as usize].clone()
+}
+
+fn key_value(name: &str, rng: &mut Rng) -> KeyValue {
+    if name.ends_with(".tint") {
+        let channel = rng.below(11) as f64 / 10.0;
+        return KeyValue::Color(Color {
+            r: channel,
+            g: 0.5,
+            b: 1.0 - channel,
+            a: 1.0,
+        });
+    }
+    let value = match name {
+        "opacity" => rng.below(11) as f64 / 10.0,
+        "transform.scaleX" => rng.range(1, 300) as f64 / 100.0,
+        "crop.left" => rng.range(0, 60) as f64 / 100.0,
+        "volumeDb" => rng.range(-40, 10) as f64,
+        _ => rng.range(-400, 400) as f64 / 4.0,
+    };
+    // Sometimes out of range: refused.
+    KeyValue::Number(if rng.percent(4) { value + 1e7 } else { value })
+}
+
+fn interpolation(rng: &mut Rng) -> Interpolation {
+    match rng.below(6) {
+        0 => Interpolation::Hold,
+        1 => Interpolation::EaseIn,
+        2 => Interpolation::EaseOut,
+        3 => Interpolation::EaseInOut,
+        4 => Interpolation::Bezier {
+            x1: 0.3,
+            y1: 1.4,
+            x2: 0.6,
+            y2: 0.9,
+        },
+        _ => Interpolation::Linear,
+    }
+}
+
+/// Keyframe times of `property` on `clip`, plus a time that has none.
+fn key_times(project: &Project, clip: ClipId, property: &str, rng: &mut Rng) -> Vec<Flicks> {
+    let mut times: Vec<Flicks> = project
+        .clip(clip)
+        .and_then(|(_, c)| c.keyframes.get(property))
+        .map(|keys| keys.iter().map(|k| k.time).collect())
+        .unwrap_or_default();
+    times.retain(|_| rng.percent(60));
+    if rng.percent(20) {
+        times.push(Flicks(rng.range(0, 90) * FRAME));
+    }
+    times
+}
+
+fn effect_spec(rng: &mut Rng) -> EffectSpec {
+    let kind = [
+        "gaussian-blur",
+        "vignette",
+        "brightness-contrast",
+        "Bad Kind",
+    ][rng.below(4) as usize];
+    EffectSpec {
+        id: None,
+        kind: kind.into(),
+        pack: BUILTIN_PACK.into(),
+        version: 1,
+        enabled: true,
+        params: [(
+            "amount".to_string(),
+            ParamValue::Number(rng.below(10) as f64 / 10.0),
+        )]
+        .into(),
+    }
+}
+
+fn effect_params(project: &Project, rng: &mut Rng) -> Params {
+    let luts: Vec<LutId> = project.luts.iter().map(|l| l.id).collect();
+    match rng.below(4) {
+        0 => [(
+            "amount".to_string(),
+            ParamValue::Number(rng.below(20) as f64 / 10.0),
+        )]
+        .into(),
+        1 => [("on".to_string(), ParamValue::Bool(rng.percent(50)))].into(),
+        2 => [(
+            "lut".to_string(),
+            ParamValue::Text(lut_ref(rng.pick(&luts).unwrap_or(LutId(999)))),
+        )]
+        .into(),
+        _ => [(
+            "tint".to_string(),
+            ParamValue::Color(Color {
+                r: 1.0,
+                g: rng.below(3) as f64 / 2.0,
+                b: 0.0,
+                a: 1.0,
+            }),
+        )]
+        .into(),
+    }
+}
+
+/// A transition aimed at a cut or a free edge of a clip on its track.
+fn add_transition(project: &Project, rng: &mut Rng) -> Command {
+    let tracks: Vec<&Track> = project.tracks.iter().map(|t| t.as_ref()).collect();
+    let track = tracks[rng.below(tracks.len() as u64) as usize];
+    let clip = rng.pick(&track.clips.iter().map(|c| c.id).collect::<Vec<_>>());
+    let (from, to) = match clip.and_then(|id| track.clip(id)) {
+        Some(c) => {
+            let next = track
+                .clips
+                .iter()
+                .find(|n| n.start == c.end())
+                .map(|n| n.id);
+            let previous = track
+                .clips
+                .iter()
+                .find(|p| p.end() == c.start)
+                .map(|p| p.id);
+            match rng.below(4) {
+                0 => (Some(c.id), next),
+                1 => (previous, Some(c.id)),
+                2 => (Some(c.id), None),
+                _ => (None, Some(c.id)),
+            }
+        }
+        None => (None, None),
+    };
+    let alignment = [
+        None,
+        Some(Alignment::Start),
+        Some(Alignment::Center),
+        Some(Alignment::End),
+    ][rng.below(4) as usize];
+    Command::AddTransition {
+        track: track.id,
+        from,
+        to,
+        transition: TransitionSpec {
+            kind: ["cross-dissolve", "wipe"][rng.below(2) as usize].into(),
+            pack: BUILTIN_PACK.into(),
+            version: 1,
+            duration: Flicks(rng.range(0, 45) * FRAME),
+            alignment,
+            params: Params::new(),
+        },
+    }
+}
+
+/// A 2³ LUT, or a broken one.
+fn lut_spec(rng: &mut Rng) -> LutSpec {
+    let bytes: Vec<u8> = (0..48).map(|i| (i * 5) as u8).collect();
+    LutSpec {
+        name: format!("Look {}", rng.below(9)),
+        shape: LutShape::ThreeD,
+        size: if rng.percent(10) { 3 } else { 2 },
+        domain_min: [0.0; 3],
+        domain_max: [1.0; 3],
+        data: base64::encode(&bytes),
     }
 }
 
@@ -260,7 +485,108 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
     } else {
         Edge::End
     };
-    match rng.below(100) {
+    let effect = rng.pick(&effects(project));
+    let (effect_clip, effect_id) = effect.unwrap_or((any_clip, EffectId(0)));
+    let transitions: Vec<TransitionId> = project
+        .tracks
+        .iter()
+        .flat_map(|t| t.transitions.iter().map(|t| t.id))
+        .collect();
+    let transition = rng.pick(&transitions).unwrap_or(TransitionId(0));
+    match rng.below(122) {
+        100..=102 => Command::AddEffect {
+            clip: any_clip,
+            effect: effect_spec(rng),
+            index: rng.percent(20).then(|| rng.below(3) as usize),
+        },
+        103 => Command::RemoveEffect {
+            clip: effect_clip,
+            effect: effect_id,
+        },
+        104 => Command::MoveEffect {
+            clip: effect_clip,
+            effect: effect_id,
+            index: rng.below(3) as usize,
+        },
+        105 => Command::SetEffectEnabled {
+            clip: effect_clip,
+            effect: effect_id,
+            enabled: rng.percent(50),
+        },
+        106 => Command::SetEffectParams {
+            clip: effect_clip,
+            effect: effect_id,
+            params: effect_params(project, rng),
+        },
+        107 => Command::ResetEffect {
+            clip: effect_clip,
+            effect: effect_id,
+            params: Params::new(),
+        },
+        108..=110 => {
+            let property = property(project, any_clip, rng);
+            Command::SetKeyframe {
+                clip: any_clip,
+                value: key_value(&property, rng),
+                property,
+                time: Flicks(rng.range(-10, 120) * FRAME + if rng.percent(10) { 7 } else { 0 }),
+                interpolation: rng.percent(50).then(|| interpolation(rng)),
+            }
+        }
+        111 => {
+            let property = property(project, any_clip, rng);
+            Command::RemoveKeyframes {
+                clip: any_clip,
+                times: key_times(project, any_clip, &property, rng),
+                property,
+            }
+        }
+        112 => {
+            let property = property(project, any_clip, rng);
+            Command::MoveKeyframes {
+                clip: any_clip,
+                times: key_times(project, any_clip, &property, rng),
+                properties: if rng.percent(50) {
+                    vec![property]
+                } else {
+                    Vec::new()
+                },
+                delta: delta(project, rng),
+            }
+        }
+        113 => {
+            let property = property(project, any_clip, rng);
+            Command::SetInterpolation {
+                clip: any_clip,
+                times: key_times(project, any_clip, &property, rng),
+                property,
+                interpolation: interpolation(rng),
+            }
+        }
+        114 => Command::ClearKeyframes {
+            clip: any_clip,
+            property: property(project, any_clip, rng),
+            at: rng.percent(70).then(|| Flicks(rng.range(0, 60) * FRAME)),
+        },
+        115..=117 => add_transition(project, rng),
+        118 => Command::SetTransition {
+            transition,
+            duration: rng.percent(60).then(|| Flicks(rng.range(0, 60) * FRAME)),
+            alignment: rng.percent(30).then(|| {
+                [Alignment::Start, Alignment::Center, Alignment::End][rng.below(3) as usize]
+            }),
+            params: rng
+                .percent(30)
+                .then(|| [("softness".to_string(), ParamValue::Number(0.2))].into()),
+        },
+        119 => Command::RemoveTransition { transition },
+        120 => Command::AddLut { lut: lut_spec(rng) },
+        121 => {
+            let luts: Vec<LutId> = project.luts.iter().map(|l| l.id).collect();
+            Command::RemoveLut {
+                lut: rng.pick(&luts).unwrap_or(LutId(0)),
+            }
+        }
         0..=11 => Command::Insert {
             track,
             at: time(project, rng),

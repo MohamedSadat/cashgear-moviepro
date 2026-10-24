@@ -219,6 +219,7 @@ mod tests {
                     audio: None,
                     speed: None,
                     properties: None,
+                    ..Default::default()
                 },
             })
             .unwrap();

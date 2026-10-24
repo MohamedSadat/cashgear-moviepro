@@ -569,7 +569,7 @@ fn split_shifts_keyframes_so_the_animation_stays_put() {
         "opacity".into(),
         vec![Keyframe {
             time: f(30),
-            value: 0.5,
+            value: KeyValue::Number(0.5),
             interpolation: Interpolation::Linear,
         }],
     );

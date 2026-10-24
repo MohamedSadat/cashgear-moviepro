@@ -5,6 +5,9 @@ use std::sync::Arc;
 use cgv_time::{Flicks, FrameRate};
 use serde::{Deserialize, Serialize};
 
+use crate::animation::Keyframes;
+use crate::effects::{Effect, Lut, LutInfo, Transition};
+
 /// The latest time the model accepts: 2^53 − 1 flicks (about 147 days), so every
 /// time stays an exact integer in JavaScript.
 pub const MAX_TIME: Flicks = Flicks((1 << 53) - 1);
@@ -31,6 +34,9 @@ id_type!(
     /// Clips sharing a link id are selected, moved and trimmed together.
     LinkId
 );
+id_type!(EffectId);
+id_type!(TransitionId);
+id_type!(LutId);
 
 /// A project: settings, the media it uses, its tracks and markers.
 ///
@@ -52,8 +58,11 @@ pub struct Project {
     pub magnetic: bool,
     /// Timeline markers, by time.
     pub markers: Vec<Marker>,
-    /// The next track, clip, marker or link id. Counting within the project keeps
-    /// replays and undo exact.
+    /// Colour lookup tables effects use, kept in the project so it travels whole.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub luts: Vec<Arc<Lut>>,
+    /// The next track, clip, marker, link, effect, transition or LUT id. Counting
+    /// within the project keeps replays and undo exact.
     pub next_id: u64,
 }
 
@@ -70,6 +79,7 @@ impl Project {
             main_track: TrackId(0),
             magnetic: true,
             markers: Vec::new(),
+            luts: Vec::new(),
             next_id: 1,
         };
         for _ in 0..2 {
@@ -119,6 +129,13 @@ impl Project {
         })
     }
 
+    pub fn lut(&self, id: LutId) -> Option<&Lut> {
+        self.luts
+            .iter()
+            .find(|lut| lut.id == id)
+            .map(|lut| lut.as_ref())
+    }
+
     pub fn clips(&self) -> impl Iterator<Item = &Clip> {
         self.tracks.iter().flat_map(|track| track.clips.iter())
     }
@@ -130,6 +147,40 @@ impl Project {
             .filter_map(|track| track.end())
             .max()
             .unwrap_or(Flicks::ZERO)
+    }
+}
+
+/// A project as the UI sees it: the same JSON as the file, with LUTs described
+/// rather than included, so every edit's snapshot stays small.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectView<'a> {
+    pub id: &'a str,
+    pub name: &'a str,
+    pub settings: &'a ProjectSettings,
+    pub media: &'a [MediaRef],
+    pub tracks: &'a [Arc<Track>],
+    pub main_track: TrackId,
+    pub magnetic: bool,
+    pub markers: &'a [Marker],
+    pub luts: Vec<LutInfo<'a>>,
+    pub next_id: u64,
+}
+
+impl Project {
+    pub fn view(&self) -> ProjectView<'_> {
+        ProjectView {
+            id: &self.id,
+            name: &self.name,
+            settings: &self.settings,
+            media: &self.media,
+            tracks: &self.tracks,
+            main_track: self.main_track,
+            magnetic: self.magnetic,
+            markers: &self.markers,
+            luts: self.luts.iter().map(|lut| lut.info()).collect(),
+            next_id: self.next_id,
+        }
     }
 }
 
@@ -334,6 +385,9 @@ pub struct Track {
     pub hidden: bool,
     /// By start time; never overlapping.
     pub clips: Vec<Clip>,
+    /// Transitions between and at the edges of this track's clips, by time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transitions: Vec<Transition>,
 }
 
 impl Track {
@@ -345,7 +399,30 @@ impl Track {
             muted: false,
             hidden: false,
             clips: Vec::new(),
+            transitions: Vec::new(),
         }
+    }
+
+    pub fn clip(&self, id: ClipId) -> Option<&Clip> {
+        self.clips.iter().find(|clip| clip.id == id)
+    }
+
+    /// The cut transition `transition` sits on: the end of its first clip or the
+    /// start of its second.
+    pub fn cut(&self, transition: &Transition) -> Option<Flicks> {
+        match (transition.from, transition.to) {
+            (Some(from), _) => self.clip(from).map(Clip::end),
+            (None, Some(to)) => self.clip(to).map(|clip| clip.start),
+            (None, None) => None,
+        }
+    }
+
+    /// The transition that ends at clip `id`'s start or begins at its end.
+    pub fn transition_at(&self, id: ClipId, edge: crate::Edge) -> Option<&Transition> {
+        self.transitions.iter().find(|t| match edge {
+            crate::Edge::Start => t.to == Some(id),
+            crate::Edge::End => t.from == Some(id),
+        })
     }
 
     pub fn end(&self) -> Option<Flicks> {
@@ -464,39 +541,31 @@ pub struct Crop {
     pub bottom: f64,
 }
 
-/// An effect on a clip. Phase 6 defines effect kinds and their parameters.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// What a clip shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Effect {
-    pub kind: String,
-    pub enabled: bool,
-    pub params: BTreeMap<String, f64>,
+pub enum ClipKind {
+    /// A piece of its media file.
+    #[default]
+    Media,
+    /// Nothing of its own: its effects apply to everything on the tracks below it.
+    Adjustment,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum Interpolation {
-    Linear,
-    Hold,
-    EaseIn,
-    EaseOut,
-    Bezier { x1: f64, y1: f64, x2: f64, y2: f64 },
+impl ClipKind {
+    fn is_media(&self) -> bool {
+        *self == ClipKind::Media
+    }
 }
 
-/// A property value at a time measured from the clip's start. Phase 6 animates these.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Keyframe {
-    pub time: Flicks,
-    pub value: f64,
-    pub interpolation: Interpolation,
-}
-
-/// A piece of media placed on a track.
+/// A piece of media, or an adjustment layer, placed on a track.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Clip {
     pub id: ClipId,
+    #[serde(default, skip_serializing_if = "ClipKind::is_media")]
+    pub kind: ClipKind,
+    /// The media file; empty for an adjustment layer.
     pub media: String,
     /// Timeline position of the first frame.
     pub start: Flicks,
@@ -516,14 +585,19 @@ pub struct Clip {
     pub opacity: f64,
     /// Gain in decibels; 0 leaves the sound as recorded.
     pub volume_db: f64,
+    /// Video effects, applied in order to the picture.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<Effect>,
-    /// Animated properties by name.
+    /// Animated properties by name ([`crate::Property`]).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub keyframes: BTreeMap<String, Vec<Keyframe>>,
+    pub keyframes: Keyframes,
 }
 
 impl Clip {
+    pub fn is_adjustment(&self) -> bool {
+        self.kind == ClipKind::Adjustment
+    }
+
     pub fn end(&self) -> Flicks {
         self.start + self.duration
     }

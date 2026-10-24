@@ -1,8 +1,11 @@
 use cgv_time::Flicks;
 use serde::{Deserialize, Serialize};
 
+use crate::animation::{Interpolation, KeyValue, Keyframes};
+use crate::effects::{Alignment, EffectSpec, LutSpec, Params, TransitionSpec};
 use crate::project::{
-    ClipId, Crop, MarkerColor, MarkerId, MediaRef, ProjectSettings, Speed, TrackId, Transform,
+    ClipId, ClipKind, Crop, EffectId, LutId, MarkerColor, MarkerId, MediaRef, ProjectSettings,
+    Speed, TrackId, Transform, TransitionId,
 };
 
 /// Which edge of a clip an edit acts on.
@@ -14,9 +17,13 @@ pub enum Edge {
 }
 
 /// What to place for insert, overwrite and append.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipSpec {
+    /// An adjustment layer has no media (`media` is empty).
+    #[serde(default)]
+    pub kind: ClipKind,
+    #[serde(default)]
     pub media: String,
     /// Source time of the first frame. Always zero for still images.
     #[serde(default)]
@@ -35,6 +42,12 @@ pub struct ClipSpec {
     /// Picture and sound settings of the new clip, as when pasting a copy.
     #[serde(default)]
     pub properties: Option<ClipProperties>,
+    /// Effects of the new clip, as when pasting a copy.
+    #[serde(default)]
+    pub effects: Vec<EffectSpec>,
+    /// Keyframes of the new clip. Effect settings are named by the ids in `effects`.
+    #[serde(default)]
+    pub keyframes: Keyframes,
 }
 
 /// Transform values to change; missing ones stay as they are, so edits of
@@ -291,6 +304,116 @@ pub enum Command {
         properties: ClipProperties,
     },
 
+    /// Adds an effect to a clip's picture at `index` in its list (the end by default).
+    AddEffect {
+        clip: ClipId,
+        effect: EffectSpec,
+        #[serde(default)]
+        index: Option<usize>,
+    },
+    /// Removes an effect and its keyframes.
+    RemoveEffect {
+        clip: ClipId,
+        effect: EffectId,
+    },
+    /// Moves an effect to `index` in the clip's list.
+    MoveEffect {
+        clip: ClipId,
+        effect: EffectId,
+        index: usize,
+    },
+    SetEffectEnabled {
+        clip: ClipId,
+        effect: EffectId,
+        enabled: bool,
+    },
+    /// Changes the named settings; others stay as they are.
+    SetEffectParams {
+        clip: ClipId,
+        effect: EffectId,
+        params: Params,
+    },
+    /// Replaces every setting with `params` (the definition's defaults) and
+    /// removes the effect's keyframes.
+    ResetEffect {
+        clip: ClipId,
+        effect: EffectId,
+        #[serde(default)]
+        params: Params,
+    },
+
+    /// Adds or replaces the keyframe of `property` at `time` (from the clip's start).
+    SetKeyframe {
+        clip: ClipId,
+        property: String,
+        time: Flicks,
+        value: KeyValue,
+        /// Defaults to the replaced keyframe's, or linear.
+        #[serde(default)]
+        interpolation: Option<Interpolation>,
+    },
+    RemoveKeyframes {
+        clip: ClipId,
+        property: String,
+        times: Vec<Flicks>,
+    },
+    /// Moves the keyframes at `times` by `delta`, for each of `properties` (every
+    /// animated property when empty). A keyframe moved onto another replaces it.
+    MoveKeyframes {
+        clip: ClipId,
+        #[serde(default)]
+        properties: Vec<String>,
+        times: Vec<Flicks>,
+        delta: Flicks,
+    },
+    SetInterpolation {
+        clip: ClipId,
+        property: String,
+        times: Vec<Flicks>,
+        interpolation: Interpolation,
+    },
+    /// Removes every keyframe of `property`. With `at`, the property keeps the
+    /// value it had then.
+    ClearKeyframes {
+        clip: ClipId,
+        property: String,
+        #[serde(default)]
+        at: Option<Flicks>,
+    },
+
+    /// Adds a transition on `track` between `from` and `to`, which touch, or at the
+    /// free start of `to` or free end of `from`. One already at that cut is replaced.
+    AddTransition {
+        track: TrackId,
+        #[serde(default)]
+        from: Option<ClipId>,
+        #[serde(default)]
+        to: Option<ClipId>,
+        transition: TransitionSpec,
+    },
+    /// Changes a transition's duration, alignment or settings (a patch).
+    SetTransition {
+        transition: TransitionId,
+        #[serde(default)]
+        duration: Option<Flicks>,
+        #[serde(default)]
+        alignment: Option<Alignment>,
+        #[serde(default)]
+        params: Option<Params>,
+    },
+    RemoveTransition {
+        transition: TransitionId,
+    },
+
+    /// Adds a LUT to the project, for effects to use.
+    AddLut {
+        lut: LutSpec,
+    },
+    /// Removes a LUT no effect uses.
+    RemoveLut {
+        lut: LutId,
+    },
+
     AddMarker {
         at: Flicks,
         #[serde(default)]
@@ -348,6 +471,23 @@ impl Command {
             Command::DetachAudio { .. } => "Detach audio",
             Command::SetSpeed { .. } => "Change speed",
             Command::SetClipProperties { .. } => "Change clip",
+            Command::AddEffect { .. } => "Add effect",
+            Command::RemoveEffect { .. } => "Remove effect",
+            Command::MoveEffect { .. } => "Reorder effects",
+            Command::SetEffectEnabled { enabled: true, .. } => "Turn effect on",
+            Command::SetEffectEnabled { .. } => "Turn effect off",
+            Command::SetEffectParams { .. } => "Change effect",
+            Command::ResetEffect { .. } => "Reset effect",
+            Command::SetKeyframe { .. } => "Set keyframe",
+            Command::RemoveKeyframes { .. } => "Delete keyframes",
+            Command::MoveKeyframes { .. } => "Move keyframes",
+            Command::SetInterpolation { .. } => "Change interpolation",
+            Command::ClearKeyframes { .. } => "Stop animating",
+            Command::AddTransition { .. } => "Add transition",
+            Command::SetTransition { .. } => "Change transition",
+            Command::RemoveTransition { .. } => "Delete transition",
+            Command::AddLut { .. } => "Import LUT",
+            Command::RemoveLut { .. } => "Remove LUT",
             Command::AddMarker { .. } => "Add marker",
             Command::UpdateMarker { .. } => "Change marker",
             Command::RemoveMarker { .. } => "Delete marker",
@@ -355,8 +495,9 @@ impl Command {
     }
 }
 
-/// What a successful command created, in order: the new clip, track or marker
-/// first, then anything made along the way (such as the right half of a split).
+/// What a successful command created, in order: the new clip, track, marker,
+/// effect, transition or LUT first, then anything made along the way (such as the
+/// right half of a split).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Outcome {
