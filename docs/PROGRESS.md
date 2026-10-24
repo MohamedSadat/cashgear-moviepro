@@ -2,6 +2,80 @@
 
 Newest phase first. Each phase lists the evidence for every exit criterion.
 
+## Phase 5: Export pipeline (MVP complete)
+
+- **Completed:** 2026-10-24, tag `v0.1.0-mvp`.
+- **CI:** [run 40116662195](https://github.com/MohamedSadat/cashgear-moviepro/actions/runs/40116662195) on commit `13869c9`, green (License gates 9 min 54 s; Windows build and test 26 min 9 s).
+  - It ran 161 Rust tests, the real FFmpeg conversions among them, and 56 software-GPU browser tests, with no retries; the export spec took 6.6 min there.
+  - The desktop smoke exported the recovered timeline in WebView2 on software rendering: MP4 in 128 s, GIF in 20 s, MP3 in 0.3 s.
+  - The Azure Static Web Apps deploy of the same commit succeeded.
+- **Reference machine:** as in Phase 0: Xeon E5-2680 v3, GTX 1650 (driver 457.51), Chrome 156, Edge 156 and WebView2 155. Every performance number below comes from it; CI's software GPUs and encoders give functional results only.
+
+### Shipped
+
+- **One frame path, now to a file (`cgv-render`, WGSL):**
+  - Export frames go through the preview's `renderFrame(t)` at full quality, every source awaited, nothing dropped.
+  - The composition, over black, becomes BT.709 limited-range Y'CbCr 4:2:0 on the GPU. It is packed so that one RGBA8 readback is an NV12 frame, on WebGPU and WebGL2 alike. The encoder never picks a colour matrix.
+  - An export of another shape centres the picture on whole pixels between black bars.
+- **Export worker (`engine-client`):**
+  - Each export runs in its own worker, with its own engine, GPU device, decoders and a copy of the project. Editing and preview carry on, and later edits do not change it.
+  - WebCodecs encoders, each tried on one frame first: hardware, then the browser's choice, then software. H.264 High, HEVC, VP9 and AV1 at the lowest level that fits; AAC or Opus sound.
+  - Mediabunny muxes MP4 and MOV (index at the front), WebM, MKV and WAV into the picked file, OPFS or the desktop's native writer.
+  - Sound is mixed offline by the playback mixer and kept within 2 s of the picture.
+- **Desktop (`cgv-native`, Tauri):**
+  - The native side writes the muxed bytes at their positions into a `.part` file beside the destination, renamed when complete, so a failed export never touches an existing file.
+  - GIF and MP3 are made by FFmpeg from an intermediate MP4 or WAV, with progress and cancel. Proxies and conversions share one FFmpeg job runner.
+  - Closing the window during an export asks first. Leftover intermediates are cleared at startup.
+- **Export dialog (`ui`):**
+  - Export sits in the header: Ctrl+E, or Ctrl+M with Premiere-like keys.
+  - Presets: YouTube 1080p and 4K, TikTok 9:16 and Instagram 1:1.
+  - Settings: format, size, frame rate, codec (only those the browser encodes, hardware marked), quality or bitrate, and sound.
+  - Notes for black bars and missing files, and an estimated size.
+  - Progress shows time left and speed, with Cancel. Hide keeps the export running behind a header chip.
+  - Web: the save picker where the browser has it, else OPFS and a download. Desktop: the native save dialog, opening in Videos.
+  - The project file's web download is now called "Download project".
+- **Tests:**
+  - Unit tests for settings, codec levels, bitrates, frame timing, the dialog form and progress estimates.
+  - Native tests for the export writer and the FFmpeg arguments, plus real GIF and MP3 conversions.
+  - Seven Playwright export tests: round-trip PSNR on WebGPU and WebGL2, A/V sync in four containers, the dialog, cancel, formats and speed.
+  - Exports in the desktop smoke.
+
+### Exit criteria
+
+| Criterion                                                                                    | Result                                       | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Exported files play correctly in VLC, Chrome, Windows Media Player and pass a YouTube upload | Passed, except YouTube: pending, by the user | **Chrome:** `the export dialog saves through the save picker while editing goes on` exports through the dialog and plays the MP4 in a `<video>` element: 1080×1080, 4.01 s, frames shown, no error (Chrome 156, Edge 156, software Chrome). **VLC 3.0.24**, headless with its scene filter saving decoded frames: MP4, MOV and MKV (H.264 with AAC or Opus), WebM (VP9 and AV1, the latter through dav1d), HEVC MP4, 23.976 fps MOV and WAV all decode, with frames saved for each video. **Windows Media Player**, played through its own engine (`WMPlayer.OCX`): MP4, MOV, MKV with Opus, 23.976 fps MOV and WAV reach the playing state, at the right size and length, with the position advancing. Legacy WMP cannot open WebM at all, and shows HEVC without picture on this machine, which lacks Microsoft's HEVC Video Extensions. **YouTube:** `bench/results/youtube/` holds a 60 s 1080p30 sample (H.264 High 7.2 Mbit/s, AAC, 55 MB) and a 20 s 4K30 sample (33 Mbit/s, 83 MB). The user tags without waiting and uploads them later (decisions). |
+| Preview-to-export PSNR is above 40 dB on all fixture projects                                | Passed                                       | `WebGPU exports match the preview above 40 dB` and its WebGL2 twin use four fixtures from `tests/fixtures/export.json`: YouTube 1080p, three layers with crop, rotation, opacity and a 25 fps clip at 720p, TikTok 9:16 with a still, and stills with sound in WebM (VP9 and Opus). Each is exported at its project's size and decoded by the pinned FFmpeg. PSNR is measured on the Y'CbCr 4:2:0 planes, as codecs report it, against the preview's `renderFrame(t)` converted by FFmpeg (decisions). Chrome and Edge, both backends: 46.5 to 55.3 dB (Y 47.4 to 58.1). By fixture: 53.2–55.0, 50.3–52.0, 53.7–55.3 and 46.5–53.3. RGB PSNR is 0.1 to 1.7 dB below what a lossless 4:2:0 copy of the preview reaches, at 34.4 to 45.4 dB; sharp edges between saturated colours cannot survive 4:2:0 in any file. The control, the next frame of the moving clip, gives 22.4 dB and fails as it must. CI's software encoder: 44.0 to 53.6 dB.                                                                                                                |
+| A/V offset in exports is under one frame                                                     | Passed, 0.0 ms                               | `exports keep picture and sound in sync in every format`: a clip that flashes white at 1, 2.5 and 4 s, with clicks at the same times on another track. It is exported as MP4 (H.264, AAC), WebM (VP9, Opus), MOV (H.264, AAC) and MKV (H.264, Opus), and decoded by FFmpeg (edit lists applied). Every click starts on its flash frame to the sample: offset 0.0 ms in all twelve on Chrome, Edge and software Chrome. AV1 in MKV gave the same by hand. One frame is 33.3 ms.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| A 1-minute 1080p30 project exports faster than real time on the reference machine            | Passed                                       | `a one-minute 1080p30 project exports faster than real time`: six 10 s cuts of the 1080p30 H.264 clip on the main track with music under them, exported as YouTube 1080p (H.264 8 Mbit/s, AAC). Chrome 156: 12.4 s, 4.9× real time; Edge 156: 12.9 s, 4.7×. Earlier runs: 12.6 and 12.1 s. WebView2 155 (the desktop app, same project): 15.7 s, 3.8×. All use the hardware encoder; 1,800 frames each. A 20 s 4K30 export took 12.1 s.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+
+### Local verification
+
+| Check                                             | Result                                                                                                                                                                                                                                              |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| fmt, clippy `-D warnings` (native and wasm32)     | Clean                                                                                                                                                                                                                                               |
+| `cargo test --workspace` (`CGV_REQUIRE_FFMPEG=1`) | 161 passed. New: the BT.709 export matrix and its inverse, export geometry and NV12 packing, the export writer, FFmpeg GIF and MP3 arguments, and a real GIF and MP3 conversion with cancel.                                                        |
+| Vitest                                            | 89 passed; 14 new: export settings 7, progress 2, the dialog form 5                                                                                                                                                                                 |
+| Playwright, hardware: Chrome 156, Edge 156        | 98 passed, the 14 export tests among them; the Phase 1 to 4 suites unchanged                                                                                                                                                                        |
+| Playwright, software (`GPU_TEST_SOFTWARE=1`)      | The export spec passed: 7 on SwiftShader WebGPU and the WebGL2 test on SwiftShader WebGL2. The first runs found that the hardware H.264 encoder Chrome offers there cannot start, which led to the software fallback.                               |
+| Desktop smoke, WebView2 155                       | Passed on hardware. New export step on the recovered project, including the ProRes clip through its proxy: a 12 s 720p MP4 written natively in 2.6 s, then a GIF (120 frames at 320×180) and an MP3 converted by FFmpeg, each checked with ffprobe. |
+| Licenses                                          | cargo-deny ok, no new crates. npm 155 packages, unchanged: Mediabunny was already shipped. The GPL self-test rejects both fixtures.                                                                                                                 |
+| Release WASM                                      | 3,551,894 bytes; gzip 1,314,715, within the 1,500,000 budget (Phase 4: 1,311,461)                                                                                                                                                                   |
+
+### Known gaps
+
+- Media that plays through a desktop proxy (ProRes, and HEVC where WebView2 lacks it) exports from its 720p proxy, not the original.
+- On frames with sharp edges between saturated colours, RGB PSNR is limited by 4:2:0 chroma, as in any H.264, VP9 or AV1 file. Three fixtures sit at 34 to 37 dB, within 1.7 dB of what a lossless 4:2:0 copy reaches. The 40 dB criterion is measured on the Y'CbCr planes (decisions).
+- Windows' AAC encoder stops at 192 kbit/s, below YouTube's recommended 384 kbit/s for stereo.
+- VP9 and AV1 encode in software on this machine; only Chrome offers HEVC.
+- An export at another frame rate repeats or skips project frames; it does not blend them.
+- Clips at other speeds export silent, as they play, until Phase 9.
+- One export runs at a time, with no queue. The dialog starts from the preset that matches the project each time, not from the last export's settings.
+- Legacy Windows Media Player cannot open WebM; WebM is for browsers.
+- Firefox and Safari (best-effort) were not tried; they would take the OPFS-and-download path.
+- No 10-bit or HDR export.
+- The YouTube upload of the samples is pending, by the user.
+
 ## Phase 4: Timeline UI and editing tools (complete)
 
 - **Completed:** 2026-10-24, tag `phase-4`.
