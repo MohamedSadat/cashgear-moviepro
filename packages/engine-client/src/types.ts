@@ -16,6 +16,7 @@ import type {
   ProjectSnapshot,
   SavedText,
 } from './project/types';
+import type { Pixels, PlaybackState, PlaybackStatsReport, QualityMode } from './playback/types';
 
 export type BackendPreference = 'auto' | 'webgl2';
 export type Backend = 'WebGPU' | 'WebGL2';
@@ -31,6 +32,10 @@ export interface InitOptions extends PhysicalSize {
   diagnostic: boolean;
   /** Diagnostics only: make the worker's WebGPU adapter or device request fail. */
   simulateGpuFailure?: GpuFault;
+  /** Show the Phase 0 test pattern instead of the timeline (GPU checks). */
+  pattern?: boolean;
+  /** Diagnostics only: force playback decoders to software or hardware. */
+  decode?: 'auto' | 'software' | 'hardware';
 }
 export interface EngineInfo {
   backend: Backend;
@@ -63,7 +68,7 @@ export interface EngineApi {
   /** Decodes exact frame `frame` and reports its barcode and optional crop pixels. */
   readFrame(id: string, frame: number, crop?: FrameCrop): Promise<FrameReadback>;
   /** Closes every cached frame and decoder (leak checks). */
-  releaseFrames(): void;
+  releaseFrames(): Promise<void>;
   /** Closes every media item (switching projects). */
   clearMedia(): void;
 
@@ -99,8 +104,34 @@ export interface EngineApi {
   projectClipsAt(time: number): ClipAt[];
   projectSnapPoints(playhead: number | null, exclude: number[]): number[];
   projectPresets(): Promise<Preset[]>;
+
+  /** Gives the worker the sound ring the page's audio output plays. */
+  attachAudio(buffer: SharedArrayBuffer, sampleRate: number, channels: number): Promise<void>;
+  /** Plays from the playhead at `rate` (negative plays backwards). */
+  play(rate?: number): void;
+  pause(): void;
+  togglePlay(): void;
+  /** J, K or L: backwards, stop, forwards, faster with each press. */
+  shuttle(key: 'j' | 'k' | 'l'): void;
+  /** Moves the playhead (flicks); `scrub` plays a short snippet of sound. */
+  seek(time: number, options?: { scrub?: boolean }): void;
+  /** Steps whole frames from the playhead and pauses. */
+  step(frames: number): void;
+  setQuality(mode: QualityMode): void;
+  playbackState(): PlaybackState;
+  playbackStats(): PlaybackStatsReport;
+  resetPlaybackStats(): void;
+  /** Diagnostics: seeks and resolves once the frame is on the monitor, with the time it took. */
+  seekAndWait(time: number): Promise<{ ms: number }>;
+  /** Diagnostics: the frame at `time`, composed at full quality, as sRGB RGBA bytes. */
+  renderPixels(time: number): Promise<Pixels>;
+  /** Diagnostics: the latest composition as it is, without drawing again. */
+  readComposition(): Promise<Pixels>;
 }
 
 /** Messages the worker posts outside the RPC channel. */
 export type EngineEvent =
-  { type: 'engine-fatal'; message: string } | ({ type: 'engine-stats' } & FrameStats);
+  | { type: 'engine-fatal'; message: string }
+  | { type: 'engine-notice'; message: string }
+  | ({ type: 'engine-stats' } & FrameStats)
+  | ({ type: 'engine-playback' } & PlaybackState);

@@ -54,6 +54,10 @@ function readOptions(search: string) {
     diagnostic,
     autosaveMs: diagnostic && autosave >= 100 ? autosave : defaultAutosaveMs,
     dev: params.get('dev') === '1',
+    pattern: params.get('pattern') === '1',
+    decode: (diagnostic && ['software', 'hardware'].includes(params.get('decode') ?? '')
+      ? params.get('decode')
+      : 'auto') as 'auto' | 'software' | 'hardware',
     gpuFault:
       diagnostic && (fault === 'adapter' || fault === 'device') ? (fault as GpuFault) : undefined,
   };
@@ -168,6 +172,8 @@ export function AppShell({ platform }: Props) {
               backend={options.backend}
               diagnostic={options.diagnostic}
               gpuFault={options.gpuFault}
+              pattern={options.pattern}
+              decode={options.decode}
               onState={onState}
               onClient={setClient}
             />

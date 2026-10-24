@@ -29,6 +29,7 @@ export {
   type OpenPlan,
 } from './project/persistence';
 export type * from './media/types';
+export type * from './playback/types';
 export type * from './project/types';
 export { FLICKS_PER_SECOND } from './project/types';
 export type * from './types';

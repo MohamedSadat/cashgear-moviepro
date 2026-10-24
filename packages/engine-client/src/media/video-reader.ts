@@ -13,6 +13,11 @@ export interface FrameResult {
   frame: ManagedFrame;
   /** Frames the decoder produced to reach this one (0 when it was already decoded). */
   decoded: number;
+  /**
+   * The frame is a hardware decoder's output, on the GPU: the browser converts it
+   * correctly there. Cached copies are CPU frames, converted from their planes.
+   */
+  gpu: boolean;
 }
 
 /**
@@ -22,14 +27,19 @@ export interface FrameResult {
  */
 export class VideoReader {
   private queue: Promise<unknown> = Promise.resolve();
+  /** Cache copies being read back from the GPU. */
+  private copying = new Set<Promise<void>>();
+  private epoch = 0;
 
   constructor(
     private readonly key: string,
-    private readonly sink: EncodedPacketSink,
+    readonly sink: EncodedPacketSink,
     readonly index: FrameIndex,
-    private readonly config: VideoDecoderConfig,
+    public config: VideoDecoderConfig,
     private readonly pool: DecoderPool<VideoDecoderSession>,
     private readonly cache: FrameCache<ManagedFrame>,
+    /** Told when the hardware decoder failed and reading fell back to any decoder. */
+    private readonly onHardwareFailure: () => void = () => {},
   ) {}
 
   /** Reads are serialized: one decoder, one position. */
@@ -41,8 +51,14 @@ export class VideoReader {
 
   /** Closes this track's decoder and forgets its cached frames. */
   release() {
+    this.epoch++;
     this.pool.release(this.key);
     this.cache.deletePrefix(this.key + ':');
+  }
+
+  /** Resolves when no cache copy is still being made. */
+  async settle() {
+    while (this.copying.size) await Promise.all(this.copying);
   }
 
   private cacheKey(timestampUs: number) {
@@ -51,22 +67,46 @@ export class VideoReader {
 
   private async read(frameNumber: number): Promise<FrameResult> {
     const target = this.index.timestampOf(frameNumber);
-    const cached = this.cache.get(this.cacheKey(target));
-    if (cached) return { frame: cached.clone(), decoded: 0 };
+    const key = this.cacheKey(target);
+    const cached = this.cache.get(key);
+    if (cached) return { frame: cached.clone(), decoded: 0, gpu: false };
 
     const session = this.pool.acquire(this.key, () => new VideoDecoderSession(this.config));
     try {
       const { frame, decoded } = await this.decode(session, frameNumber, target);
-      // The cache keeps a copy so the decoder gets its surface back straight away.
-      const copy = ManagedFrame.wrap(await detachFrame(frame.raw));
-      frame.close();
-      this.cache.put(this.cacheKey(target), copy);
-      return { frame: copy.clone(), decoded };
+      // The caller gets the decoder's frame at once. The cache keeps a copy in
+      // memory the page owns, so the decoder gets its surface back soon after.
+      this.keepCopy(key, frame);
+      return { frame, decoded, gpu: this.config.hardwareAcceleration === 'prefer-hardware' };
     } catch (error) {
       // A failed or stalled decoder is in an unknown state: start over next time.
       this.pool.release(this.key);
+      // A hardware decoder the browser offered may still fail (a software GPU
+      // process, say): read with whatever decoder the browser picks instead.
+      if (this.config.hardwareAcceleration === 'prefer-hardware') {
+        this.config = { ...this.config, hardwareAcceleration: 'no-preference' };
+        this.onHardwareFailure();
+        return this.read(frameNumber);
+      }
       throw error;
     }
+  }
+
+  private keepCopy(key: string, frame: ManagedFrame) {
+    const epoch = this.epoch;
+    const source = frame.clone();
+    const job: Promise<void> = detachFrame(source.raw)
+      .then((copy) => {
+        const managed = ManagedFrame.wrap(copy);
+        if (epoch === this.epoch) this.cache.put(key, managed);
+        else managed.close();
+      })
+      .catch(() => {})
+      .finally(() => {
+        source.close();
+        this.copying.delete(job);
+      });
+    this.copying.add(job);
   }
 
   /** Returns the decoder-backed target frame; the caller must close it promptly. */
@@ -83,39 +123,47 @@ export class VideoReader {
       verifyKeyPackets: true,
     });
     if (!keyPacket) throw new Error(`No key frame before frame ${frameNumber}`);
-    let packet: EncodedPacket | null;
+    let first: EncodedPacket | null;
     const continuing =
       !session.needsKey &&
       session.lastFed !== null &&
       keyPacket.sequenceNumber <= session.lastFed.sequenceNumber &&
       target > session.lastOutputUs;
     if (continuing) {
-      packet = await this.sink.getNextPacket(session.lastFed!);
+      first = await this.sink.getNextPacket(session.lastFed!);
     } else {
       session.reset();
       session.discardUntil(target);
-      packet = keyPacket;
+      first = keyPacket;
     }
 
+    // The iterator reads packets ahead while the decoder works.
+    const packets = first ? this.sink.packets(first) : null;
+    const next = async () => (packets ? ((await packets.next()).value ?? null) : null);
+    let packet = await next();
     let flushed = false;
-    while (true) {
-      if (session.error) throw session.error;
-      result = session.take(target);
-      if (result) return { frame: result, decoded: session.outputCount };
-      // Outputs arrive in presentation order, so a later frame means the target was skipped.
-      if (session.lastOutputUs > target) throw missing();
-      if (packet && session.queueSize < maxQueuedChunks) {
-        session.feed(packet);
-        packet = await this.sink.getNextPacket(packet);
-        continue;
+    try {
+      while (true) {
+        if (session.error) throw session.error;
+        result = session.take(target);
+        if (result) return { frame: result, decoded: session.outputCount };
+        // Outputs arrive in presentation order, so a later frame means the target was skipped.
+        if (session.lastOutputUs > target) throw missing();
+        if (packet && session.queueSize < maxQueuedChunks) {
+          session.feed(packet);
+          packet = await next();
+          continue;
+        }
+        if (!packet && !flushed) {
+          await session.flush();
+          flushed = true;
+          continue;
+        }
+        if (!packet) throw missing();
+        await session.waitForActivity();
       }
-      if (!packet && !flushed) {
-        await session.flush();
-        flushed = true;
-        continue;
-      }
-      if (!packet) throw missing();
-      await session.waitForActivity();
+    } finally {
+      await packets?.return();
     }
   }
 }

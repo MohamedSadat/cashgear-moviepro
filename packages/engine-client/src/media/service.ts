@@ -1,12 +1,12 @@
-import type { Input } from 'mediabunny';
+import type { Input, InputAudioTrack } from 'mediabunny';
 import type { MediaLibrary } from '../pkg/cgv_wasm';
 import { readBarcode } from './barcode';
 import { DecoderPool } from './decoder-pool';
 import { FrameCache } from './frame-cache';
 import { openFrameCount, readPlanes, type ManagedFrame } from './frames';
-import { probeMedia, probeVideo } from './probe';
+import { probeAudio, probeMedia, probeVideo } from './probe';
 import { ProjectService } from '../project/service';
-import { copyToOpfs, openInput, sourceModified } from './sources';
+import { copyToOpfs, openInput, readAll, sourceModified } from './sources';
 import type {
   FrameReadback,
   ImportOutcome,
@@ -18,10 +18,22 @@ import type {
 } from './types';
 import type { VideoDecoderSession } from './video-decoder';
 import { VideoReader } from './video-reader';
+import type { StreamSource } from './video-stream';
 
 /** Decoded frames kept for instant re-seeks. Decoder pools are small; so is this. */
 const defaultCacheBudget = 256 * 1024 * 1024;
 const decoderCapacity = 4;
+/**
+ * Playback decodes frames up to this size in software when it can. Hardware
+ * decoders on Windows stall the browser's GPU process when a clip ends (they
+ * hand over their last frames at once), which costs frames during playback;
+ * software decoding plays three 1080p30 tracks without a drop on the reference
+ * machine. Larger frames and codecs without a software decoder (HEVC) use hardware.
+ */
+const softwarePixels = 1920 * 1088;
+
+/** How playback picks decoders: by the rule above, or forced (diagnostics). */
+export type DecodePreference = 'auto' | 'software' | 'hardware';
 
 interface OpenMedia {
   source: MediaSourceRef;
@@ -29,9 +41,34 @@ interface OpenMedia {
   reader: VideoReader | null;
   /** Set when decoding goes through a desktop proxy instead of the original. */
   proxy: { source: MediaSourceRef; input: Input } | null;
+  kind: MediaItem['kind'];
+  /** Clockwise degrees that show the video upright. */
+  rotation: number;
+  /** The decoders the browser has for the reader's track, and its frame size. */
+  decoders: { hardware: boolean; software: boolean; pixels: number };
+  /** The decodable sound track, from the original or else the proxy. */
+  audio: InputAudioTrack | null;
 }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+async function supports(config: VideoDecoderConfig, hardwareAcceleration: HardwareAcceleration) {
+  try {
+    const support = await VideoDecoder.isConfigSupported({ ...config, hardwareAcceleration });
+    return support.supported === true;
+  } catch {
+    return false;
+  }
+}
+
+/** The browser's hardware and software decoders for `config`. Hardware frames stay on the GPU. */
+async function decodersFor(config: VideoDecoderConfig, width: number, height: number) {
+  return {
+    hardware: await supports(config, 'prefer-hardware'),
+    software: await supports(config, 'prefer-software'),
+    pixels: width * height,
+  };
+}
 
 /**
  * The engine worker's media side: the library (Rust, via WASM), open inputs,
@@ -41,6 +78,10 @@ export class MediaService {
   private media = new Map<string, OpenMedia>();
   private cache = new FrameCache<ManagedFrame>(defaultCacheBudget);
   private pool = new DecoderPool<VideoDecoderSession>(decoderCapacity);
+  /** Told the id of a medium that was removed or now decodes differently. */
+  onChange: (id: string) => void = () => {};
+  /** Diagnostics: force playback to software or hardware decoders where possible. */
+  decode: DecodePreference = 'auto';
 
   constructor(private readonly library: MediaLibrary) {}
 
@@ -74,11 +115,33 @@ export class MediaService {
       throw error;
     }
     const video = probed.video;
-    const reader =
-      video && video.probe.decodable && video.config
-        ? new VideoReader(id, video.sink, video.index, video.config, this.pool, this.cache)
-        : null;
-    this.media.set(id, { source: ref, input: probed.input, reader, proxy: null });
+    const decodable = video?.probe.decodable && video.config ? video : null;
+    const decoders = decodable
+      ? await decodersFor(decodable.config!, video!.probe.codedWidth, video!.probe.codedHeight)
+      : { hardware: false, software: false, pixels: 0 };
+    const reader = decodable
+      ? new VideoReader(
+          id,
+          decodable.sink,
+          decodable.index,
+          this.readerConfig(decodable.config!, decoders),
+          this.pool,
+          this.cache,
+          () => this.noHardware(id),
+        )
+      : null;
+    this.media.set(id, {
+      source: ref,
+      input: probed.input,
+      reader,
+      proxy: null,
+      kind: item.kind,
+      rotation: video?.probe.rotation ?? 0,
+      decoders,
+      audio: probed.audio?.probe.decodable ? probed.audio.track : null,
+    });
+    // Clips of this file may already be on the timeline (a project opened first).
+    this.onChange(id);
     return { id, item, source: ref, media: ProjectService.mediaRef(item, modified) };
   }
 
@@ -96,21 +159,34 @@ export class MediaService {
       const video = await probeVideo(track);
       if (!video.probe.decodable || !video.config)
         throw new Error('The proxy itself cannot be decoded');
+      const decoders = await decodersFor(
+        video.config,
+        video.probe.codedWidth,
+        video.probe.codedHeight,
+      );
       media.reader?.release();
       media.proxy?.input.dispose();
       media.proxy = { source, input };
+      media.decoders = decoders;
       media.reader = new VideoReader(
         id,
         video.sink,
         video.index,
-        video.config,
+        this.readerConfig(video.config, decoders),
         this.pool,
         this.cache,
+        () => this.noHardware(id),
       );
+      if (!media.audio) {
+        const track = await input.getPrimaryAudioTrack();
+        const audio = track ? await probeAudio(track) : null;
+        media.audio = audio?.probe.decodable ? audio.track : null;
+      }
     } catch (error) {
       input.dispose();
       throw error;
     }
+    this.onChange(id);
     return this.setStatus(id, { state: 'proxyReady' });
   }
 
@@ -121,7 +197,99 @@ export class MediaService {
     media.input?.dispose();
     media.proxy?.input.dispose();
     this.media.delete(id);
+    this.onChange(id);
     return this.library.remove(id);
+  }
+
+  /** What playback streams decode from, or null when the video cannot be decoded. */
+  streamSource(id: string): StreamSource | null {
+    const media = this.media.get(id);
+    if (!media?.reader) return null;
+    const { sink, index, config } = media.reader;
+    // A proxy decodes differently from its original: its decoders are not shared.
+    const key = media.proxy ? id + ':proxy' : id;
+    return { key, sink, index, config, hardware: this.useHardware(media.decoders) };
+  }
+
+  /**
+   * The hardware decoder the browser offered for `id` failed: playback and
+   * seeks use software or the browser's choice from now on.
+   */
+  noHardware(id: string) {
+    const media = this.media.get(id);
+    if (media) media.decoders = { ...media.decoders, hardware: false };
+  }
+
+  /** The decoder policy: software up to 1080p where the browser has it. */
+  private useHardware({ hardware, software, pixels }: OpenMedia['decoders']) {
+    const preferHardware =
+      this.decode === 'hardware' ||
+      (this.decode === 'auto' && pixels > softwarePixels) ||
+      !software;
+    return hardware && preferHardware;
+  }
+
+  /**
+   * Seeks decode in hardware where they can: decoding from a key frame up to the
+   * wanted frame is quicker there, and a paused monitor does not mind the GPU
+   * process stalls that cost playback frames. Frames are asked for as soon as
+   * they are decoded, so a seek decodes up to its frame and not past it.
+   */
+  private readerConfig(config: VideoDecoderConfig, decoders: OpenMedia['decoders']) {
+    const hardware = decoders.hardware && this.decode !== 'software';
+    return {
+      ...config,
+      hardwareAcceleration: hardware ? ('prefer-hardware' as const) : ('no-preference' as const),
+      optimizeForLatency: true,
+    };
+  }
+
+  /** The frame showing at source time `flicks` (705.6 per microsecond), or -1. */
+  frameNumber(id: string, flicks: number): number {
+    const reader = this.media.get(id)?.reader;
+    if (!reader || reader.index.frameCount === 0) return -1;
+    // A microsecond of slack covers containers that round timestamps up.
+    return reader.index.frameAt(Math.round(flicks / 705.6) + 1);
+  }
+
+  rotation(id: string): number {
+    return this.media.get(id)?.rotation ?? 0;
+  }
+
+  audioTrack(id: string): InputAudioTrack | null {
+    return this.media.get(id)?.audio ?? null;
+  }
+
+  /** True when the medium is open and has a picture to show. */
+  hasPicture(id: string): boolean {
+    const media = this.media.get(id);
+    return !!media && (media.kind === 'image' || !!media.reader);
+  }
+
+  isStill(id: string): boolean {
+    return this.media.get(id)?.kind === 'image';
+  }
+
+  /** Decodes a still image, scaled down to fit `maxSize`. The caller closes it. */
+  async stillBitmap(id: string, maxSize: number): Promise<ImageBitmap> {
+    const media = this.require(id);
+    if (media.kind !== 'image') throw new Error(`${id} is not a still image`);
+    const blob = new Blob([await readAll(media.source)]);
+    const options: ImageBitmapOptions = {
+      premultiplyAlpha: 'none',
+      colorSpaceConversion: 'default',
+    };
+    const bitmap = await createImageBitmap(blob, options);
+    if (bitmap.width <= maxSize && bitmap.height <= maxSize) return bitmap;
+    const scale = maxSize / Math.max(bitmap.width, bitmap.height);
+    const size = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
+    return createImageBitmap(blob, {
+      ...options,
+      resizeWidth: Math.max(1, Math.floor(size.width * scale)),
+      resizeHeight: Math.max(1, Math.floor(size.height * scale)),
+      resizeQuality: 'high',
+    });
   }
 
   /** Closes every item (switching projects). */
@@ -186,7 +354,8 @@ export class MediaService {
   }
 
   /** Closes every cached frame and decoder. Open frames should then be zero. */
-  releaseFrames() {
+  async releaseFrames() {
+    await Promise.all([...this.media.values()].map((media) => media.reader?.settle()));
     this.cache.clear();
     this.pool.clear();
   }

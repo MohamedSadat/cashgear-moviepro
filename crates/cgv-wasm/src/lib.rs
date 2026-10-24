@@ -62,10 +62,6 @@ mod bridge {
         pub fn pattern_frame(&mut self, now_ms: f64) -> Result<bool, JsValue> {
             self.inner.pattern_frame(now_ms).map_err(js_error)
         }
-        /// The Phase 0 name of `pattern_frame`, until the worker drives playback.
-        pub fn frame(&mut self, now_ms: f64) -> Result<bool, JsValue> {
-            self.pattern_frame(now_ms)
-        }
 
         /// Starts building the frame a `ProjectSession::plan_frame` plan describes.
         pub fn begin(&mut self, plan: &str) -> Result<(), JsValue> {

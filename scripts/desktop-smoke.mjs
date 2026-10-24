@@ -185,7 +185,7 @@ try {
   const origin = new URL(page.url()).origin;
   const results = [];
   for (const backend of ['WebGPU', 'WebGL2']) {
-    await page.goto(origin + (backend === 'WebGL2' ? '/?gpu=webgl2' : '/'));
+    await page.goto(origin + (backend === 'WebGL2' ? '/?pattern=1&gpu=webgl2' : '/?pattern=1'));
     await expect(page.getByTestId('engine-status')).toHaveText('Engine ready', { timeout: 30000 });
     await expect(page.getByTestId('gpu-backend')).toHaveText(backend);
     const monitor = page.getByTestId('program-monitor');

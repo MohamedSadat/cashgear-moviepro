@@ -16,6 +16,13 @@ import type {
  */
 export class ProjectService {
   private session: ProjectSession | null = null;
+  /** Told after every change; `replaced` when another project (or none) is open. */
+  onChange: (replaced: boolean) => void = () => {};
+
+  /** The open project's session, for playback. */
+  get current(): ProjectSession | null {
+    return this.session;
+  }
 
   create(id: string, name: string): ProjectSnapshot {
     return this.replace(new ProjectSession(id, name));
@@ -27,8 +34,10 @@ export class ProjectService {
   }
 
   close() {
+    const open = this.session !== null;
     this.session?.free();
     this.session = null;
+    if (open) this.onChange(true);
   }
 
   snapshot(): ProjectSnapshot {
@@ -37,6 +46,7 @@ export class ProjectService {
 
   execute(command: Command): { outcome: Outcome; snapshot: ProjectSnapshot } {
     const outcome = JSON.parse(this.require().execute(JSON.stringify(command))) as Outcome;
+    this.onChange(false);
     return { outcome, snapshot: this.snapshot() };
   }
 
@@ -53,19 +63,23 @@ export class ProjectService {
         outcomes.push(JSON.parse(session.execute(JSON.stringify(command))));
     } catch (error) {
       session.cancel_group();
+      this.onChange(false);
       throw error;
     }
     session.end_group();
+    this.onChange(false);
     return { outcomes, snapshot: this.snapshot() };
   }
 
   undo(): ProjectSnapshot {
     this.require().undo();
+    this.onChange(false);
     return this.snapshot();
   }
 
   redo(): ProjectSnapshot {
     this.require().redo();
+    this.onChange(false);
     return this.snapshot();
   }
 
@@ -75,11 +89,13 @@ export class ProjectService {
 
   endGroup(): ProjectSnapshot {
     this.require().end_group();
+    this.onChange(false);
     return this.snapshot();
   }
 
   cancelGroup(): ProjectSnapshot {
     this.require().cancel_group();
+    this.onChange(false);
     return this.snapshot();
   }
 
@@ -102,6 +118,7 @@ export class ProjectService {
   /** Records a relinked or changed file. Not an undo step; leaves unsaved changes. */
   updateMedia(media: MediaRef): ProjectSnapshot {
     this.require().update_media(JSON.stringify(media));
+    this.onChange(false);
     return this.snapshot();
   }
 
@@ -123,8 +140,9 @@ export class ProjectService {
   }
 
   private replace(session: ProjectSession): ProjectSnapshot {
-    this.close();
+    this.session?.free();
     this.session = session;
+    this.onChange(true);
     return this.snapshot();
   }
 

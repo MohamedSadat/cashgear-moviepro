@@ -25,6 +25,10 @@ interface Props {
   backend: BackendPreference;
   diagnostic: boolean;
   gpuFault?: GpuFault;
+  /** Show the Phase 0 test pattern instead of the timeline (GPU checks). */
+  pattern?: boolean;
+  /** Diagnostics: force playback decoders to software or hardware. */
+  decode?: 'auto' | 'software' | 'hardware';
   onState: (state: MonitorState) => void;
   /** The engine worker behind this monitor, for media and diagnostics; null once it is gone. */
   onClient: (client: EngineClient | null) => void;
@@ -41,6 +45,8 @@ export function ProgramMonitor({
   backend,
   diagnostic,
   gpuFault,
+  pattern = false,
+  decode = 'auto',
   onState,
   onClient,
 }: Props) {
@@ -105,7 +111,14 @@ export function ProgramMonitor({
       startupTimeout,
     );
     void client
-      .init(offscreen, { ...initialSize, backend, diagnostic, simulateGpuFailure: gpuFault })
+      .init(offscreen, {
+        ...initialSize,
+        backend,
+        diagnostic,
+        simulateGpuFailure: gpuFault,
+        pattern,
+        decode,
+      })
       .then(async (info) => {
         clearTimeout(timeout);
         if (disposed || failed) return;
@@ -131,6 +144,6 @@ export function ProgramMonitor({
       client.dispose();
       canvas.remove();
     };
-  }, [generation, backend, diagnostic, gpuFault, onState, onClient]);
+  }, [generation, backend, diagnostic, gpuFault, pattern, decode, onState, onClient]);
   return <div className="cgv-monitor" ref={host} />;
 }

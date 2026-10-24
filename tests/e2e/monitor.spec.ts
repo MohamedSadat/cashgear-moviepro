@@ -16,8 +16,10 @@ async function engineReady(page: Page, backend: 'WebGPU' | 'WebGL2') {
   await expect.poll(() => frames(page)).toBeGreaterThan(2);
 }
 
+// The Phase 0 test pattern (`?pattern=1`) checks the GPU path itself; the
+// monitor otherwise shows the timeline, which tests/e2e/playback.spec.ts covers.
 for (const backend of ['WebGPU', 'WebGL2'] as const) {
-  const query = backend === 'WebGL2' ? '?gpu=webgl2' : '';
+  const query = backend === 'WebGL2' ? '?pattern=1&gpu=webgl2' : '?pattern=1';
 
   test(
     backend + ' draws the animated test pattern in the engine worker',
@@ -78,7 +80,7 @@ for (const backend of ['WebGPU', 'WebGL2'] as const) {
   );
 
   test(backend + ' recovers from device loss and a Rust panic on retry', async ({ page }) => {
-    await page.goto('/?diagnostic=1' + (query ? '&' + query.slice(1) : ''));
+    await page.goto('/?diagnostic=1&' + query.slice(1));
     await engineReady(page, backend);
     await page.getByRole('button', { name: 'Simulate device loss' }).click();
     await expect(page.getByRole('alert')).toContainText('GPU device lost');
@@ -95,7 +97,7 @@ for (const backend of ['WebGPU', 'WebGL2'] as const) {
 
 for (const fault of ['adapter', 'device']) {
   test('reports the WebGL2 fallback when the WebGPU ' + fault + ' fails', async ({ page }) => {
-    await page.goto('/?diagnostic=1&fault=' + fault);
+    await page.goto('/?diagnostic=1&pattern=1&fault=' + fault);
     await engineReady(page, 'WebGL2');
     await expect(page.getByTestId('capability-strip')).toHaveAttribute('data-status', 'degraded');
     await expect(page.getByTestId('capability-notice')).toContainText(
@@ -117,7 +119,7 @@ test('blocks with a clear message when WebCodecs is missing', async ({ page }) =
 });
 
 test('pauses a zero-sized monitor and resumes rendering', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?pattern=1');
   await expect.poll(() => frames(page)).toBeGreaterThan(2);
   const monitor = page.getByTestId('program-monitor');
   await monitor.evaluate((canvas) => {
@@ -136,7 +138,7 @@ test('pauses a zero-sized monitor and resumes rendering', async ({ page }) => {
 test('renders at physical pixels when the window or device pixel ratio changes', async ({
   page,
 }) => {
-  await page.goto('/');
+  await page.goto('/?pattern=1');
   await expect.poll(() => frames(page)).toBeGreaterThan(2);
   const monitor = page.getByTestId('program-monitor');
   const matchesBacking = () =>

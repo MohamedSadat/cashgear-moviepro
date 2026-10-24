@@ -1,14 +1,28 @@
 import { expose } from 'comlink';
 import { FrameLoop, workerScheduler } from './frame-loop';
-import { MediaService } from './media/service';
+import { AudioBlocks } from './media/audio-blocks';
+import { MediaService, type DecodePreference } from './media/service';
+import { AudioPlayer } from './playback/audio-player';
+import { PlaybackController } from './playback/controller';
 import { ProjectService } from './project/service';
+import type { Pixels } from './playback/types';
 import type { EngineApi, EngineEvent, EngineInfo, GpuFault, InitOptions } from './types';
 import initWasm, { Engine, MediaLibrary } from './pkg/cgv_wasm';
 
 let engine: Engine | undefined;
 let loop: FrameLoop | undefined;
 let media: MediaService | undefined;
+let playback: PlaybackController | undefined;
+let audio: AudioPlayer | null = null;
+let decode: DecodePreference = 'auto';
 const project = new ProjectService();
+const blocks = new AudioBlocks((id) => media?.audioTrack(id) ?? null);
+project.onChange = (replaced) => {
+  if (replaced) {
+    blocks.clear();
+    playback?.reset();
+  } else playback?.invalidate();
+};
 let initializing = false;
 let disposed = false;
 let diagnostic = false;
@@ -28,6 +42,14 @@ function fatal(message: string) {
 function requireMedia() {
   if (!media) throw new Error('The media library is not configured');
   return media;
+}
+function requirePlayback() {
+  if (!playback) throw new Error('The engine is not running');
+  return playback;
+}
+function requireDiagnostics() {
+  if (!diagnostic) throw new Error('Diagnostics are disabled');
+  return requirePlayback();
 }
 
 // Worker-local fault injection lets browser tests exercise the real Rust
@@ -69,11 +91,23 @@ const api: EngineApi = {
     if (backend !== 'WebGPU' && backend !== 'WebGL2')
       throw new Error('Unexpected GPU backend: ' + backend);
     const running = engine;
+    const controller = new PlaybackController({
+      engine: running,
+      session: () => project.current,
+      media: () => media,
+      audio: () => audio,
+      onState: (state) => post({ type: 'engine-playback', ...state }),
+      onError: (message) => post({ type: 'engine-notice', message }),
+    });
+    controller.pattern = options.pattern === true;
+    decode = (diagnostic && options.decode) || 'auto';
+    if (media) media.decode = decode;
+    playback = controller;
     loop = new FrameLoop(
       {
         resize: (size) => running.resize(size.width, size.height),
         frame: (now) => ({
-          presented: running.frame(now),
+          presented: controller.tick(now),
           frames: running.frames(),
           width: running.width(),
           height: running.height(),
@@ -98,7 +132,11 @@ const api: EngineApi = {
     disposed = true;
     loop?.stop();
     loop = undefined;
-    media?.releaseFrames();
+    playback?.dispose();
+    playback = undefined;
+    audio?.dispose();
+    audio = null;
+    void media?.releaseFrames();
     project.close();
     engine?.dispose();
     engine?.free();
@@ -114,6 +152,11 @@ const api: EngineApi = {
     if (media) throw new Error('The media library is already configured');
     await ensureWasm();
     media = new MediaService(new MediaLibrary(platform));
+    media.decode = decode;
+    media.onChange = (id) => {
+      blocks.forget(id);
+      playback?.mediaChanged(id);
+    };
   },
   importMedia: (requests) => requireMedia().import(requests),
   mediaSnapshot: () => requireMedia().snapshot(),
@@ -152,6 +195,38 @@ const api: EngineApi = {
   async projectPresets() {
     await ensureWasm();
     return ProjectService.presets();
+  },
+
+  // Sound may be set up before the renderer starts (the project opens first).
+  async attachAudio(buffer, sampleRate, channels) {
+    await ensureWasm();
+    playback?.pause();
+    audio?.dispose();
+    blocks.clear();
+    audio = new AudioPlayer(buffer, sampleRate, channels, blocks);
+  },
+  play: (rate) => requirePlayback().play(rate),
+  pause: () => requirePlayback().pause(),
+  togglePlay: () => requirePlayback().toggle(),
+  shuttle: (key) => requirePlayback().shuttle(key),
+  seek: (time, options) => requirePlayback().seek(time, options),
+  step: (frames) => requirePlayback().step(frames),
+  setQuality: (mode) => requirePlayback().setQuality(mode),
+  playbackState: () => requirePlayback().state(),
+  playbackStats: () => requirePlayback().stats(),
+  resetPlaybackStats: () => requirePlayback().resetStats(),
+  async seekAndWait(time) {
+    const controller = requireDiagnostics();
+    const started = performance.now();
+    controller.pause();
+    controller.seek(time);
+    await controller.whenSettled();
+    return { ms: performance.now() - started };
+  },
+  renderPixels: (time) => requireDiagnostics().pixels(time),
+  async readComposition() {
+    requireDiagnostics();
+    return (await engine!.read_pixels()) as Pixels;
   },
 };
 expose(api);
