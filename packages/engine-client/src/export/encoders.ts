@@ -25,18 +25,57 @@ function dequeued(encoder: VideoEncoder | AudioEncoder) {
   );
 }
 
-/** The encoder configuration to use: hardware when the browser has it for `config`. */
+/** True when an encoder with `config` really encodes a black frame. */
+async function encodes(config: VideoEncoderConfig): Promise<boolean> {
+  let produced = false;
+  let failed = false;
+  const encoder = new VideoEncoder({
+    output: () => (produced = true),
+    error: () => (failed = true),
+  });
+  try {
+    encoder.configure(config);
+    const { width, height } = config;
+    const data = new Uint8Array(width * height * 1.5);
+    data.fill(16, 0, width * height).fill(128, width * height);
+    const frame = new VideoFrame(data, {
+      format: 'NV12',
+      codedWidth: width,
+      codedHeight: height,
+      timestamp: 0,
+    });
+    encoder.encode(frame, { keyFrame: true });
+    frame.close();
+    await Promise.race([
+      encoder.flush().catch(() => {}),
+      new Promise((resolve) => setTimeout(resolve, 5000)),
+    ]);
+    return produced && !failed;
+  } catch {
+    return false;
+  } finally {
+    if (encoder.state !== 'closed') encoder.close();
+  }
+}
+
+/**
+ * The encoder configuration to use: hardware when the browser has it for
+ * `config`, else the browser's choice, else software. A hardware encoder the
+ * browser offers may still fail to start (a software GPU process, where even its
+ * own choice is the hardware one), so each is tried on one frame.
+ */
 export async function chooseVideoConfig(
   config: VideoEncoderConfig,
 ): Promise<{ config: VideoEncoderConfig; hardware: boolean } | null> {
-  for (const hardwareAcceleration of ['prefer-hardware', 'no-preference'] as const) {
+  const preferences = ['prefer-hardware', 'no-preference', 'prefer-software'] as const;
+  for (const hardwareAcceleration of preferences) {
     const candidate = { ...config, hardwareAcceleration };
-    try {
-      if ((await VideoEncoder.isConfigSupported(candidate)).supported)
-        return { config: candidate, hardware: hardwareAcceleration === 'prefer-hardware' };
-    } catch {
-      /* Not this one. */
-    }
+    const supported = await VideoEncoder.isConfigSupported(candidate).then(
+      (support) => support.supported === true,
+      () => false,
+    );
+    if (supported && (await encodes(candidate)))
+      return { config: candidate, hardware: hardwareAcceleration === 'prefer-hardware' };
   }
   return null;
 }
