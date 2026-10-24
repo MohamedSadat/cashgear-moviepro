@@ -28,6 +28,37 @@ export {
   type AutosaveTarget,
   type OpenPlan,
 } from './project/persistence';
+export { probeEncoders, type EncoderSupport } from './export/capabilities';
+export {
+  clearOpfsExports,
+  downloadOpfsExport,
+  startExport,
+  type ExportHandlers,
+  type RunningExport,
+} from './export/client';
+export { remainingLabel } from './export/progress';
+export {
+  audioBitrate,
+  audioCodecLabels,
+  evenSize,
+  exportFileName,
+  fitNotice,
+  formatInfo,
+  formatsFor,
+  frameCount,
+  presetBitrate,
+  presets as exportPresets,
+  qualityBitrate,
+  videoCodecLabels,
+  type ExportAudioCodec,
+  type ExportFormat,
+  type ExportPreset,
+  type ExportQuality,
+  type ExportSettings,
+  type ExportVideoCodec,
+  type FormatInfo,
+} from './export/settings';
+export type * from './export/types';
 export type * from './media/types';
 export type * from './playback/types';
 export type * from './project/types';

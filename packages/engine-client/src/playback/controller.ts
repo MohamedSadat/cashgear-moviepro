@@ -1,11 +1,12 @@
 import type { MediaService } from '../media/service';
 import type { ManagedFrame } from '../media/frames';
-import { copyPlanes, type FramePlanes } from '../media/planes';
+import { copyPlanes } from '../media/planes';
 import { StreamDecoders } from '../media/stream-decoders';
 import { streamConfig, VideoStream } from '../media/video-stream';
 import { Playback, type Engine, type ProjectSession } from '../pkg/cgv_wasm';
 import { FLICKS_PER_SECOND } from '../project/types';
 import type { AudioPlayer } from './audio-player';
+import { drawFrame, drawsGpuFrames, type LayerSource } from './draw';
 import type {
   FramePlan,
   LayerPlan,
@@ -27,11 +28,6 @@ const audioClockTimeoutMs = 600;
 const scrubSeconds = 0.08;
 /** State updates while playing, at most this often. */
 const stateIntervalMs = 33;
-
-type LayerSource =
-  | { kind: 'gpu'; frame: VideoFrame; rotation: number }
-  | { kind: 'planes'; planes: FramePlanes; rotation: number }
-  | { kind: 'still'; key: string; width: number; height: number };
 
 type Clock =
   /** `reported`: the last tick the sound device's clock could be read. */
@@ -231,15 +227,8 @@ export class PlaybackController {
     return this.starting !== null || this.playback.playing();
   }
 
-  /**
-   * The renderer draws hardware decoder frames directly: WebGPU on a hardware
-   * adapter. WebGL2, and software adapters that cannot reach the decoder's
-   * frames, take their planes instead.
-   */
   private get gpuFrames() {
-    const engine = this.deps.engine;
-    const software = /swiftshader|warp|basic render|llvmpipe|software/i;
-    return engine.backend() === 'WebGPU' && !software.test(engine.adapter_name());
+    return drawsGpuFrames(this.deps.engine);
   }
 
   private get rate() {
@@ -692,38 +681,7 @@ export class PlaybackController {
 
   /** Composes `planJson` with its gathered sources and shows it. */
   private draw(planJson: string, sources: (LayerSource | null)[], scale: number, present: boolean) {
-    const engine = this.deps.engine;
-    engine.begin(planJson);
-    sources.forEach((source, index) => {
-      if (!source) return;
-      if (source.kind === 'gpu') {
-        const frame = source.frame;
-        engine.set_layer_frame(
-          index,
-          frame,
-          frame.displayWidth,
-          frame.displayHeight,
-          source.rotation,
-        );
-      } else if (source.kind === 'planes') {
-        const p = source.planes;
-        engine.set_layer_planes(
-          index,
-          p.format,
-          p.codedWidth,
-          p.codedHeight,
-          p.data,
-          p.layout,
-          p.colorSpace.matrix ?? undefined,
-          p.colorSpace.fullRange ?? undefined,
-          p.colorSpace.transfer ?? undefined,
-          p.displayWidth,
-          p.displayHeight,
-          source.rotation,
-        );
-      } else engine.set_layer_still(index, source.key, source.width, source.height);
-    });
-    return engine.compose(scale, present);
+    return drawFrame(this.deps.engine, planJson, sources, scale, present);
   }
 
   /** Draws the playhead's frame while paused, waiting for its sources. */

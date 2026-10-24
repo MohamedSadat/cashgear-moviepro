@@ -88,6 +88,8 @@ export class VideoStream {
   private epoch = 0;
   /** Outputs before this frame are closed on arrival. */
   private wanted: number;
+  /** Export: woken when a frame arrives, the decoder runs dry or the stream fails. */
+  private waiters: (() => void)[] = [];
   /** The newest frame the decoder has output. */
   newest = -1;
   error: Error | null = null;
@@ -117,6 +119,7 @@ export class VideoStream {
       output: (frame) => this.onOutput(frame),
       error: (error) => {
         this.error = error;
+        this.wake();
       },
     });
     pooled.decoder.ondequeue = () => void this.pump();
@@ -182,6 +185,13 @@ export class VideoStream {
   private add(entry: Ready) {
     this.ready.push(entry);
     this.ready.sort((a, b) => a.frame - b.frame);
+    this.wake();
+  }
+
+  private wake() {
+    const waiting = this.waiters;
+    this.waiters = [];
+    for (const resolve of waiting) resolve();
   }
 
   private get held() {
@@ -237,6 +247,27 @@ export class VideoStream {
         this.error = error instanceof Error ? error : new Error(String(error));
     } finally {
       this.feeding = false;
+      this.wake();
+    }
+  }
+
+  /**
+   * Export: frame `frame`, waiting for the decoder instead of dropping it. Like
+   * `frameFor`, the result belongs to the stream until the next call.
+   */
+  async frameWhenReady(frame: number, timeoutMs = 15000): Promise<StreamFrame> {
+    const until = performance.now() + timeoutMs;
+    while (true) {
+      const item = this.frameFor(frame);
+      if (item) return item;
+      if (this.error) throw this.error;
+      if (this.closed) throw new Error('The decoder was closed');
+      if (performance.now() > until) throw new Error(`Frame ${frame} was not decoded in time`);
+      // A missed wake-up costs at most a moment.
+      await new Promise<void>((resolve) => {
+        this.waiters.push(resolve);
+        setTimeout(resolve, 50);
+      });
     }
   }
 
@@ -311,5 +342,6 @@ export class VideoStream {
     this.epoch++;
     this.discard();
     this.giveBack();
+    this.wake();
   }
 }
