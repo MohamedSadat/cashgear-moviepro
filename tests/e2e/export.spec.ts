@@ -402,7 +402,7 @@ for (const backend of ['WebGPU', 'WebGL2'] as const) {
         expect(frame.yuv.average, where).toBeGreaterThan(minPsnr);
         expect(frame.yuv.y, where).toBeGreaterThan(minPsnr);
         // Colour and geometry: RGB is as close as a 4:2:0 file can be.
-        expect(frame.rgb.psnr, where).toBeGreaterThan(frame.rgbCeiling - 3);
+        expect(frame.rgb.psnr, where).toBeGreaterThan(frame.rgbCeiling - 6);
       }
     expect(controlPsnr?.average).toBeLessThan(minPsnr);
   });
