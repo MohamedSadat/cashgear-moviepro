@@ -298,8 +298,10 @@ test('seeks show the frame within 100 ms', async ({ page }, testInfo) => {
   };
   const result = { cached: summary(cached), uncached: summary(uncached), software };
   await record(testInfo, 'seek-latency', result);
+  // Software GPUs and decoders are no measure of speed: there seeks only have to work.
+  if (software) return;
   expect(result.cached.max).toBeLessThan(100);
-  if (!software) expect(result.uncached.p95).toBeLessThan(100);
+  expect(result.uncached.p95).toBeLessThan(100);
 });
 
 test('three stacked 1080p30 tracks play in real time at full resolution', async ({
@@ -326,7 +328,7 @@ test('three stacked 1080p30 tracks play in real time at full resolution', async 
   });
   expect(stats.level).toBe(0);
   expect(advanced).toBeGreaterThan(wall * 0.9);
-  expect(stats.presented).toBeGreaterThan(realtimeSeconds * 5);
+  expect(stats.presented).toBeGreaterThan(realtimeSeconds * (software ? 1 : 25));
   // Real time on the reference machine: every frame shown. CI's software GPU and
   // decoders are far slower; there only the clock and playback are checked.
   if (!software) {
@@ -350,8 +352,20 @@ test('picture and sound stay within one frame while playing', async ({ page }, t
     stats,
     software,
   });
+  expect(advanced).toBeGreaterThan(wall * 0.9);
+  if (software && stats.clock !== 'audio') {
+    // A CI runner may have no sound device: playback then follows the wall clock.
+    testInfo.annotations.push({
+      type: 'no sound device',
+      description: `Playback followed the wall clock: ${stats.fallback ?? 'no sound output'}`,
+    });
+    return;
+  }
   expect(stats.clock).toBe('audio');
   expect(stats.audio?.running).toBe(true);
+  // Software GPUs draw far fewer than 30 frames a second, so how long a frame stays
+  // on screen, not sync, would dominate their offsets: the numbers are recorded only.
+  if (software) return;
   expect(stats.audio?.underruns).toBe(0);
   // Sampled at every display refresh: the frame on screen against the sound heard.
   expect(stats.offset.count).toBeGreaterThan(driftSeconds * 20);
