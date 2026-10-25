@@ -3,3 +3,4 @@
 *.ico binary
 *.icns binary
 *.wasm binary
+assets/fonts/** binary
