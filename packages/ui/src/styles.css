@@ -22,6 +22,7 @@
   --cgv-clip-image: #68498f;
   --cgv-clip-offline: #6e2b2b;
   --cgv-clip-adjustment: #4f5566;
+  --cgv-clip-title: #8c5a2c;
   --cgv-transition: rgb(240 244 255 / 0.82);
   --cgv-curve-bg: #15181d;
   --cgv-curve-grid: #262b34;
@@ -1029,6 +1030,60 @@ body,
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--cgv-muted);
+}
+
+.cgv-element-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 160px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.cgv-element {
+  width: 100%;
+  padding: 4px 6px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 12px;
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cgv-text);
+  background: transparent;
+}
+
+.cgv-element:hover {
+  background: var(--cgv-surface-raised, rgba(255, 255, 255, 0.05));
+}
+
+.cgv-element[aria-pressed='true'] {
+  border-color: var(--cgv-accent, #3d8bfd);
+  background: rgba(61, 139, 253, 0.14);
+}
+
+.cgv-inspector-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.cgv-segmented {
+  display: flex;
+  gap: 2px;
+}
+
+.cgv-title-text {
+  width: 100%;
+  min-height: 56px;
+  resize: vertical;
+  font: inherit;
+  font-size: 13px;
 }
 
 .cgv-field {

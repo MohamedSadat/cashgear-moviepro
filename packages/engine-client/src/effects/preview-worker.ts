@@ -2,6 +2,7 @@
 // off-screen canvas draws each effect and transition on two sample pictures, so
 // the previews show what the shaders really do without touching the monitor.
 import { expose } from 'comlink';
+import { FontLoader, fontCatalog } from '../fonts/loader';
 import initWasm, { Engine, ProjectSession } from '../pkg/cgv_wasm';
 import type { FramePlan, LayerPlan, LutPlan, PlanStep } from '../playback/types';
 import { loadPackImages, lookText } from './assets';
@@ -131,13 +132,25 @@ const api: PreviewWorkerApi = {
         domainMin: [0, 0, 0],
         domainMax: [1, 1, 1],
       };
+      const fonts = new FontLoader(engine, fontCatalog());
       const images: (Blob | null)[] = [];
       for (const request of requests) {
         try {
           const params = { ...request.params };
           let layers: LayerPlan[];
           let steps: PlanStep[];
-          if (request.type === 'transition') {
+          // Titles are drawn on the canvas they were designed for, scaled down.
+          let project = { width, height };
+          if (request.type === 'title') {
+            project = { width: 1920, height: 1080 };
+            const back = layer(1, 'sample-b');
+            const title = { ...layer(2, ''), still: false, title: request.title };
+            layers = [back, title];
+            steps = [
+              { kind: 'layer', layer: 0 },
+              { kind: 'layer', layer: 1 },
+            ];
+          } else if (request.type === 'transition') {
             layers = [layer(1, 'sample-a'), layer(2, 'sample-b')];
             steps = [
               {
@@ -158,17 +171,19 @@ const api: PreviewWorkerApi = {
           const plan: FramePlan = {
             frame: 0,
             time: 0,
-            width,
-            height,
+            width: project.width,
+            height: project.height,
             layers,
             steps,
             luts: [look],
           };
-          engine.begin(JSON.stringify(plan));
-          layers.forEach((entry, index) =>
-            engine.set_layer_still(index, entry.media, width, height),
-          );
-          engine.compose(1, false);
+          const planJson = JSON.stringify(plan);
+          await fonts.ensure(planJson, plan);
+          engine.begin(planJson);
+          layers.forEach((entry, index) => {
+            if (!entry.title) engine.set_layer_still(index, entry.media, width, height);
+          });
+          engine.compose(width / project.width, false);
           const pixels = (await engine.read_pixels()) as {
             width: number;
             height: number;

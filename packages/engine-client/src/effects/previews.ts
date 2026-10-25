@@ -1,10 +1,16 @@
 import { releaseProxy, wrap } from 'comlink';
+import type { Title } from '../project/title';
 import type { Params } from '../project/types';
 import type { EffectKind } from './types';
 
-/** One browser item to preview: an effect on a sample picture, or a transition between two. */
+/**
+ * One browser item to preview: an effect on a sample picture, a transition
+ * between two, or a title (designed on a 1920×1080 canvas) over one.
+ */
 export interface PreviewRequest {
-  type: EffectKind;
+  type: EffectKind | 'title';
+  /** Titles: what to draw. */
+  title?: Title;
   pack: string;
   kind: string;
   params: Params;

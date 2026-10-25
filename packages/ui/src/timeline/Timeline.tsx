@@ -1,3 +1,4 @@
+import { titleName } from '../titles/templates';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   CgButton,
@@ -262,7 +263,9 @@ const ClipList = memo(function ClipList({
               {missing.has(clip.media) && 'Missing: '}
               {clip.kind === 'adjustment'
                 ? 'Adjustment layer'
-                : (names.get(clip.media) ?? clip.media)}
+                : clip.kind === 'title'
+                  ? `Title: ${titleName(clip.title)}`
+                  : (names.get(clip.media) ?? clip.media)}
               , {formatTime(clip.start)} to {formatTime(clip.start + clip.duration)} on{' '}
               {trackLabel(track, index)}
             </button>
@@ -378,6 +381,8 @@ export function Timeline({ editor, diagnostic }: { editor: EditorState; diagnost
       applyTransition: (item, target) => editorRef.current.applyTransition(item, target),
       addAdjustmentLayer: (time, track) =>
         editorRef.current.addAdjustmentLayer(time, track ?? undefined),
+      addTitle: (template, time, track) =>
+        editorRef.current.addTitle(template, time, track ?? undefined),
       scrolled: (top) => {
         if (headers.current) headers.current.style.transform = `translateY(${-top}px)`;
       },

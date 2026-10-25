@@ -15,7 +15,9 @@ import {
   usePausedTime,
   type KeyContext,
 } from './fields';
+import { TitleInspector } from './TitleInspector';
 import { TransitionInspector } from './TransitionInspector';
+import { titleName } from '../titles/templates';
 
 const speeds: Speed[] = [
   { num: 1, den: 4 },
@@ -151,8 +153,9 @@ export function Inspector({ editor }: { editor: EditorState }) {
       </aside>
     );
   const adjustment = clip.kind === 'adjustment';
+  const title = clip.kind === 'title';
   const media = snapshot.project.media.find((item) => item.id === clip.media);
-  const still = media?.kind === 'image' || adjustment;
+  const still = media?.kind === 'image' || adjustment || title;
   const locked = snapshot.project.tracks.some(
     (track) => track.locked && track.clips.some((c) => c.id === clip.id),
   );
@@ -195,7 +198,13 @@ export function Inspector({ editor }: { editor: EditorState }) {
       data-clip-id={clip.id}
       aria-label="Inspector"
     >
-      <h2 title={media?.name}>{adjustment ? 'Adjustment layer' : (media?.name ?? 'Clip')}</h2>
+      <h2 title={media?.name}>
+        {adjustment
+          ? 'Adjustment layer'
+          : title
+            ? `Title: ${titleName(clip.title)}`
+            : (media?.name ?? 'Clip')}
+      </h2>
       {locked && <p className="cgv-muted">This clip is on a locked track.</p>}
       {adjustment && (
         <Section title="Adjustment">
@@ -203,8 +212,19 @@ export function Inspector({ editor }: { editor: EditorState }) {
           {opacity}
         </Section>
       )}
+      {title && (
+        <TitleInspector
+          key={clip.id}
+          editor={editor}
+          clip={clip}
+          context={context}
+          canvas={snapshot.project.settings}
+          frame={frame}
+          disabled={locked}
+        />
+      )}
       {clip.video && !adjustment && (
-        <Section title="Transform">
+        <Section title={title ? 'Whole title' : 'Transform'}>
           {field({
             label: 'Position X',
             properties: ['transform.x'],

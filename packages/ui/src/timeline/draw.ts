@@ -2,6 +2,7 @@
 // and waveforms, the ruler, markers and gesture feedback. Only what is in view is
 // drawn, so the cost follows the canvas size, not the clip count. The playhead is
 // an element over the canvas, so playback never redraws it.
+import { titleName } from '../titles/templates';
 import {
   FLICKS_PER_SECOND,
   type Clip,
@@ -44,6 +45,7 @@ export interface Palette {
   clipAudio: string;
   clipImage: string;
   clipAdjustment: string;
+  clipTitle: string;
   clipOffline: string;
   transition: string;
   clipText: string;
@@ -70,6 +72,7 @@ const defaults: Palette = {
   clipAudio: '#2b7350',
   clipImage: '#68498f',
   clipAdjustment: '#4f5566',
+  clipTitle: '#8c5a2c',
   clipOffline: '#6e2b2b',
   transition: 'rgba(240, 244, 255, 0.82)',
   clipText: '#eef1f6',
@@ -103,6 +106,7 @@ const tokenNames: Record<Exclude<keyof Palette, 'markers'>, string> = {
   clipAudio: '--cgv-clip-audio',
   clipImage: '--cgv-clip-image',
   clipAdjustment: '--cgv-clip-adjustment',
+  clipTitle: '--cgv-clip-title',
   clipOffline: '--cgv-clip-offline',
   transition: '--cgv-transition',
   clipText: '--cgv-clip-text',
@@ -280,16 +284,20 @@ function drawClip(
   const h = row.height - 4;
   const media = input.media.get(clip.media);
   const adjustment = clip.kind === 'adjustment';
-  const offline = !adjustment && input.missing.has(clip.media);
+  const title = clip.kind === 'title';
+  const generated = adjustment || title;
+  const offline = !generated && input.missing.has(clip.media);
   ctx.fillStyle = offline
     ? palette.clipOffline
     : adjustment
       ? palette.clipAdjustment
-      : !clip.video
-        ? palette.clipAudio
-        : media?.kind === 'image'
-          ? palette.clipImage
-          : palette.clipVideo;
+      : title
+        ? palette.clipTitle
+        : !clip.video
+          ? palette.clipAudio
+          : media?.kind === 'image'
+            ? palette.clipImage
+            : palette.clipVideo;
   if (w < 3) {
     ctx.fillRect(x, y, w, h);
     return;
@@ -308,7 +316,7 @@ function drawClip(
         ? Math.round((h - nameBar) * 0.38)
         : h - nameBar
       : 0;
-    if (visuals && !offline && !adjustment) {
+    if (visuals && !offline && !generated) {
       if (clip.video && visuals.thumbnails.length)
         drawFilmstrip(ctx, input, clip, visuals, x, y + nameBar, w, h - nameBar - waveHeight);
       if (clip.audio)
@@ -332,7 +340,11 @@ function drawClip(
         (offline ? 'Missing: ' : '') +
         (clip.effects?.length ? 'fx ' : '') +
         speedLabel(clip) +
-        (adjustment ? 'Adjustment layer' : (media?.name ?? clip.media));
+        (adjustment
+          ? 'Adjustment layer'
+          : title
+            ? titleName(clip.title)
+            : (media?.name ?? clip.media));
       ctx.fillText(name, Math.max(x, 0) + 5, y + nameBar / 2 + 0.5);
     }
     ctx.restore();

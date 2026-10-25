@@ -29,6 +29,7 @@ export function copyClips(project: Project, ids: number[]): ClipboardItem[] {
       track,
       offset: clip.start - first,
       clip: {
+        kind: clip.kind,
         media: clip.media,
         sourceIn: clip.sourceIn,
         duration: clip.duration,
@@ -41,6 +42,17 @@ export function copyClips(project: Project, ids: number[]): ClipboardItem[] {
           opacity: clip.opacity,
           volumeDb: clip.volumeDb,
         },
+        // Effects keep their ids, so their keyframes follow them to the copy.
+        effects: clip.effects?.map(({ id, kind, pack, version, enabled, params }) => ({
+          id,
+          kind,
+          pack,
+          version,
+          enabled,
+          params,
+        })),
+        keyframes: clip.keyframes,
+        title: clip.title,
       },
       group: clip.link !== null && (groups.get(clip.link) ?? 0) > 1 ? clip.link : null,
     }));

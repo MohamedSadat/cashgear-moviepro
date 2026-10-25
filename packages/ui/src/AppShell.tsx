@@ -14,6 +14,8 @@ import { DevOverlay } from './DevOverlay';
 import { useCatalog } from './effects/catalog';
 import { EffectsBrowser } from './effects/EffectsBrowser';
 import { usePreviews } from './effects/usePreviews';
+import { TitlesBrowser } from './titles/TitlesBrowser';
+import { useTitlePreviews } from './titles/useTitlePreviews';
 import { useEditor, type EditorState } from './editing/useEditor';
 import { ExportDialog } from './export/ExportDialog';
 import { useExport, type ExportState } from './export/useExport';
@@ -109,6 +111,8 @@ export function AppShell({ platform }: Props) {
   // Previews render once someone opens the effects or transitions.
   const [browsing, setBrowsing] = useState(false);
   const previews = usePreviews(browsing ? catalog : null);
+  const [titling, setTitling] = useState(false);
+  const titlePreviews = useTitlePreviews(titling);
   const keymap = useMemo(() => effectiveKeymap(settings.shortcuts), [settings.shortcuts]);
   const [dialog, setDialog] = useState<'projects' | 'settings' | 'shortcuts' | 'export' | null>(
     null,
@@ -263,12 +267,19 @@ export function AppShell({ platform }: Props) {
       <Workspace
         library={
           <LibraryTabs
-            onSelect={(id) => id !== 'media' && setBrowsing(true)}
+            onSelect={(id) =>
+              id === 'titles' ? setTitling(true) : id !== 'media' && setBrowsing(true)
+            }
             tabs={[
               {
                 id: 'media',
                 label: 'Media',
                 render: () => <MediaLibraryPanel project={project} />,
+              },
+              {
+                id: 'titles',
+                label: 'Titles',
+                render: () => <TitlesBrowser editor={editor} previews={titlePreviews} />,
               },
               {
                 id: 'effects',

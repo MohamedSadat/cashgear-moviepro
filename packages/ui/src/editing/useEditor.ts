@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
-import type { Clip, Command, Project, Track, Transition } from '@cgv/engine-client';
+import type { Clip, ClipSpec, Command, Project, Track, Transition } from '@cgv/engine-client';
 import type { Catalog, CatalogItem } from '../effects/catalog';
 import type { PlaybackControls } from '../monitor/usePlayback';
 import type { ProjectState } from '../project/useProject';
 import type { ActionId } from '../shortcuts/keymap';
 import { findClip, projectEnd, withPartners } from '../timeline/controller';
+import { templateSpec, type TitleTemplate } from '../titles/templates';
 import { frameDuration } from '../timeline/geometry';
 import { copyClips, planPaste, type ClipboardItem } from './clipboard';
 import {
@@ -45,6 +46,8 @@ export interface EditorState {
   applyTransition(item: CatalogItem, target?: { track: number } & CutTarget): Promise<void>;
   /** Adds an adjustment layer at `time` (the playhead) on `track`, or above the others. */
   addAdjustmentLayer(time?: number, track?: number): Promise<void>;
+  /** Adds a title from `template` at `time` (the playhead) on `track`, or above the others. */
+  addTitle(template: TitleTemplate, time?: number, track?: number): Promise<void>;
   tool: Tool;
   setTool(tool: Tool): void;
   snapping: boolean;
@@ -195,23 +198,50 @@ export function useEditor(
     [selectTransition],
   );
 
-  const addAdjustmentLayer = useCallback(async (time?: number, track?: number) => {
-    const { project, playback, current } = state.current;
-    if (!current) return;
-    const frame = frameDuration(current.settings.frameRate);
-    const at = Math.round((time ?? playback.state?.time ?? 0) / frame) * frame;
-    const clip = { kind: 'adjustment' as const, duration: adjustmentDuration };
-    const top = current.tracks[current.tracks.length - 1];
-    const free = (t: Track) =>
-      t.id !== current.mainTrack &&
-      t.clips.every((c) => c.start + c.duration <= at || c.start >= at + adjustmentDuration);
-    const onto = track ?? (top && free(top) ? top.id : null);
-    const created = await project.transaction('Add adjustment layer', async (step) => {
-      const target = onto ?? (await step({ type: 'addTrack', index: current.tracks.length }))[0];
-      return step({ type: 'overwrite', track: target, at, clip });
-    });
-    if (created?.length) setSelection([created[0]]);
-  }, []);
+  /**
+   * Places a clip without media (an adjustment layer or a title) at `time` on
+   * `track`, or on the top track where it is free, else on a new track above.
+   */
+  const addGenerated = useCallback(
+    async (label: string, clip: ClipSpec, time?: number, track?: number) => {
+      const { project, playback, current } = state.current;
+      if (!current) return;
+      const frame = frameDuration(current.settings.frameRate);
+      const at = Math.round((time ?? playback.state?.time ?? 0) / frame) * frame;
+      const top = current.tracks[current.tracks.length - 1];
+      const free = (t: Track) =>
+        t.id !== current.mainTrack &&
+        t.clips.every((c) => c.start + c.duration <= at || c.start >= at + clip.duration);
+      const onto = track ?? (top && free(top) ? top.id : null);
+      const created = await project.transaction(label, async (step) => {
+        const target = onto ?? (await step({ type: 'addTrack', index: current.tracks.length }))[0];
+        return step({ type: 'overwrite', track: target, at, clip });
+      });
+      if (created?.length) setSelection([created[0]]);
+    },
+    [],
+  );
+
+  const addAdjustmentLayer = useCallback(
+    (time?: number, track?: number) =>
+      addGenerated(
+        'Add adjustment layer',
+        { kind: 'adjustment', duration: adjustmentDuration },
+        time,
+        track,
+      ),
+    [addGenerated],
+  );
+
+  const addTitle = useCallback(
+    async (template: TitleTemplate, time?: number, track?: number) => {
+      const current = state.current.current;
+      if (!current) return;
+      const spec = templateSpec(template, current.settings);
+      await addGenerated(`Add ${template.name.toLowerCase()}`, spec, time, track);
+    },
+    [addGenerated],
+  );
 
   const playhead = useCallback(() => state.current.playback.state?.time ?? 0, []);
 
@@ -348,6 +378,7 @@ export function useEditor(
     applyEffect,
     applyTransition,
     addAdjustmentLayer,
+    addTitle,
     tool,
     setTool,
     snapping: options.snapping,
