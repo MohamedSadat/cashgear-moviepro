@@ -6,6 +6,7 @@ default-members = [
   "crates/cgv-time",
   "crates/cgv-model",
   "crates/cgv-effects",
+  "crates/cgv-text",
   "crates/cgv-media",
   "crates/cgv-render",
   "crates/cgv-audio",
@@ -30,9 +31,14 @@ web-sys = "0.3.106"
 js-sys = "0.3.106"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+rustybuzz = "0.20"
+unicode-bidi = "0.3"
+unicode-linebreak = "0.1"
+zeno = "0.3"
 cgv-time = { path = "crates/cgv-time" }
 cgv-model = { path = "crates/cgv-model" }
 cgv-effects = { path = "crates/cgv-effects" }
+cgv-text = { path = "crates/cgv-text" }
 cgv-media = { path = "crates/cgv-media" }
 cgv-render = { path = "crates/cgv-render" }
 cgv-audio = { path = "crates/cgv-audio" }
@@ -53,4 +59,11 @@ opt-level = "s"
 [profile.release.package.cgv-effects]
 opt-level = "s"
 [profile.release.package.serde_json]
+opt-level = "s"
+# Shaping runs when a title's text or style changes, not per pixel.
+[profile.release.package.rustybuzz]
+opt-level = "s"
+[profile.release.package.unicode-bidi]
+opt-level = "s"
+[profile.release.package.unicode-linebreak]
 opt-level = "s"

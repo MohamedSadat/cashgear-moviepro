@@ -69,7 +69,7 @@ pub struct Stroke {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Shadow {
     pub color: Color,
-    /// Offset in project pixels, before the element's rotation.
+    /// Offset in project pixels, scaled with the element but not turned with it.
     pub x: f64,
     pub y: f64,
     /// Blur radius in project pixels.
@@ -180,7 +180,8 @@ pub enum ShapeKind {
     Ellipse,
     /// A bar `width` long and `height` thick, with round ends.
     Line,
-    /// A line ending in a head, pointing right.
+    /// An arrow pointing right that fills its box: its head is as tall as the box,
+    /// its shaft a third as thick.
     Arrow,
     /// A regular polygon of `sides` sides in the `width` by `height` box, pointing up.
     Polygon,
