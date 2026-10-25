@@ -106,7 +106,7 @@ Gotchas:
 - A new effect is a folder in `assets/effects/` and nothing else, plus its fixture in `tests/fixtures/effects.json`. Make its golden with `UPDATE_GOLDEN=1` on the chrome project, then keep only the new PNG.
 - Effect shaders must give the same picture on every GPU: use the prelude's `hash`, `time_step`, `seed_step`, `cell_of` and `coverage`, not `sin` hashes or `floor(time * rate)`.
 - Golden scenes are made at the project's size: a minified source lets each GPU filter differently.
-- On WebGL2, wgpu copies an `ImageBitmap` at the next submit, so `upload_image` submits at once, before the bitmap closes.
+- Pack images reach the GPU as RGBA bytes (`upload_image`), decoded through a 2D canvas in the worker. Copying grey `ImageBitmap`s failed about one engine start in five on SwiftShader's WebGPU, and wgpu's WebGL2 backend copies bitmaps only at the next submit.
 - Effects run at a layer's drawn size. Keyframed layers round it up to sixteenths of an octave, and the texture pool destroys textures unused for 30 frames: never key pooled textures on a size that changes every frame.
 - Every engine (monitor, export, previews) loads the pack's images at start.
 - An inspector field with a stopwatch is a `div`, not a `label`: a label passes clicks on it to its first button.

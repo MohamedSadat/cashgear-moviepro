@@ -16,6 +16,7 @@ Choices made while building effects, transitions and keyframes.
   - Choice settings become WGSL constants, so shaders compare names, not numbers.
   - The prelude gives inputs (`read_input`, `read_original`, `read_from`, `read_to`, `read_image`, `apply_lut`) and helpers (`luma`, HSV, `value_noise`, `hash`, `time_step`, `seed_step`, `cell_of`, `coverage`).
   - Pack images, such as the luma-wipe gradients, are PNGs in the effect's folder. Every engine (monitor, export, previews) loads them at start.
+  - The worker decodes them to RGBA bytes through a 2D canvas, and the renderer writes the bytes. Copying the grey gradients from `ImageBitmap`s failed inside the browser on SwiftShader's WebGPU, about one engine start in five ("[Invalid Texture] is invalid due to a previous error"), which CI's first Phase 6 run showed. 30 starts in a row now pass, and the luma-wipe goldens are unchanged.
   - `assets/README.md` is the authoring guide. Adding Duotone touched only its folder and its golden fixture.
 - **The same picture on every GPU:** golden renders on WebGPU and WebGL2, hardware and software, must agree, which shaped the helpers.
   - Noise comes from an integer hash (PCG), not the usual `sin` hash, whose precision differs between GPUs.
@@ -49,6 +50,7 @@ Choices made while building effects, transitions and keyframes.
   - Volume keys become a gain envelope, evaluated every 256 samples and blended linearly between.
   - Multi-property changes (a uniform scale keys X and Y) are one command, one undo step.
 - **Effect previews:** drawn once per session by a worker with its own engine, on two pictures it paints itself.
+- **Software GPUs:** the five-effect real-time test runs at 640×360 there. At 1080p, CI's SwiftShader never moved the playhead in 10 s; locally it played at a third of real time.
 - **WASM size:** the effect catalogue, the model and `serde_json` are built with `opt-level = "s"`. Release WASM is 1,482,207 bytes gzipped, within the 1.5 MB budget (1,518,732 before).
 - **Found, not fixed:** paused frames and exports of 4:2:0 video show the picture's last row with its colour a quarter weaker. The browser's own conversion, used while playing, and FFmpeg both show it at full strength. The cause is in the planes path (Phases 1 to 3), not in effects. On an untransformed frame it is one row; under rotation it shows along the bottom edge.
 
