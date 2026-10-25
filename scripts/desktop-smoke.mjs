@@ -83,6 +83,9 @@ if (hostedRunner) {
     throw new Error('Could not configure WebView2 test policy: ' + added.stderr);
 }
 
+/** What the app's CSP refused, from the console of every launch. The smoke fails on any. */
+const policyViolations = [];
+
 /** Starts the desktop app and attaches to its WebView2. Launches share the profile and data folder. */
 async function launch() {
   const child = spawn(join(root, 'target/release/cgv-desktop.exe'), [], {
@@ -127,6 +130,7 @@ async function launch() {
     if (message.type() !== 'error') return;
     const { url, lineNumber } = message.location();
     console.error('Console error: ' + message.text() + (url ? ` (${url}:${lineNumber})` : ''));
+    if (message.text().includes('Content Security Policy')) policyViolations.push(message.text());
   });
   return { child, browser, page };
 }
@@ -274,6 +278,35 @@ try {
     for (const [frame, barcode] of reads)
       if (frame !== barcode) throw new Error(`${name}: frame ${frame} decoded as ${barcode}`);
   results.push({ media });
+
+  // Filmstrips: the timeline fetches each thumbnail's object URL and decodes it,
+  // which the CSP must allow.
+  const filmstrip = await page.evaluate(async () => {
+    const id = (await window.__cgv.client.api.mediaSnapshot()).find(
+      (item) => item.name === 'h264-1080p30-aac.mp4',
+    ).id;
+    const deadline = Date.now() + 60000;
+    let urls = [];
+    while (!urls.length && Date.now() < deadline) {
+      urls = window.__cgv.library.visuals[id]?.thumbnails ?? [];
+      if (!urls.length) await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    const sizes = new Set();
+    for (const url of urls) {
+      try {
+        const bitmap = await createImageBitmap(await (await fetch(url)).blob());
+        sizes.add(bitmap.width + 'x' + bitmap.height);
+        bitmap.close();
+      } catch (error) {
+        throw new Error(`Filmstrip image ${url} could not be read: ${error.message}`, {
+          cause: error,
+        });
+      }
+    }
+    return { thumbnails: urls.length, sizes: [...sizes] };
+  });
+  if (!filmstrip.thumbnails) throw new Error('The H.264 clip has no filmstrip');
+  results.push({ filmstrip });
 
   // Projects: save to a real .cgvproj file and reopen it from the recent list.
   const saved = await page.evaluate(async (path) => {
@@ -601,6 +634,8 @@ try {
     JSON.stringify(results, null, 2) + '\n',
   );
   console.log(JSON.stringify(results, null, 2));
+  if (policyViolations.length)
+    throw new Error('The CSP refused: ' + [...new Set(policyViolations)].join(' | '));
 } finally {
   await app?.browser.close().catch((error) => {
     console.error('Could not close the desktop browser: ' + error.message);

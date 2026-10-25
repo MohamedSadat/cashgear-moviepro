@@ -2,6 +2,12 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-25: Desktop filmstrips
+
+- The timeline reads each filmstrip thumbnail by fetching its object URL and decoding the blob off the main thread. The desktop's CSP allowed `blob:` for images and workers but not for `connect-src`, so every fetch failed and desktop timelines drew no filmstrips (since Phase 4).
+- `connect-src` now allows `blob:`. A page can fetch only blob URLs its own origin created, so this opens no path to the network. Decoding through an `<img>` instead would keep the policy as it was, but any other fetch of an object URL would hit the same wall.
+- The desktop smoke now reads the H.264 clip's filmstrip the way the timeline does, and fails on any CSP violation in the console.
+
 ## 2026-10-25: Phase 8 findings and defaults
 
 Choices made while building the audio features.
