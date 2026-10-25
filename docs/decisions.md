@@ -2,6 +2,62 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-25: Phase 8 answers
+
+- **Sound library:** about 30 sound effects and 10 music beds made by our own script (`scripts/make-sounds.mjs`), as the stickers and looks are. No licences are involved, and the files can be made again. The music is simple; licensed music can be added before release.
+- **Audio effects at launch:** the plan's five plus basics.
+  - The plan's five: EQ (parametric, with presets), compressor, noise gate, reverb and noise reduction (`nnnoiseless`).
+  - The basics: a limiter, high- and low-pass filters, and echo.
+- **CashGear Audio:** no shared code yet. No CashGear Audio repository exists on this machine. The DSP gets its own crate here, with no dependency on the project model, so it can move to a shared repository when CashGear Audio needs it.
+- **Ducking:** live, by track role.
+  - Tracks are marked Dialogue, Music or Effects.
+  - The mixer lowers Music tracks whenever a Dialogue track plays, so ducking stays right after edits.
+  - The amount and the fade times are set in the mixer.
+
+## 2026-10-25: Phase 8 defaults
+
+These were proposed alongside the questions, and the user raised no objection.
+
+- **Sizes measured before asking:** on a probe crate built for wasm32 at `opt-level = "s"` with LTO, `nnnoiseless` 0.5 adds about 183 KB gzipped (its FFT through `easyfft` and `rustfft`, and the RNNoise weights), and `ebur128` 0.1 adds about 32 KB. The engine has 116 KB left of its 2 MB budget.
+  - So noise reduction gets a WASM module of its own, loaded the first time a clip uses it.
+  - `ebur128` and our own DSP go in the engine, built for size. The budget stays at 2 MB.
+- **Model:** `.cgvproj` format 5, with a migration from format 4.
+  - Tracks get a volume, a pan, solo and a role.
+  - Clips get fade-in and fade-out lengths and an audio effect stack.
+  - Music tracks get ducking settings.
+- **Mixer:** a strip per track, with volume, constant-power pan, mute, solo and a meter.
+  - The master strip has peak and RMS meters and a loudness readout in LUFS.
+  - Solo mutes every track that is not soloed.
+- **Meters:**
+  - Peak meters hold for 1.5 s, then fall as IEC meters do.
+  - RMS is taken over 300 ms and read plainly, so a full-scale sine shows −3.0 dBFS.
+  - Loudness follows EBU R128.
+  - The reference is FFmpeg's `astats` and `ebur128` filters, plus the EBU Tech 3341 test signals made by our own script. Readings must agree within 0.1 dB or 0.1 LU.
+- **Fades and crossfades:**
+  - Fade handles sit at a clip's top corners.
+  - A transition on a cut also crossfades the sound of both clips, at equal power, using media beyond their edges. A cut between sound-only clips takes a transition too, which is then a crossfade.
+  - The volume line on a clip drags up and down. Ctrl-click adds a key to the existing `volumeDb` keyframes.
+- **Audio effects:**
+  - Each clip has a stack in the inspector, like its video effects.
+  - The DSP is our own Rust: biquad EQ and filters, compressor, gate, limiter, echo and a Freeverb-style reverb.
+  - Effects run in play order. After a seek, each chain is warmed up on the second before the playhead, so the preview sounds as the export does.
+- **Loudness on export:**
+  - Two passes: the mix is measured first, then exported through a fixed gain and a true-peak limiter with a −1 dBTP ceiling.
+  - Targets: −14 LUFS (the default, for YouTube, TikTok and Instagram), −16 (Apple, podcasts), −23 (EBU R128), −24 (ATSC A/85), a custom value, or off.
+  - Exports are checked with FFmpeg's `ebur128` filter.
+- **Voiceover:**
+  - A record button in the timeline toolbar, a 3-2-1 countdown, an input meter, and hearing yourself as an option (off by default, to avoid feedback).
+  - Sound is captured as raw PCM through an AudioWorklet into a 48 kHz WAV file. MediaRecorder's timing is too loose for alignment within a frame.
+  - The clip is placed at the playhead. Placement is corrected from the output clock and the input latency the browser reports.
+  - Files go to OPFS on the web. On the desktop they go to a `Voiceovers` folder next to the project.
+- **Measuring voiceover alignment:**
+  - On the reference machine, Chrome's system-audio loopback (`getDisplayMedia`, nothing to install) records the timeline's own click track through the real output device.
+  - In CI, Chrome's fake microphone is used.
+  - If the loopback does not work, a virtual audio cable is discussed with the user first.
+- **Library tabs:** Music and Sounds, with search, categories and a preview played by the engine. A sound is added by dragging it or double-clicking it.
+- **Already done:** detaching sound from video (Phase 2, with volume keys moving in Phase 6).
+- **Pushing:** one push near the end of the phase, after the user's go-ahead.
+
 ## 2026-10-25: Phase 7 findings and defaults
 
 Choices made while building titles, overlays and stickers.
