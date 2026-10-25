@@ -174,6 +174,12 @@ fn visual_layer(project: &Project, track: TrackId, clip: &Clip, time: Flicks) ->
     let still = media.is_still();
     let source_time = if still {
         Flicks::ZERO
+    } else if media.loops() {
+        Flicks(
+            (clip.source_in + clip.speed.source_span(offset))
+                .0
+                .rem_euclid(media.duration.0),
+        )
     } else {
         let at = clip.source_in + clip.speed.source_span(offset);
         Flicks(at.0.clamp(0, (media.duration.0 - 1).max(0)))
@@ -182,7 +188,8 @@ fn visual_layer(project: &Project, track: TrackId, clip: &Clip, time: Flicks) ->
         clip: clip.id,
         track,
         media: clip.media.clone(),
-        still,
+        // Animated images are drawn from their frames, each kept as a still.
+        still: still || media.loops(),
         source_time,
         transform: clip.transform_at(offset),
         crop: clip.crop_at(offset),
@@ -896,6 +903,33 @@ mod tests {
         assert!(plan.layers[0].moving);
         // No decoder starts early for a title.
         assert!(upcoming_layers(session.project(), Flicks::ZERO, Flicks(FRAME * 90)).is_empty());
+    }
+
+    #[test]
+    fn animated_images_loop_their_frames_over_the_clip() {
+        let mut session = session();
+        let gif = MediaRef {
+            duration: Flicks(FRAME * 20),
+            ..media("gif", MediaKind::Image)
+        };
+        session.execute(&Command::AddMedia { media: gif }).unwrap();
+        let top = track(&session, 1);
+        session
+            .execute(&Command::Append {
+                track: top,
+                clip: ClipSpec {
+                    media: "gif".into(),
+                    source_in: Flicks(FRAME * 5),
+                    duration: Flicks(FRAME * 90),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        // Frame 40 of the clip is frame 45 of the loop, which is 20 frames long: 5.
+        let plan = plan_frame(session.project(), Flicks(FRAME * 40));
+        let layer = &plan.layers[0];
+        assert!(layer.still, "drawn from its frames, as stills");
+        assert_eq!(layer.source_time, Flicks(FRAME * 5));
     }
 
     #[test]

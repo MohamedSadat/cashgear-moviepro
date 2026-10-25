@@ -12,6 +12,8 @@ pub enum MediaSource {
     Opfs { path: String },
     /// A local file streamed through the `cgv-media://` protocol (desktop).
     Path { path: String },
+    /// A file of the app's own pack (a sticker), by its path under `assets`.
+    Pack { path: String },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

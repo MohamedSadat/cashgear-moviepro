@@ -688,6 +688,11 @@ impl Edit {
             if clip.source_in != Flicks::ZERO {
                 return Err("Stills have no source position".into());
             }
+        } else if media.loops() {
+            // Animated images loop: any length, starting anywhere in their loop.
+            if clip.source_in < Flicks::ZERO || clip.source_in >= media.duration {
+                return Err(format!("{} has no frame there", media.name));
+            }
         } else if clip.source_in < Flicks::ZERO {
             return Err(format!("{} has nothing before that point", media.name));
         } else if clip.source_out() > media.duration + SOURCE_SLACK {

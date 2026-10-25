@@ -114,7 +114,7 @@ impl MediaLibrary {
             (Some(v), MediaKind::Video) => {
                 timecode(v.frame_rate.frame_at(duration), v.frame_rate, false)
             }
-            (_, MediaKind::Image) => String::new(),
+            (_, MediaKind::Image) if duration == Flicks::ZERO => String::new(),
             _ => format_clock(duration),
         };
         let status = self.status_for(&video, &audio);

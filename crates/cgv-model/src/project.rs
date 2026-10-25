@@ -320,6 +320,9 @@ pub enum MediaLocation {
     Path { path: String },
     /// A file the browser keeps for this media id: a File System Access handle or an OPFS copy.
     Browser,
+    /// A file of the app's own pack (a sticker), by its path under `assets`: the
+    /// app has it wherever the project opens.
+    Pack { path: String },
 }
 
 /// A media file the project uses, with what relinking and the timeline need to know.
@@ -329,7 +332,8 @@ pub struct MediaRef {
     pub id: String,
     pub name: String,
     pub kind: MediaKind,
-    /// Zero for still images, which play for any duration.
+    /// Zero for still images, which play for any duration. An animated image's
+    /// is one loop of its frames.
     pub duration: Flicks,
     pub has_video: bool,
     pub has_audio: bool,
@@ -344,8 +348,14 @@ pub struct MediaRef {
 }
 
 impl MediaRef {
+    /// A still image: one picture for any length of clip.
     pub fn is_still(&self) -> bool {
-        self.kind == MediaKind::Image
+        self.kind == MediaKind::Image && self.duration == Flicks::ZERO
+    }
+
+    /// An animated image (GIF, WebP, APNG): its frames loop for as long as its clip lasts.
+    pub fn loops(&self) -> bool {
+        self.kind == MediaKind::Image && self.duration > Flicks::ZERO
     }
 
     pub fn validate(&self) -> Result<(), String> {

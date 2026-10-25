@@ -20,7 +20,8 @@ pub fn media_ref(item: &MediaItem, modified: Option<i64>) -> MediaRef {
         id: item.id.clone(),
         name: item.name.clone(),
         kind,
-        duration: if kind == MediaKind::Image {
+        // A still image has no length of its own; an animated one lasts a loop.
+        duration: if kind == MediaKind::Image && !item.image.as_ref().is_some_and(|i| i.animated) {
             Flicks::ZERO
         } else {
             item.duration
@@ -34,6 +35,7 @@ pub fn media_ref(item: &MediaItem, modified: Option<i64>) -> MediaRef {
         modified,
         location: match &item.source {
             MediaSource::Path { path } => MediaLocation::Path { path: path.clone() },
+            MediaSource::Pack { path } => MediaLocation::Pack { path: path.clone() },
             MediaSource::Handle | MediaSource::Opfs { .. } => MediaLocation::Browser,
         },
     }
