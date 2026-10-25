@@ -8,6 +8,11 @@ export class ProgressClock {
 
   constructor(private readonly windowMs = 5000) {}
 
+  /** Forgets the rate so far, when the job moves on to work of another kind. */
+  reset() {
+    this.samples = [];
+  }
+
   /** Records that `done` units were finished at time `at` (milliseconds). */
   record(done: number, at: number) {
     this.samples.push({ at, done });

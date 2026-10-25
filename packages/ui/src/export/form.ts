@@ -1,5 +1,6 @@
 import {
   audioBitrate,
+  defaultLoudness,
   evenSize,
   exportPresets,
   formatInfo,
@@ -32,6 +33,8 @@ export interface ExportForm {
   audioCodec: ExportAudioCodec;
   /** MP3 only. */
   mp3Kbps: number;
+  /** Integrated loudness to normalise to (LUFS), or off. */
+  loudness: number | 'off';
 }
 
 /** GIFs are small and slow: 640 pixels wide at most, 15 frames a second. */
@@ -65,6 +68,7 @@ export function initialForm(project: ProjectSettings): ExportForm {
     audio: true,
     audioCodec: 'aac',
     mp3Kbps: 256,
+    loudness: defaultLoudness,
   };
 }
 
@@ -174,6 +178,7 @@ export function exportSettings(form: ExportForm, project: ProjectSettings): Expo
             form.format === 'mp3'
               ? form.mp3Kbps * 1000
               : audioBitrate(form.audioCodec, project.channels),
+          loudness: form.loudness === 'off' ? null : form.loudness,
         }
       : null,
   };

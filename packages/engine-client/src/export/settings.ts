@@ -18,7 +18,46 @@ export interface ExportSettings {
   /** Null for audio-only formats. */
   video: { codec: ExportVideoCodec; bitrate: number } | null;
   /** Null when the file has no sound track. */
-  audio: { codec: ExportAudioCodec; bitrate: number } | null;
+  audio: {
+    codec: ExportAudioCodec;
+    bitrate: number;
+    /** Integrated loudness to normalise to, in LUFS; null or missing leaves the mix as it is. */
+    loudness?: number | null;
+  } | null;
+}
+
+/** Loudness targets the dialog offers, in LUFS. */
+export const loudnessTargets: { value: number; label: string }[] = [
+  { value: -14, label: '-14 LUFS (YouTube, Spotify, TikTok)' },
+  { value: -16, label: '-16 LUFS (Apple, podcasts)' },
+  { value: -23, label: '-23 LUFS (EBU R128 broadcast)' },
+  { value: -24, label: '-24 LUFS (ATSC A/85)' },
+];
+/** The default target. */
+export const defaultLoudness = -14;
+/** True peaks stay under this, in dBTP, when loudness is normalised. */
+export const loudnessCeiling = -1;
+/** The most a normalised export is raised or lowered, in dB. */
+export const maxLoudnessGain = 24;
+/** The mixer's reading for silence. */
+const silentLufs = -200;
+
+/** What normalising an export measured and did. */
+export interface LoudnessPlan {
+  target: number;
+  /** The mix as it was: integrated LUFS and true peak in dBTP. */
+  measured: number;
+  truePeak: number;
+  /** The gain applied before the limiter. */
+  gainDb: number;
+  /** Measuring passes over the mix: two when the limiter's effect was measured too. */
+  passes: number;
+}
+
+/** The gain that takes `measured` LUFS to `target`: none for silence, within ±24 dB. */
+export function loudnessGain(measured: number, target: number): number {
+  if (!Number.isFinite(measured) || measured <= silentLufs + 1) return 0;
+  return Math.max(-maxLoudnessGain, Math.min(maxLoudnessGain, target - measured));
 }
 
 export interface FormatInfo {

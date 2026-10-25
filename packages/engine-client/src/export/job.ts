@@ -18,7 +18,7 @@ import { Engine, Mixer, type ProjectSession } from '../pkg/cgv_wasm';
 import { drawFrame } from '../playback/draw';
 import type { FramePlan, LayerPlan } from '../playback/types';
 import { FLICKS_PER_SECOND } from '../project/types';
-import { ExportAudio } from './audio';
+import { ExportAudio, normalizeLoudness } from './audio';
 import {
   AudioTrackEncoder,
   chooseVideoConfig,
@@ -37,6 +37,7 @@ import {
   frameMicroseconds,
   frameTime,
   videoCodecString,
+  type LoudnessPlan,
 } from './settings';
 import type { OpenTarget } from './targets';
 import type { ExportJob, ExportProgress, ExportResult } from './types';
@@ -218,7 +219,22 @@ export async function runExport(
     sink && mixer ? new ExportAudio(session, mixer, deps.blocks, sink, totalSamples) : null;
   const sources = new ExportFrames(engine, deps.media, deps.planes);
   let finished = false;
+  let loudness: LoudnessPlan | null = null;
   try {
+    const loudnessTarget = audio?.loudness;
+    if (mixer && loudnessTarget !== null && loudnessTarget !== undefined) {
+      // The whole mix is measured before anything is encoded.
+      loudness = await normalizeLoudness(
+        session,
+        mixer,
+        deps.blocks,
+        totalSamples,
+        loudnessTarget,
+        (fraction) => progress('measuring', Math.floor(fraction * units)),
+        signal,
+      );
+      clock.reset();
+    }
     await output.start();
     if (videoEncoder) {
       const project = JSON.parse(session.plan_frame(0)) as FramePlan;
@@ -312,5 +328,6 @@ export async function runExport(
     audioCodec,
     hardwareEncoder: hardware,
     backend: engine.backend(),
+    loudness,
   };
 }

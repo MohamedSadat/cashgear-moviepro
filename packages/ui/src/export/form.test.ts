@@ -37,7 +37,7 @@ describe('export form', () => {
       height: 1080,
       frameRate: { num: 30, den: 1 },
       video: { codec: 'avc', bitrate: 8e6 },
-      audio: { codec: 'aac', bitrate: 192_000 },
+      audio: { codec: 'aac', bitrate: 192_000, loudness: -14 },
     });
     expect(initialForm(vertical).preset).toBe('tiktok');
     const odd = initialForm({ ...hd, width: 1280, height: 720 });
@@ -77,9 +77,15 @@ describe('export form', () => {
     expect(gif.video?.codec).toBe('avc');
     const wav = exportSettings(applyFormat(initialForm(hd), 'wav', hd, chrome), hd);
     expect(wav.video).toBeNull();
-    expect(wav.audio).toEqual({ codec: 'pcm-s16', bitrate: 0 });
+    expect(wav.audio).toEqual({ codec: 'pcm-s16', bitrate: 0, loudness: -14 });
     const mp3Form = { ...applyFormat(initialForm(hd), 'mp3', hd, chrome), mp3Kbps: 320 };
-    expect(exportSettings(mp3Form, hd).audio).toEqual({ codec: 'pcm-s16', bitrate: 320_000 });
+    expect(exportSettings(mp3Form, hd).audio).toEqual({
+      codec: 'pcm-s16',
+      bitrate: 320_000,
+      loudness: -14,
+    });
+    // Loudness normalisation can be switched off.
+    expect(exportSettings({ ...mp3Form, loudness: 'off' }, hd).audio?.loudness).toBeNull();
     // Back from GIF, the size follows the project again.
     const back = applyFormat(applyFormat(initialForm(hd), 'gif', hd, chrome), 'mp4', hd, chrome);
     expect([back.preset, back.width, back.rate]).toEqual(['youtube-1080p', 1920, 'project']);

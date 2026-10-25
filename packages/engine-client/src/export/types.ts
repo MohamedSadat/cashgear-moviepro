@@ -1,7 +1,7 @@
 import type { FontFamilyEntry } from '../fonts/catalog';
 import type { MediaSourceRef } from '../media/types';
 import type { BackendPreference, MediaPlatformKind } from '../types';
-import type { ExportSettings } from './settings';
+import type { ExportSettings, LoudnessPlan } from './settings';
 
 /** One export: a copy of the project as it was when the export started. */
 export interface ExportJob {
@@ -27,7 +27,7 @@ export type ExportTarget =
   /** Desktop: the bytes go back to the page, which hands them to the native side. */
   | { kind: 'sink' };
 
-export type ExportPhase = 'preparing' | 'rendering' | 'finishing' | 'converting';
+export type ExportPhase = 'preparing' | 'measuring' | 'rendering' | 'finishing' | 'converting';
 
 export interface ExportProgress {
   phase: ExportPhase;
@@ -56,6 +56,8 @@ export interface ExportResult {
   hardwareEncoder: boolean | null;
   /** The GPU backend that rendered the frames. */
   backend: string;
+  /** What loudness normalisation measured and did; null when it was off. */
+  loudness: LoudnessPlan | null;
 }
 
 /** The page's side of a running export. */

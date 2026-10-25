@@ -7,6 +7,7 @@ import {
   formatInfo,
   formatsFor,
   frameCount,
+  loudnessTargets,
   probeEncoders,
   remainingLabel,
   videoCodecLabels,
@@ -84,6 +85,8 @@ export function ExportDialog({ project, exporter, platform, onClose }: Props) {
       : 30;
     let line = 'Opening the media…';
     if (converting !== null) line = `Converting with FFmpeg: ${Math.round(converting * 100)}%`;
+    else if (progress?.phase === 'measuring')
+      line = `Measuring loudness: ${Math.round(progress.fraction * 100)}%`;
     else if (progress?.phase === 'rendering')
       line = `Frame ${progress.frame.toLocaleString()} of ${progress.frames.toLocaleString()}`;
     else if (progress?.phase === 'finishing') line = 'Finishing the file…';
@@ -465,6 +468,32 @@ function ExportSettingsView({ project, exporter, platform, onClose }: Props) {
                   </select>
                 </label>
               )
+            )}
+          </div>
+        )}
+        {result.audio && (
+          <div className="cgv-form-row">
+            <label>
+              Loudness
+              <select
+                data-testid="export-loudness"
+                value={String(form.loudness)}
+                onChange={(event) =>
+                  update({
+                    loudness: event.target.value === 'off' ? 'off' : Number(event.target.value),
+                  })
+                }
+              >
+                {loudnessTargets.map((target) => (
+                  <option key={target.value} value={target.value}>
+                    {target.label}
+                  </option>
+                ))}
+                <option value="off">Off: keep the mix as it is</option>
+              </select>
+            </label>
+            {form.loudness !== 'off' && (
+              <span className="cgv-form-note">Peaks stay under -1 dBTP</span>
             )}
           </div>
         )}

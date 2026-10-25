@@ -14,6 +14,9 @@ import {
   presets,
   qualityBitrate,
   videoCodecString,
+  loudnessCeiling,
+  loudnessGain,
+  loudnessTargets,
 } from './settings';
 
 const ntsc = { num: 30000, den: 1001 };
@@ -95,5 +98,17 @@ describe('export settings', () => {
   it('names files after the project', () => {
     expect(exportFileName('Trip: day 1/2', 'mp4')).toBe('Trip_ day 1_2.mp4');
     expect(exportFileName('  ', 'wav')).toBe('Untitled project.wav');
+  });
+});
+
+describe('loudness', () => {
+  it('raises or lowers the mix to the target, within 24 dB, and leaves silence alone', () => {
+    expect(loudnessGain(-20, -14)).toBe(6);
+    expect(loudnessGain(-9.5, -14)).toBe(-4.5);
+    expect(loudnessGain(-60, -14)).toBe(24);
+    expect(loudnessGain(-200, -14)).toBe(0);
+    expect(loudnessGain(Number.NEGATIVE_INFINITY, -23)).toBe(0);
+    expect(loudnessTargets.map((target) => target.value)).toEqual([-14, -16, -23, -24]);
+    expect(loudnessCeiling).toBe(-1);
   });
 });

@@ -45,12 +45,16 @@ export { remainingLabel } from './export/progress';
 export {
   audioBitrate,
   audioCodecLabels,
+  defaultLoudness,
   evenSize,
   exportFileName,
   fitNotice,
   formatInfo,
   formatsFor,
   frameCount,
+  loudnessCeiling,
+  loudnessGain,
+  loudnessTargets,
   presetBitrate,
   presets as exportPresets,
   qualityBitrate,
@@ -62,6 +66,7 @@ export {
   type ExportSettings,
   type ExportVideoCodec,
   type FormatInfo,
+  type LoudnessPlan,
 } from './export/settings';
 export type * from './effects/types';
 export type * from './export/types';
