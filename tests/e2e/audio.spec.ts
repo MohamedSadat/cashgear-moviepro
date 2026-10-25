@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 
@@ -546,5 +546,200 @@ test.describe('meters', () => {
       }
     }
     await record('meters', testInfo, results);
+  });
+});
+
+/** The first channel of a 16-bit PCM WAV file, from -1 to 1. */
+function readWav(file: string): Float32Array {
+  const bytes = readFileSync(file);
+  let at = 12;
+  let channels = 1;
+  while (at + 8 <= bytes.length) {
+    const id = bytes.toString('ascii', at, at + 4);
+    const size = bytes.readUInt32LE(at + 4);
+    if (id === 'fmt ') channels = bytes.readUInt16LE(at + 10);
+    if (id === 'data') {
+      const frames = Math.floor(Math.min(size, bytes.length - at - 8) / (2 * channels));
+      const out = new Float32Array(frames);
+      for (let i = 0; i < frames; i++)
+        out[i] = bytes.readInt16LE(at + 8 + i * 2 * channels) / 32768;
+      return out;
+    }
+    at += 8 + size + (size % 2);
+  }
+  throw new Error('No data in ' + file);
+}
+
+/** Two Butterworth sections (24 dB an octave) of an RBJ high- or low-pass filter. */
+function filter(samples: ArrayLike<number>, kind: 'high' | 'low', frequency: number) {
+  let out = Float64Array.from(samples);
+  for (const q of [0.5411961, 1.306563]) {
+    const w = (2 * Math.PI * frequency) / RATE;
+    const alpha = Math.sin(w) / (2 * q);
+    const cos = Math.cos(w);
+    const [b0, b1, b2] =
+      kind === 'low'
+        ? [(1 - cos) / 2, 1 - cos, (1 - cos) / 2]
+        : [(1 + cos) / 2, -(1 + cos), (1 + cos) / 2];
+    const [a0, a1, a2] = [1 + alpha, -2 * cos, 1 - alpha];
+    const next = new Float64Array(out.length);
+    let [x1, x2, y1, y2] = [0, 0, 0, 0];
+    for (let i = 0; i < out.length; i++) {
+      const x = out[i];
+      const y = (b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2) / a0;
+      [x2, x1, y2, y1] = [x1, x, y1, y];
+      next[i] = y;
+    }
+    out = next;
+  }
+  return out;
+}
+
+/** RMS in dBFS of each 10 ms window. */
+function windows(samples: ArrayLike<number>) {
+  const hop = RATE / 100;
+  const out: number[] = [];
+  for (let at = 0; at + hop <= samples.length; at += hop) {
+    let sum = 0;
+    for (let i = at; i < at + hop; i++) sum += samples[i] * samples[i];
+    out.push(10 * Math.log10(Math.max(sum / hop, 1e-20)));
+  }
+  return out;
+}
+
+const wavOnly: Settings = {
+  format: 'wav',
+  width: 1280,
+  height: 720,
+  frameRate: { num: 30, den: 1 },
+  video: null,
+  audio: { codec: 'pcm-s16', bitrate: 0, loudness: null },
+};
+
+test.describe('ducking and noise reduction', () => {
+  test('ducking reduces music under dialogue without clicks', async ({ page }, testInfo) => {
+    test.setTimeout(300000);
+    mkdirSync(signals, { recursive: true });
+    const length = seconds(12);
+    // Music: 200 and 400 Hz, whole periods in every 10 ms window, so its level
+    // reads steadily; nothing above 1 kHz.
+    const music = new Float32Array(length);
+    for (const [f, a] of [
+      [200, 0.2],
+      [400, 0.1],
+    ])
+      for (let i = 0; i < length; i++) music[i] += a * Math.sin((2 * Math.PI * f * i) / RATE);
+    // Dialogue: speech-like bursts between 2 and 4 kHz, from 3 to 5 s and 7.5 to 9.5 s.
+    const dialogue = new Float32Array(length);
+    const voice = filter(filter(pink(length, -12, 31), 'high', 2000), 'low', 4000);
+    for (const [from, to] of [
+      [3, 5],
+      [7.5, 9.5],
+    ])
+      for (let i = seconds(from); i < seconds(to); i++) {
+        const syllable = ((i - seconds(from)) % seconds(0.25)) / seconds(0.25);
+        dialogue[i] = voice[i] * (syllable < 0.8 ? Math.sin((Math.PI * syllable) / 0.8) : 0) * 2;
+      }
+    const files = {
+      music: wav(join(signals, 'duck-music.wav'), [music, music]),
+      dialogue: wav(join(signals, 'duck-dialogue.wav'), [dialogue, dialogue]),
+    };
+    await open(page);
+    const ids = await importFiles(page, Object.values(files));
+    const [bottom, top] = await clear(page, 2);
+    await append(page, bottom, ids.get('duck-dialogue.wav')!, 12 * 30);
+    await append(page, top, ids.get('duck-music.wav')!, 12 * 30);
+    await execute(page, { type: 'setTrackSound', track: bottom, sound: { role: 'dialogue' } });
+    await execute(page, { type: 'setTrackSound', track: top, sound: { role: 'music' } });
+    const file = testInfo.outputPath('ducked.wav');
+    await exportTo(page, wavOnly, file);
+    const mix = readWav(file);
+    // The music alone: below 1 kHz.
+    const musicLevel = windows(filter(mix, 'low', 1000));
+    const at = (s: number) => musicLevel[Math.round(s * 100)];
+    const full = at(1.5);
+    const depth = at(4) - full;
+    const between = at(6.8) - full;
+    // A click spreads energy everywhere. Above 8 kHz there is no music, and no
+    // speech while the music falls (just before each line) and rises (after it).
+    const quiet = (levels: number[]) =>
+      Math.max(
+        ...[
+          [2.5, 2.98],
+          [5.02, 7.28],
+        ].flatMap(([from, to]) => levels.slice(Math.round(from * 100), Math.round(to * 100))),
+      );
+    const splatter = quiet(windows(filter(mix, 'high', 8000)));
+    // The control: the same music switched down 12 dB at once, as without ramps.
+    const stepped = Float32Array.from(music, (x, i) =>
+      i >= seconds(2.9) && i < seconds(5.5) ? x * db(-12) : x,
+    );
+    const controlSplatter = quiet(windows(filter(stepped, 'high', 8000)));
+    // How fast the level of the music moves: the steepest change between windows.
+    let steepest = 0;
+    for (let i = 101; i < musicLevel.length - 1; i++)
+      steepest = Math.max(steepest, Math.abs(musicLevel[i] - musicLevel[i - 1]));
+    const result = { full, depth, between, splatter, controlSplatter, steepest };
+    await record('ducking', testInfo, result);
+    expect(Math.abs(depth + 12), JSON.stringify(result)).toBeLessThan(0.5);
+    expect(Math.abs(between), 'back up between the lines').toBeLessThan(0.5);
+    expect(splatter, 'no clicks').toBeLessThan(-80);
+    expect(controlSplatter, 'the control clicks').toBeGreaterThan(splatter + 20);
+    expect(steepest, 'the level eases').toBeLessThan(1.5);
+  });
+
+  test('noise reduction lowers hiss and keeps the voice', async ({ page }, testInfo) => {
+    test.setTimeout(300000);
+    mkdirSync(signals, { recursive: true });
+    const length = seconds(8);
+    // A voiced, speech-like sound: harmonics of a gliding pitch in syllables, with pauses.
+    const voice = new Float32Array(length);
+    for (let i = 0; i < length; i++) {
+      const t = i / RATE;
+      const syllable = (t * 4) % 1;
+      const envelope = syllable < 0.6 ? Math.sin((Math.PI * syllable) / 0.6) : 0;
+      const pitch = 130 + 20 * Math.sin(t * 1.3);
+      let sum = 0;
+      for (let h = 1; h <= 12; h++)
+        sum += (Math.sin(2 * Math.PI * pitch * t * h) / h) * (1 + Math.cos(h * 0.4));
+      voice[i] = 0.12 * envelope * sum;
+    }
+    const hiss = pink(length, -36, 41);
+    const noisy = Float32Array.from(voice, (x, i) => x + hiss[i]);
+    const file = wav(join(signals, 'noisy-voice.wav'), [noisy, noisy]);
+    await open(page);
+    const ids = await importFiles(page, [file]);
+    const [track] = await clear(page, 2);
+    const clip = await append(page, track, ids.get('noisy-voice.wav')!, 8 * 30);
+    const plain = testInfo.outputPath('plain.wav');
+    await exportTo(page, wavOnly, plain);
+    await execute(page, { type: 'setClipProperties', clip, properties: { denoise: 1 } });
+    const cleaned = testInfo.outputPath('cleaned.wav');
+    await exportTo(page, wavOnly, cleaned);
+    const levels = (path: string) => {
+      const out = windows(readWav(path));
+      // Pauses: the end of each quarter second; voice: the middle of each syllable.
+      const pause: number[] = [];
+      const speech: number[] = [];
+      for (let quarter = 4; quarter < 30; quarter++) {
+        const start = quarter * 25;
+        pause.push(...out.slice(start + 18, start + 24));
+        speech.push(...out.slice(start + 5, start + 10));
+      }
+      const mean = (values: number[]) =>
+        10 * Math.log10(values.reduce((sum, v) => sum + 10 ** (v / 10), 0) / values.length);
+      return { pause: mean(pause), speech: mean(speech) };
+    };
+    const before = levels(plain);
+    const after = levels(cleaned);
+    const result = {
+      before,
+      after,
+      hissDown: before.pause - after.pause,
+      voiceChange: after.speech - before.speech,
+    };
+    await record('noise-reduction', testInfo, result);
+    expect(result.hissDown, JSON.stringify(result)).toBeGreaterThan(15);
+    expect(Math.abs(result.voiceChange)).toBeLessThan(3);
   });
 });
