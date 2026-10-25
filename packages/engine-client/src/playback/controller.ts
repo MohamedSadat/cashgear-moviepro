@@ -6,6 +6,7 @@ import { StreamDecoders } from '../media/stream-decoders';
 import { streamConfig, VideoStream } from '../media/video-stream';
 import { Playback, type Engine, type ProjectSession } from '../pkg/cgv_wasm';
 import { FLICKS_PER_SECOND } from '../project/types';
+import type { MeterReading } from '../audio/meters';
 import type { AudioPlayer } from './audio-player';
 import { drawFrame, drawsGpuFrames, type LayerSource } from './draw';
 import type {
@@ -42,6 +43,8 @@ export interface PlaybackDeps {
   media(): MediaService | undefined;
   audio(): AudioPlayer | null;
   onState(state: PlaybackState): void;
+  /** The meters for the sound heard now, while playing; null when they stop. */
+  onMeters(reading: MeterReading | null): void;
   onError(message: string): void;
 }
 
@@ -91,6 +94,8 @@ export class PlaybackController {
   private settled: (() => void)[] = [];
   private lastState = '';
   private lastStateAt = 0;
+  private lastMetersAt = 0;
+  private metering = false;
   /** Diagnostics: draw the Phase 0 test pattern instead of the timeline. */
   pattern = false;
   constructor(private readonly deps: PlaybackDeps) {}
@@ -432,7 +437,10 @@ export class PlaybackController {
         this.fallBackToWall(now, 'the sound device reported no output time');
       // Mix far enough ahead to outlast the slowest recent ticks: a busy machine
       // drops frames, but its sound and clock keep going.
-      else audio!.fill(session, (2.5 * this.intervalPeak) / 1000);
+      else {
+        audio!.fill(session, (2.5 * this.intervalPeak) / 1000);
+        this.publishMeters(audio!, nowAbs, now);
+      }
     }
     // The frame drawn now is seen on the next refresh: pick it for that moment.
     const seconds = this.readClock(nowAbs + this.vsyncMs);
@@ -512,10 +520,23 @@ export class PlaybackController {
     this.publish(true);
   }
 
+  private publishMeters(audio: AudioPlayer, nowAbs: number, now: number) {
+    if (now - this.lastMetersAt < stateIntervalMs) return;
+    const reading = audio.meterAt(nowAbs);
+    if (!reading) return;
+    this.lastMetersAt = now;
+    this.metering = true;
+    this.deps.onMeters(reading);
+  }
+
   /** Stops the clock, the sound and the decoders. */
   private halt() {
     this.clock = null;
     this.deps.audio()?.stop();
+    if (this.metering) {
+      this.metering = false;
+      this.deps.onMeters(null);
+    }
     for (const { stream } of this.streams.values()) stream.close();
     this.streams.clear();
   }

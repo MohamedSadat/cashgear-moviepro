@@ -1,0 +1,54 @@
+import { describe, expect, it } from 'vitest';
+import { levelDb, MeterQueue, parseReadings, type MeterReading } from './meters';
+
+describe('meter readings', () => {
+  it('parse the mixer layout with any number of tracks', () => {
+    const flat = [
+      ...[
+        480, -20, -21, -22, 0.5, 0.4, 0.3, 0.2, 2, 7, 0.1, 0.1, 0.05, 0.05, 9, 0.2, 0.2, 0.1, 0.1,
+      ],
+      ...[960, -19, -20, -21, 0.6, 0.5, 0.4, 0.3, 0],
+    ];
+    const readings = parseReadings(flat);
+    expect(readings).toHaveLength(2);
+    expect(readings[0]).toEqual({
+      sample: 480,
+      momentary: -20,
+      shortTerm: -21,
+      integrated: -22,
+      master: { peak: [0.5, 0.4], rms: [0.3, 0.2] },
+      tracks: [
+        { id: 7, level: { peak: [0.1, 0.1], rms: [0.05, 0.05] } },
+        { id: 9, level: { peak: [0.2, 0.2], rms: [0.1, 0.1] } },
+      ],
+    });
+    expect(readings[1].tracks).toEqual([]);
+  });
+
+  it('wait in a queue until their sample is heard', () => {
+    const reading = (sample: number): MeterReading => ({
+      sample,
+      momentary: 0,
+      shortTerm: 0,
+      integrated: 0,
+      master: { peak: [0, 0], rms: [0, 0] },
+      tracks: [],
+    });
+    const queue = new MeterQueue();
+    queue.push([480, 960, 1440, 1920].map(reading));
+    expect(queue.at(400)).toBeNull();
+    expect(queue.at(1000)?.sample).toBe(960);
+    // Older readings went; the one heard stays until a newer one is due.
+    expect(queue.at(1000)?.sample).toBe(960);
+    expect(queue.at(5000)?.sample).toBe(1920);
+    queue.clear();
+    expect(queue.at(5000)).toBeNull();
+  });
+
+  it('show levels in decibels with a floor', () => {
+    expect(levelDb(1)).toBe(0);
+    expect(levelDb(0.5)).toBeCloseTo(-6.0206, 4);
+    expect(levelDb(0)).toBe(-96);
+    expect(levelDb(1e-9, -60)).toBe(-60);
+  });
+});

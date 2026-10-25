@@ -1,4 +1,5 @@
 import { releaseProxy, transfer, wrap } from 'comlink';
+import type { MeterReading } from './audio/meters';
 import { AudioOutput } from './audio/output';
 import { fontCatalog } from './fonts/loader';
 import type { PlaybackState } from './playback/types';
@@ -11,6 +12,8 @@ export interface EngineClient {
   onStats(listener: ((stats: FrameStats) => void) | null): void;
   /** Receives the playhead and transport whenever they change (at most ~30 times a second). */
   onPlayback(listener: ((state: PlaybackState) => void) | null): void;
+  /** Receives the meters while playing (about 30 times a second), then null. */
+  onMeters(listener: ((reading: MeterReading | null) => void) | null): void;
   /** Receives non-fatal engine messages, such as a frame that could not be drawn. */
   onNotice(listener: ((message: string) => void) | null): void;
   /** Proves this page and the worker share memory (needs cross-origin isolation). */
@@ -40,6 +43,7 @@ export function createEngineClient(onError: (message: string) => void): EngineCl
   let statsListener: ((stats: FrameStats) => void) | null = null;
   let playbackListener: ((state: PlaybackState) => void) | null = null;
   let noticeListener: ((message: string) => void) | null = null;
+  let metersListener: ((reading: MeterReading | null) => void) | null = null;
   let output: AudioOutput | null = null;
   let audioSetup: Promise<void> = Promise.resolve();
   // The worker's fonts follow this page's catalogue (imported and installed families).
@@ -57,6 +61,8 @@ export function createEngineClient(onError: (message: string) => void): EngineCl
     else if (data.type === 'engine-stats') {
       const { frames, presented, width, height } = data;
       statsListener?.({ frames, presented, width, height });
+    } else if (data.type === 'engine-meters') {
+      metersListener?.(data.reading);
     } else if (data.type === 'engine-playback') {
       const state: PlaybackState & { type?: string } = { ...data };
       delete state.type;
@@ -83,6 +89,9 @@ export function createEngineClient(onError: (message: string) => void): EngineCl
     },
     onNotice(listener) {
       noticeListener = listener;
+    },
+    onMeters(listener) {
+      metersListener = listener;
     },
     async checkSharedMemory() {
       if (typeof SharedArrayBuffer !== 'function' || !crossOriginIsolated) return false;
@@ -123,6 +132,7 @@ export function createEngineClient(onError: (message: string) => void): EngineCl
       statsListener = null;
       playbackListener = null;
       noticeListener = null;
+      metersListener = null;
       output?.close();
       output = null;
       // A crashed WASM instance may never answer RPC. Always terminate its worker.

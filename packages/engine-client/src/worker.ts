@@ -108,6 +108,7 @@ const api: EngineApi = {
       media: () => media,
       audio: () => audio,
       onState: (state) => post({ type: 'engine-playback', ...state }),
+      onMeters: (reading) => post({ type: 'engine-meters', reading }),
       onError: (message) => post({ type: 'engine-notice', message }),
     });
     controller.pattern = options.pattern === true;

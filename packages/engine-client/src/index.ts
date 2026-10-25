@@ -1,4 +1,5 @@
 export { createEngineClient, type EngineClient } from './client';
+export { levelDb, type MeterLevel, type MeterReading } from './audio/meters';
 export {
   evaluateCapabilities,
   probeCapabilities,

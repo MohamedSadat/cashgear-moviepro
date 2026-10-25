@@ -1,3 +1,4 @@
+import type { MeterReading } from './audio/meters';
 import type { FontFamilyEntry } from './fonts/catalog';
 import type {
   FrameReadback,
@@ -148,4 +149,5 @@ export type EngineEvent =
   | { type: 'engine-fatal'; message: string }
   | { type: 'engine-notice'; message: string }
   | ({ type: 'engine-stats' } & FrameStats)
-  | ({ type: 'engine-playback' } & PlaybackState);
+  | ({ type: 'engine-playback' } & PlaybackState)
+  | { type: 'engine-meters'; reading: MeterReading | null };

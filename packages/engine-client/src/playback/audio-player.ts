@@ -9,6 +9,7 @@ import {
   writeFrames,
   type RingViews,
 } from '../audio/ring';
+import { MeterQueue, parseReadings, type MeterReading } from '../audio/meters';
 import type { AudioBlocks } from '../media/audio-blocks';
 import { Mixer, type ProjectSession } from '../pkg/cgv_wasm';
 
@@ -43,6 +44,7 @@ export class AudioPlayer {
   private lastWorkletTime = 0;
   private lastWorkletChange = 0;
   private memo: ClockMemo = {};
+  private meters = new MeterQueue();
 
   constructor(
     buffer: SharedArrayBuffer,
@@ -88,6 +90,8 @@ export class AudioPlayer {
   start(project: ProjectSession, sample: number) {
     const startFrame = flush(this.ring);
     this.session = { startFrame, startSample: sample, next: sample };
+    this.mixer.set_metering(true);
+    this.meters.clear();
     // Sound first: a quantum played before it would count as an underrun.
     this.fill(project);
     Atomics.store(this.ring.header, H.active, 1);
@@ -98,6 +102,8 @@ export class AudioPlayer {
     this.session = null;
     Atomics.store(this.ring.header, H.active, 0);
     flush(this.ring);
+    this.mixer.set_metering(false);
+    this.meters.clear();
   }
 
   get playing() {
@@ -119,6 +125,7 @@ export class AudioPlayer {
     while (queued < target) {
       if (!this.mixer.ready(project, session.next, chunkFrames)) break;
       const samples = this.mixer.mix(project, session.next, chunkFrames);
+      this.meters.push(parseReadings(this.mixer.take_readings()));
       const written = writeFrames(this.ring, samples, chunkFrames);
       session.next += written;
       queued += written;
@@ -139,6 +146,14 @@ export class AudioPlayer {
     const whole = Math.floor(heard);
     const since = ((whole - session.startFrame) | 0) + (heard - whole);
     return since / this.sampleRate;
+  }
+
+  /** The meters for the sound heard at absolute time `nowMs`, while playing. */
+  meterAt(nowMs: number): MeterReading | null {
+    const session = this.session;
+    const heard = this.heardSeconds(nowMs);
+    if (!session || heard === null || heard < 0) return null;
+    return this.meters.at(session.startSample + heard * this.sampleRate);
   }
 
   /** Plays `seconds` of the timeline from `sample` once (scrubbing), if decoded. */
