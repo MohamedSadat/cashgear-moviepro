@@ -14,12 +14,15 @@ export interface CutTarget {
 }
 
 const takesTransitions = (clip: Clip) => clip.video && clip.kind !== 'adjustment';
+const soundOnly = (clip: Clip) => !clip.video && clip.audio;
 
-/** Every cut and free edge of `track`'s picture clips, by time. */
+/**
+ * Every cut and free edge of `track`'s picture clips, and every cut between two
+ * sound-only clips (where a transition is a crossfade), by time.
+ */
 export function cutsOf(track: Track): CutTarget[] {
   const cuts = new Map<number, CutTarget>();
-  const clips = track.clips.filter(takesTransitions);
-  for (const clip of clips) {
+  for (const clip of track.clips.filter(takesTransitions)) {
     const end = clip.start + clip.duration;
     if (!cuts.has(clip.start)) {
       const before = track.clips.find((c) => c.start + c.duration === clip.start);
@@ -31,6 +34,12 @@ export function cutsOf(track: Track): CutTarget[] {
       if (!after || takesTransitions(after))
         cuts.set(end, { from: clip.id, to: after?.id ?? null, cut: end });
     }
+  }
+  for (const clip of track.clips.filter(soundOnly)) {
+    const end = clip.start + clip.duration;
+    const after = track.clips.find((c) => c.start === end);
+    if (after && soundOnly(after) && !cuts.has(end))
+      cuts.set(end, { from: clip.id, to: after.id, cut: end });
   }
   return [...cuts.values()].sort((a, b) => a.cut - b.cut);
 }

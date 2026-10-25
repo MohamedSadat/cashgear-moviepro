@@ -20,13 +20,19 @@ describe('transition targets', () => {
     expect(cutNear(t, 70, 5)).toBeNull();
   });
 
-  it('leave out adjustment layers and sound', () => {
+  it('leave out adjustment layers and sound next to pictures', () => {
     const t = track([
       clip(1, 0, 30),
       clip(2, 30, 30, { kind: 'adjustment' }),
-      clip(3, 60, 30, { video: false }),
+      clip(3, 60, 30, { video: false, audio: true }),
     ]);
     expect(cutsOf(t)).toEqual([{ from: null, to: 1, cut: 0 }]);
+  });
+
+  it('include cuts between two sounds, which crossfade, but not their free edges', () => {
+    const sound = { video: false, audio: true };
+    const t = track([clip(1, 0, 30, sound), clip(2, 30, 30, sound), clip(3, 90, 30, sound)]);
+    expect(cutsOf(t)).toEqual([{ from: 1, to: 2, cut: 30 }]);
   });
 });
 
