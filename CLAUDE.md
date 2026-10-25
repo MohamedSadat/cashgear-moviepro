@@ -33,6 +33,7 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `cgv-effects`: the effect and transition catalogue: JSON schema, registry, shader assembly (`prelude.wgsl`) and settings packing.
   - `cgv-text`: fonts, shaping (rustybuzz), bidi and line breaks, and drawing titles on the CPU (`paint.rs`). No GPU code.
   - `cgv-dsp`: sound effects (filters, dynamics, echo, reverb), level meters, loudness (`ebur128`) and ducking curves. It knows nothing of projects, so it can be shared with CashGear Audio.
+  - `cgv-denoise`: noise reduction (`nnnoiseless`) as a WASM module of its own (`src/pkg/denoise/`), run in a worker that starts when a clip first asks for it. It is too big for the engine's budget.
   - `cgv-time`, `cgv-model`, `cgv-media`, `cgv-audio`.
 - `assets/`: the built-in pack, embedded at build time. One folder per effect or transition (`effect.json` and `effect.wgsl`, plus any images) in `effects/` and `transitions/`; looks in `luts/`. `assets/README.md` is the authoring guide; `scripts/make-effect-assets.mjs` makes the looks and gradients.
   - `fonts/` (OFL families listed in `fonts.json`, from `pnpm fetch-fonts`), `titles/` (30 templates, from `scripts/make-title-templates.mjs`) and `stickers/` (animated WebP and `stickers.json`, from `scripts/make-stickers.mjs`). Templates are bundled into the UI; font and sticker files are build assets, fetched when used, and never inside the WASM.
@@ -79,7 +80,7 @@ Checks run in CI (`.github/workflows/ci.yml`). Run them in this order:
 cargo fmt --all --check
 pnpm build
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p cgv-wasm --target wasm32-unknown-unknown -- -D warnings
+cargo clippy -p cgv-wasm -p cgv-denoise --target wasm32-unknown-unknown -- -D warnings
 cargo test --workspace
 pnpm typecheck && pnpm lint && pnpm format:check && pnpm test
 pnpm test:e2e                     # Chrome + Edge on the real GPU; CI uses software GPUs (GPU_TEST_SOFTWARE=1)

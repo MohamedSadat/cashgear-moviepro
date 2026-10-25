@@ -10,6 +10,7 @@ default-members = [
   "crates/cgv-media",
   "crates/cgv-render",
   "crates/cgv-dsp",
+  "crates/cgv-denoise",
   "crates/cgv-audio",
   "crates/cgv-engine",
   "crates/cgv-wasm",

@@ -1,4 +1,5 @@
 import { AudioSampleSink, type InputAudioTrack } from 'mediabunny';
+import { denoise, denoiseLeadIn, isDenoised, sourceOf } from '../audio/denoise';
 import type { Mixer } from '../pkg/cgv_wasm';
 
 /** Blocks decoded at once, so playback never waits behind a long queue. */
@@ -7,7 +8,9 @@ const maxConcurrent = 2;
 /**
  * Decodes source audio for the mixer, one block (a second at the project rate)
  * at a time, in the order playback needs them. Media without decodable sound
- * gets silent blocks, so the mixer stops asking.
+ * gets silent blocks, so the mixer stops asking. Blocks of `<media>#nr` are
+ * the medium's sound cleaned by the noise reduction module, which hears a
+ * second before each block first.
  */
 export class AudioBlocks {
   private sinks = new Map<string, AudioSampleSink>();
@@ -39,8 +42,9 @@ export class AudioBlocks {
   /** Forgets a medium's decoder (removed, relinked or switched to a proxy). */
   forget(media: string) {
     this.sinks.delete(media);
-    this.queue = this.queue.filter(([, id]) => id !== media);
-    for (const key of [...this.pending]) if (key.startsWith(media + ':')) this.pending.delete(key);
+    this.queue = this.queue.filter(([, id]) => sourceOf(id) !== media);
+    for (const key of [...this.pending])
+      if (sourceOf(key.slice(0, key.lastIndexOf(':'))) === media) this.pending.delete(key);
   }
 
   clear() {
@@ -74,14 +78,17 @@ export class AudioBlocks {
   }
 
   private async decode(mixer: Mixer, media: string, block: number, generation: number) {
-    const track = this.track(media);
+    const source = sourceOf(media);
+    const cleaned = isDenoised(media);
+    const track = this.track(source);
     if (!track) return this.silence(mixer, media, block);
-    let sink = this.sinks.get(media);
+    let sink = this.sinks.get(source);
     if (!sink) {
       sink = new AudioSampleSink(track);
-      this.sinks.set(media, sink);
+      this.sinks.set(source, sink);
     }
-    const [start, end] = mixer.block_span(block);
+    const [padded, end] = mixer.block_span(block);
+    const start = cleaned ? Math.max(0, block - denoiseLeadIn) : padded;
     const chunks: Float32Array[][] = [];
     let first: number | null = null;
     let rate = 0;
@@ -108,14 +115,33 @@ export class AudioBlocks {
     }
     if (generation !== this.generation) return;
     if (first === null) return this.silence(mixer, media, block);
-    const data = new Float32Array(frames * channels);
+    // Cleaned sound starts exactly at `start`, so the denoiser hears the same
+    // lead-in whichever packet decoding began at, and blocks come out the same.
+    const skip = cleaned ? Math.min(frames, Math.max(0, Math.round((start - first) * rate))) : 0;
+    const kept = frames - skip;
+    const data = new Float32Array(kept * channels);
     for (let channel = 0; channel < channels; channel++) {
-      let at = channel * frames;
+      let at = channel * kept - skip;
       for (const planes of chunks) {
-        data.set(planes[channel], at);
-        at += planes[channel].length;
+        const plane = planes[channel];
+        if (at + plane.length > channel * kept) {
+          const from = Math.max(0, channel * kept - at);
+          data.set(plane.subarray(from), at + from);
+        }
+        at += plane.length;
       }
     }
-    mixer.insert_block(media, block, rate, channels, first, data);
+    const begins = first + skip / rate;
+    if (!cleaned) return mixer.insert_block(media, block, rate, channels, begins, data);
+    try {
+      // A copy goes to the worker, so the original is still here should it fail.
+      const clean = await denoise(rate, channels, data.slice());
+      if (generation !== this.generation) return;
+      mixer.insert_block(media, block, clean.rate, channels, begins, clean.data);
+    } catch (error) {
+      // Without the module the clip plays as recorded rather than silent.
+      console.warn('Noise reduction is unavailable:', error);
+      mixer.insert_block(media, block, rate, channels, begins, data);
+    }
   }
 }

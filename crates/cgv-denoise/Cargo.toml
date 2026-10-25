@@ -1,0 +1,19 @@
+[package]
+name = "cgv-denoise"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+# Noise reduction as a WASM module of its own, loaded the first time a clip uses
+# it: RNNoise (nnnoiseless) and its FFT would not fit the engine's size budget.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+nnnoiseless = { version = "=0.5.2", default-features = false }
+rubato = { version = "=5.0.1", default-features = false }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen.workspace = true

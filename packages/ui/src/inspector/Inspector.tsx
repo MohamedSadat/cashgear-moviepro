@@ -371,6 +371,19 @@ export function Inspector({ editor }: { editor: EditorState }) {
               />
             );
           })}
+          <ScrubField
+            label="Noise reduction"
+            value={(clip.denoise ?? 0) * 100}
+            min={0}
+            max={100}
+            step={1}
+            precision={0}
+            unit="%"
+            testId="field-denoise"
+            editor={editor}
+            disabled={locked}
+            command={(percent) => set({ denoise: percent / 100 })}
+          />
         </Section>
       )}
       {clip.audio && <EffectStack editor={editor} context={context} disabled={locked} audio />}

@@ -11,45 +11,58 @@ const check = spawnSync(bindgen, ['--version'], { encoding: 'utf8' });
 if (check.status !== 0 || check.stdout.trim() !== 'wasm-bindgen ' + bindgenVersion) {
   throw new Error('wasm-bindgen ' + bindgenVersion + ' is missing. Run pnpm setup:wasm.');
 }
+// The engine, and noise reduction as a module of its own (loaded when first used).
+const modules = [
+  { crate: 'cgv-wasm', name: 'cgv_wasm', out: wasmOutput },
+  { crate: 'cgv-denoise', name: 'cgv_denoise', out: join(wasmOutput, 'denoise') },
+];
 await run('cargo', [
   'build',
-  '-p',
-  'cgv-wasm',
+  ...modules.flatMap((module) => ['-p', module.crate]),
   '--target',
   'wasm32-unknown-unknown',
   ...(release ? ['--release'] : []),
 ]);
-await mkdir(wasmOutput, { recursive: true });
-await run(bindgen, [
-  join(root, 'target/wasm32-unknown-unknown', release ? 'release' : 'debug', 'cgv_wasm.wasm'),
-  '--target',
-  'web',
-  '--out-dir',
-  wasmOutput,
-  '--out-name',
-  'cgv_wasm',
-]);
-if (release) {
+for (const { name, out } of modules) {
+  await mkdir(out, { recursive: true });
+  await run(bindgen, [
+    join(root, 'target/wasm32-unknown-unknown', release ? 'release' : 'debug', `${name}.wasm`),
+    '--target',
+    'web',
+    '--out-dir',
+    out,
+    '--out-name',
+    name,
+  ]);
+}
+
+/** Optimizes a release module with binaryen; returns its size and gzipped size. */
+async function optimize(path) {
   const { default: binaryen } = await import('binaryen');
-  const path = join(wasmOutput, 'cgv_wasm_bg.wasm');
   const module = binaryen.readBinary(await readFile(path));
   module.setFeatures(binaryen.Features.All);
   binaryen.setOptimizeLevel(3);
   binaryen.setShrinkLevel(1);
   module.optimize();
-  if (!module.validate()) throw new Error('Optimized WASM failed validation');
+  if (!module.validate()) throw new Error('Optimized WASM failed validation: ' + path);
   const bytes = module.emitBinary();
   module.dispose();
   await writeFile(path, bytes);
-  const gzippedBytes = gzipSync(bytes, { level: 9 }).length;
-  const report = { wasmBytes: bytes.length, gzippedBytes, limitBytes };
+  return { wasmBytes: bytes.length, gzippedBytes: gzipSync(bytes, { level: 9 }).length };
+}
+
+if (release) {
+  const denoise = await optimize(join(modules[1].out, 'cgv_denoise_bg.wasm'));
+  console.log(
+    'Noise reduction WASM: ' + denoise.wasmBytes + ' bytes; gzip: ' + denoise.gzippedBytes,
+  );
+  const { wasmBytes, gzippedBytes } = await optimize(join(wasmOutput, 'cgv_wasm_bg.wasm'));
+  const report = { wasmBytes, gzippedBytes, limitBytes, denoise };
   await mkdir(join(root, 'bench/results'), { recursive: true });
   await writeFile(
     join(root, 'bench/results/wasm-size.json'),
     JSON.stringify(report, null, 2) + '\n',
   );
-  console.log(
-    'Release WASM: ' + bytes.length + ' bytes; gzip: ' + gzippedBytes + ' / ' + limitBytes,
-  );
+  console.log('Release WASM: ' + wasmBytes + ' bytes; gzip: ' + gzippedBytes + ' / ' + limitBytes);
   if (gzippedBytes > limitBytes) throw new Error('Release WASM gzip size exceeds 2 MB');
 }
