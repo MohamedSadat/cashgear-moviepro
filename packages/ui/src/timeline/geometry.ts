@@ -10,7 +10,7 @@ import {
   type Transition,
 } from '@cgv/engine-client';
 import { transitionCut, transitionWindow } from '../editing/transitions';
-import { keyTimes } from '../effects/animation';
+import { isAnimated, keyTimes, numberAt } from '../effects/animation';
 
 export const rulerHeight = 28;
 export const trackHeight = 58;
@@ -132,6 +132,10 @@ export type Hit =
       cut: number;
     }
   | { kind: 'keyframe'; clip: Clip; row: Row; time: number }
+  /** A selected clip's sound fade handle. */
+  | { kind: 'fade'; clip: Clip; row: Row; edge: 'in' | 'out' }
+  /** A selected clip's volume line, or one of its volume keyframes (`key`, from its start). */
+  | { kind: 'volume'; clip: Clip; row: Row; key: number | null; time: number }
   | { kind: 'marker'; marker: Marker }
   | { kind: 'ruler'; time: number }
   | { kind: 'empty'; row: Row | null; time: number };
@@ -153,9 +157,85 @@ export function transitionBox(
   };
 }
 
+/** A fade handle with no fade sits this far inside the clip, clear of its trim edge. */
+export const fadeInset = 10;
+/** The volume line spans this range of decibels over a clip's sound. */
+export const volumeFloor = -60;
+export const volumeTop = 24;
+
+export interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Where a clip's sound (its waveform) is drawn; null for clips without sound. */
+export function soundBox(view: View, row: Row, clip: Clip): Box | null {
+  if (!clip.audio) return null;
+  const top = rowTop(view, row) + 2;
+  const height = row.height - 4;
+  const h = clip.video ? Math.round((height - nameBar) * 0.38) : height - nameBar;
+  return {
+    x: timeToX(view, clip.start),
+    y: top + height - h,
+    w: Math.max(1, span(view, clip.duration)),
+    h,
+  };
+}
+
+/** The height on the volume line of `db`. */
+export function volumeY(box: Box, db: number): number {
+  const position = (db - volumeFloor) / (volumeTop - volumeFloor);
+  return box.y + (1 - Math.min(1, Math.max(0, position))) * box.h;
+}
+
+/** The volume at height `y` on the line, to a tenth of a decibel. */
+export function volumeAtY(box: Box, y: number): number {
+  const position = 1 - Math.min(1, Math.max(0, (y - box.y) / box.h));
+  return Math.round((volumeFloor + position * (volumeTop - volumeFloor)) * 10) / 10;
+}
+
+/** The volume at `offset` from the clip's start: its keyframes, else its level. */
+export function volumeAt(clip: Clip, offset: number): number {
+  return numberAt(clip, 'volumeDb', offset, clip.volumeDb);
+}
+
+/** The fade handles' centres: at the end of each fade, inside the clip. */
+export function fadeHandles(view: View, box: Box, clip: Clip) {
+  const fadeIn = Math.max(fadeInset, span(view, clip.fadeIn ?? 0));
+  const fadeOut = Math.max(fadeInset, span(view, clip.fadeOut ?? 0));
+  return { in: box.x + fadeIn, out: box.x + box.w - fadeOut, y: box.y + 5 };
+}
+
+/** A selected clip's sound handle under (`x`, `y`): a fade handle, a volume key or the line. */
+function soundHit(view: View, row: Row, clip: Clip, x: number, y: number): Hit | null {
+  const box = soundBox(view, row, clip);
+  if (!box || box.w < 3 * fadeInset || box.h < 10) return null;
+  const handles = fadeHandles(view, box, clip);
+  for (const edge of ['in', 'out'] as const) {
+    const hx = edge === 'in' ? handles.in : handles.out;
+    if (Math.abs(x - hx) <= 6 && Math.abs(y - handles.y) <= 6)
+      return { kind: 'fade', clip, row, edge };
+  }
+  const time = xToTime(view, x);
+  if (isAnimated(clip, 'volumeDb'))
+    for (const key of clip.keyframes!.volumeDb) {
+      if (key.time < 0 || key.time > clip.duration) continue;
+      const kx = timeToX(view, clip.start + key.time);
+      const ky = volumeY(box, key.value as number);
+      if (Math.abs(x - kx) <= 5 && Math.abs(y - ky) <= 5)
+        return { kind: 'volume', clip, row, key: key.time, time };
+    }
+  const inside = x - box.x > edgeGrab && box.x + box.w - x > edgeGrab;
+  const lineY = volumeY(box, volumeAt(clip, time - clip.start));
+  if (inside && Math.abs(y - lineY) <= 4) return { kind: 'volume', clip, row, key: null, time };
+  return null;
+}
+
 /**
  * What is under canvas point (`x`, `y`). `selected` clips show their keyframes,
- * which can then be grabbed.
+ * fade handles and volume line, which can then be grabbed.
  */
 export function hitTest(
   project: Project,
@@ -186,6 +266,12 @@ export function hitTest(
     return { kind: 'transition', transition, row, edge, window, cut };
   }
   const top = rowTop(view, row);
+  if (selected && y > top + 2 + nameBar)
+    for (const clip of visibleClips(row.track.clips, time - 1, time + 1)) {
+      if (!selected.has(clip.id)) continue;
+      const sound = soundHit(view, row, clip, x, y);
+      if (sound) return sound;
+    }
   if (selected && y <= top + 2 + nameBar)
     for (const clip of visibleClips(row.track.clips, time - 1, time + 1)) {
       if (!selected.has(clip.id)) continue;

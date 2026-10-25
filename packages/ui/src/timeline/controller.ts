@@ -46,9 +46,12 @@ import {
   snapDelta,
   snapPixels,
   snapTargets,
+  soundBox,
   snapToFrame,
   timeToX,
   visibleClips,
+  volumeAt,
+  volumeAtY,
   xToTime,
   zoomAt,
   type Hit,
@@ -156,6 +159,16 @@ type Drag =
       offset: number;
       x: number;
       time: number;
+    }
+  | { kind: 'fade'; gesture: Gesture | null; clip: Clip; row: Row; edge: 'in' | 'out'; x: number }
+  | {
+      kind: 'volume';
+      gesture: Gesture | null;
+      clip: Clip;
+      row: Row;
+      /** The volume keyframe dragged (from the clip's start), or null for the line. */
+      key: number | null;
+      y: number;
     };
 
 export interface DrawStats {
@@ -483,6 +496,49 @@ export class TimelineController {
       };
       return;
     }
+    if (hit.kind === 'fade' || hit.kind === 'volume') {
+      if (hit.row.track.locked || this.host.locked()) return;
+      if (hit.kind === 'fade') {
+        this.drag = {
+          kind: 'fade',
+          gesture: null,
+          clip: hit.clip,
+          row: hit.row,
+          edge: hit.edge,
+          x,
+        };
+        return;
+      }
+      const frame = this.frame(project);
+      const clip = hit.clip;
+      if (hit.key !== null && event.altKey) {
+        // Alt-click takes a volume keyframe away.
+        void this.host.execute({
+          type: 'removeKeyframes',
+          clip: clip.id,
+          property: 'volumeDb',
+          times: [hit.key],
+        });
+        return;
+      }
+      if (hit.key === null && (event.ctrlKey || event.metaKey)) {
+        // Ctrl-click adds a volume keyframe on the line, at its level there.
+        const offset = Math.min(
+          clip.duration - frame,
+          Math.max(0, snapToFrame(hit.time - clip.start, frame)),
+        );
+        void this.host.execute({
+          type: 'setKeyframe',
+          clip: clip.id,
+          property: 'volumeDb',
+          time: offset,
+          value: Math.round(volumeAt(clip, offset) * 10) / 10,
+        });
+        return;
+      }
+      this.drag = { kind: 'volume', gesture: null, clip, row: hit.row, key: hit.key, y };
+      return;
+    }
     if (hit.kind === 'empty') {
       const additive = event.shiftKey || event.ctrlKey || event.metaKey;
       if (!additive) this.host.select([], 'replace');
@@ -541,13 +597,17 @@ export class TimelineController {
             : hit.edge
               ? 'ew-resize'
               : 'grab'
-          : hit.kind === 'marker' || hit.kind === 'keyframe'
+          : hit.kind === 'marker' || hit.kind === 'keyframe' || hit.kind === 'fade'
             ? 'ew-resize'
-            : hit.kind === 'transition'
-              ? hit.edge
-                ? 'ew-resize'
-                : 'pointer'
-              : 'default';
+            : hit.kind === 'volume'
+              ? hit.key !== null
+                ? 'move'
+                : 'ns-resize'
+              : hit.kind === 'transition'
+                ? hit.edge
+                  ? 'ew-resize'
+                  : 'pointer'
+                : 'default';
       if (hover?.clip !== this.hover?.clip || hover?.edge !== this.hover?.edge) {
         this.hover = hover;
         this.redraw();
@@ -611,6 +671,45 @@ export class TimelineController {
         const frame = this.frame(snapshot.project);
         const duration = durationForEdge(drag.transition, drag.cut, drag.edge, time, frame);
         drag.gesture.step({ type: 'setTransition', transition: drag.transition.id, duration });
+        return;
+      }
+      case 'fade': {
+        if (!drag.gesture && Math.abs(x - drag.x) < 2) return;
+        drag.gesture ??= this.host.gesture('Change fade');
+        if (!drag.gesture) return;
+        const frame = this.frame(snapshot.project);
+        const clip = drag.clip;
+        const end = clip.start + clip.duration;
+        const room =
+          clip.duration - (drag.edge === 'in' ? (clip.fadeOut ?? 0) : (clip.fadeIn ?? 0));
+        const length = drag.edge === 'in' ? time - clip.start : end - time;
+        const fade = Math.min(room - (room % frame), Math.max(0, snapToFrame(length, frame)));
+        this.guide = drag.edge === 'in' ? clip.start + fade : end - fade;
+        drag.gesture.step({
+          type: 'setClipProperties',
+          clip: clip.id,
+          properties: drag.edge === 'in' ? { fadeIn: fade } : { fadeOut: fade },
+        });
+        return;
+      }
+      case 'volume': {
+        if (!drag.gesture && Math.abs(y - drag.y) < 2) return;
+        drag.gesture ??= this.host.gesture('Change volume');
+        if (!drag.gesture) return;
+        const box = soundBox(this.view, drag.row, drag.clip);
+        if (!box) return;
+        const value = volumeAtY(box, y);
+        drag.gesture.step(
+          drag.key === null
+            ? { type: 'setClipProperties', clip: drag.clip.id, properties: { volumeDb: value } }
+            : {
+                type: 'setKeyframe',
+                clip: drag.clip.id,
+                property: 'volumeDb',
+                time: drag.key,
+                value,
+              },
+        );
         return;
       }
       case 'keyframe': {
@@ -750,7 +849,9 @@ export class TimelineController {
       drag.kind === 'trim' ||
       drag.kind === 'marker' ||
       drag.kind === 'transition' ||
-      drag.kind === 'keyframe'
+      drag.kind === 'keyframe' ||
+      drag.kind === 'fade' ||
+      drag.kind === 'volume'
     ) {
       if (drag.gesture) await this.host.finish(drag.gesture);
     }

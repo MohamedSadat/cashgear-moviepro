@@ -1,6 +1,12 @@
 import { useState, type ReactNode } from 'react';
 import { CgButton } from '@cashgear/ui';
-import type { Clip, ClipProperties, Command, Speed } from '@cgv/engine-client';
+import {
+  FLICKS_PER_SECOND,
+  type Clip,
+  type ClipProperties,
+  type Command,
+  type Speed,
+} from '@cgv/engine-client';
 import type { EditorState } from '../editing/useEditor';
 import { isAnimated, numberAt } from '../effects/animation';
 import { frameDuration } from '../timeline/geometry';
@@ -337,8 +343,37 @@ export function Inspector({ editor }: { editor: EditorState }) {
             testId: 'field-volume',
             set: (volumeDb) => set({ volumeDb }),
           })}
+          {(['fadeIn', 'fadeOut'] as const).map((edge) => {
+            const other = edge === 'fadeIn' ? (clip.fadeOut ?? 0) : (clip.fadeIn ?? 0);
+            const room = Math.max(0, clip.duration - other);
+            return (
+              <ScrubField
+                key={edge}
+                label={edge === 'fadeIn' ? 'Fade in' : 'Fade out'}
+                value={(clip[edge] ?? 0) / FLICKS_PER_SECOND}
+                min={0}
+                max={room / FLICKS_PER_SECOND}
+                step={0.01}
+                precision={2}
+                unit="s"
+                testId={edge === 'fadeIn' ? 'field-fade-in' : 'field-fade-out'}
+                editor={editor}
+                disabled={locked}
+                // Whole frames, as the fade handles on the timeline move.
+                command={(seconds) =>
+                  set({
+                    [edge]: Math.min(
+                      room,
+                      Math.round((seconds * FLICKS_PER_SECOND) / frame) * frame,
+                    ),
+                  })
+                }
+              />
+            );
+          })}
         </Section>
       )}
+      {clip.audio && <EffectStack editor={editor} context={context} disabled={locked} audio />}
       {!still && (
         <Section title="Speed">
           <div className="cgv-speed-presets" role="group" aria-label="Speed presets">

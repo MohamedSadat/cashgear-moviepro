@@ -41,10 +41,21 @@ export function copyClips(project: Project, ids: number[]): ClipboardItem[] {
           crop: clip.crop,
           opacity: clip.opacity,
           volumeDb: clip.volumeDb,
+          // Sound settings only where there is sound to take them.
+          ...(clip.audio
+            ? { fadeIn: clip.fadeIn ?? 0, fadeOut: clip.fadeOut ?? 0, denoise: clip.denoise ?? 0 }
+            : {}),
         },
         // Effects keep their ids, so their keyframes follow them to the copy.
         effects: clip.effects?.map(({ id, kind, pack, version, enabled, params }) => ({
           id,
+          kind,
+          pack,
+          version,
+          enabled,
+          params,
+        })),
+        audioEffects: clip.audioEffects?.map(({ kind, pack, version, enabled, params }) => ({
           kind,
           pack,
           version,

@@ -25,6 +25,8 @@ export interface Catalog {
   entries: CatalogEntry[];
   effects: CatalogItem[];
   transitions: CatalogItem[];
+  /** Sound effects: one item each; their variants are presets. */
+  audio: CatalogItem[];
   looks: LookInfo[];
   find(pack: string, id: string): CatalogEntry | undefined;
 }
@@ -58,6 +60,15 @@ export function catalogOf(entries: CatalogEntry[], looks: LookInfo[]): Catalog {
     entries,
     effects: itemsOf(entries, 'effect'),
     transitions: itemsOf(entries, 'transition'),
+    audio: entries
+      .filter((entry) => entry.type === 'audio')
+      .map((entry) => ({
+        key: `${entry.pack}/${entry.id}`,
+        entry,
+        variant: null,
+        name: entry.name,
+        params: {},
+      })),
     looks,
     find: (pack, id) => entries.find((entry) => entry.pack === pack && entry.id === id),
   };

@@ -4,6 +4,8 @@ import {
   aboveRows,
   clampView,
   dropZoneHeight,
+  fadeHandles,
+  fadeInset,
   fitScale,
   hitTest,
   layoutRows,
@@ -14,8 +16,12 @@ import {
   rulerTicks,
   snapDelta,
   snapTargets,
+  soundBox,
   timeToX,
   visibleClips,
+  volumeAt,
+  volumeAtY,
+  volumeY,
   xToTime,
   zoomAt,
   type View,
@@ -158,5 +164,76 @@ describe('snapping and cuts', () => {
     expect(nearestCut(clips, 1.5 * S)).toBe(0);
     expect(nearestCut(clips, 2 * S)).toBe(3 * S);
     expect(nearestCut(clips, 50 * S)).toBe(7 * S);
+  });
+});
+
+describe('sound handles', () => {
+  // One track of a sound-only clip from 3 s to 7 s, with fades and a volume.
+  const sound: Clip = {
+    ...clip(1, 3, 4),
+    video: false,
+    volumeDb: -12,
+    fadeIn: 0.5 * S,
+    fadeOut: 0,
+  };
+  const p = project([track(1, [sound])]);
+  const rows = layoutRows(p.tracks);
+  const row = rows[0];
+
+  it('place the volume line and the fade handles in the clip', () => {
+    const box = soundBox(view, row, sound)!;
+    expect(box.x).toBe(100);
+    expect(box.w).toBe(400);
+    expect(volumeY(box, 24)).toBe(box.y);
+    expect(volumeY(box, -60)).toBe(box.y + box.h);
+    expect(volumeAtY(box, volumeY(box, -12))).toBe(-12);
+    const handles = fadeHandles(view, box, sound);
+    // Half a second of fade in is 50 px; no fade out sits just inside the edge.
+    expect(handles.in).toBe(150);
+    expect(handles.out).toBe(500 - fadeInset);
+    expect(soundBox(view, row, { ...sound, audio: false })).toBeNull();
+  });
+
+  it('are grabbed only on selected clips, away from the trim edges', () => {
+    const box = soundBox(view, row, sound)!;
+    const handles = fadeHandles(view, box, sound);
+    const selected = new Set([1]);
+    expect(hitTest(p, rows, view, 150, handles.y, selected)).toMatchObject({
+      kind: 'fade',
+      edge: 'in',
+    });
+    expect(hitTest(p, rows, view, handles.out, handles.y, selected)).toMatchObject({
+      kind: 'fade',
+      edge: 'out',
+    });
+    const lineY = volumeY(box, -12);
+    expect(hitTest(p, rows, view, 300, lineY + 2, selected)).toMatchObject({
+      kind: 'volume',
+      key: null,
+    });
+    // Unselected, the same point is the clip; at its edge, the edge.
+    expect(hitTest(p, rows, view, 300, lineY, new Set())).toMatchObject({ kind: 'clip' });
+    expect(hitTest(p, rows, view, 102, lineY, selected)).toMatchObject({
+      kind: 'clip',
+      edge: 'start',
+    });
+    // With volume keyframes, the keys are grabbed.
+    const keyed: Clip = {
+      ...sound,
+      keyframes: {
+        volumeDb: [
+          { time: 1 * S, value: -6, interpolation: { kind: 'linear' } },
+          { time: 3 * S, value: -24, interpolation: { kind: 'linear' } },
+        ],
+      },
+    };
+    const keyedProject = project([track(1, [keyed])]);
+    const keyedRows = layoutRows(keyedProject.tracks);
+    expect(hitTest(keyedProject, keyedRows, view, 200, volumeY(box, -6), selected)).toMatchObject({
+      kind: 'volume',
+      key: 1 * S,
+    });
+    // Half way between the keys the line is at -15 dB.
+    expect(volumeAt(keyed, 2 * S)).toBeCloseTo(-15, 6);
   });
 });

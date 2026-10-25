@@ -752,7 +752,7 @@ function menuFor(editor: EditorState, hit: Hit): MenuItem[] {
       },
     ];
   }
-  if (hit.kind !== 'clip')
+  if (hit.kind !== 'clip' && hit.kind !== 'fade' && hit.kind !== 'volume')
     return [
       paste,
       {

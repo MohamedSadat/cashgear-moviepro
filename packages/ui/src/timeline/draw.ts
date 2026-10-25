@@ -12,20 +12,26 @@ import {
   type Transition,
 } from '@cgv/engine-client';
 import { transitionWindow } from '../editing/transitions';
-import { keyTimes } from '../effects/animation';
+import { isAnimated, keyTimes } from '../effects/animation';
 import type { MediaVisuals } from '../media/useMediaLibrary';
 import {
   dropZoneHeight,
+  fadeHandles,
+  fadeInset,
   frameDuration,
   nameBar,
   rowTop,
   rulerHeight,
   rulerTicks,
+  soundBox,
   span,
   timeToX,
   transitionBox,
   visibleClips,
+  volumeAt,
+  volumeY,
   xToTime,
+  type Box,
   type Row,
   type View,
 } from './geometry';
@@ -54,6 +60,7 @@ export interface Palette {
   invalid: string;
   waveform: string;
   waveformMuted: string;
+  volume: string;
   guide: string;
   drop: string;
   markers: Record<MarkerColor, string>;
@@ -79,6 +86,7 @@ const defaults: Palette = {
   clipBorder: 'rgba(255, 255, 255, 0.16)',
   selection: '#f2b84b',
   invalid: '#ef5a5a',
+  volume: '#ffd166',
   waveform: 'rgba(214, 255, 232, 0.75)',
   waveformMuted: 'rgba(200, 200, 200, 0.35)',
   guide: '#f2d24b',
@@ -113,6 +121,7 @@ const tokenNames: Record<Exclude<keyof Palette, 'markers'>, string> = {
   clipBorder: '--cgv-clip-border',
   selection: '--cgv-clip-selected',
   invalid: '--cgv-danger',
+  volume: '--cgv-volume-line',
   waveform: '--cgv-waveform',
   waveformMuted: '--cgv-waveform-muted',
   guide: '--cgv-snap-guide',
@@ -264,6 +273,89 @@ function drawWaveform(
   ctx.fill();
 }
 
+/** The equal-power rise of a fade, as the mixer plays it. */
+const rise = (p: number) => Math.sin(Math.min(1, Math.max(0, p)) * (Math.PI / 2));
+
+/** A clip's sound fades: the part each fade holds back, shaded over its waveform. */
+function drawFades(ctx: CanvasRenderingContext2D, input: DrawInput, clip: Clip, box: Box) {
+  const fades = [
+    { length: span(input.view, clip.fadeIn ?? 0), from: box.x, sign: 1 },
+    { length: span(input.view, clip.fadeOut ?? 0), from: box.x + box.w, sign: -1 },
+  ];
+  for (const { length, from, sign } of fades) {
+    if (length < 2) continue;
+    const steps = Math.max(4, Math.min(48, Math.round(length / 4)));
+    ctx.beginPath();
+    ctx.moveTo(from, box.y);
+    for (let i = 0; i <= steps; i++) {
+      const p = i / steps;
+      ctx.lineTo(from + sign * p * length, box.y + box.h * (1 - rise(p)));
+    }
+    ctx.lineTo(from + sign * length, box.y);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.fill();
+    ctx.beginPath();
+    for (let i = 0; i <= steps; i++) {
+      const p = i / steps;
+      const px = from + sign * p * length;
+      const py = box.y + box.h * (1 - rise(p));
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+/** A selected clip's volume line (or its volume keyframes) and fade handles. */
+function drawSoundHandles(ctx: CanvasRenderingContext2D, input: DrawInput, clip: Clip, box: Box) {
+  if (box.w < 3 * fadeInset || box.h < 10) return;
+  const { view, palette } = input;
+  const from = Math.max(box.x, 0);
+  const to = Math.min(box.x + box.w, view.width);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(box.x, box.y - 6, box.w, box.h + 12);
+  ctx.clip();
+  ctx.strokeStyle = palette.volume;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  if (isAnimated(clip, 'volumeDb')) {
+    for (let px = from; px <= to; px += 3) {
+      const offset = ((px - box.x) / view.scale) * FLICKS_PER_SECOND;
+      const py = volumeY(box, volumeAt(clip, offset));
+      if (px === from) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+  } else {
+    const py = Math.round(volumeY(box, clip.volumeDb)) + 0.5;
+    ctx.moveTo(from, py);
+    ctx.lineTo(to, py);
+  }
+  ctx.stroke();
+  ctx.fillStyle = palette.volume;
+  for (const key of clip.keyframes?.volumeDb ?? []) {
+    const kx = timeToX(view, clip.start + key.time);
+    if (kx < box.x - 1 || kx > box.x + box.w + 1) continue;
+    ctx.beginPath();
+    ctx.arc(kx, volumeY(box, key.value as number), 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const handles = fadeHandles(view, box, clip);
+  ctx.fillStyle = palette.clipText;
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.lineWidth = 1;
+  for (const hx of [handles.in, handles.out]) {
+    ctx.beginPath();
+    ctx.arc(hx, handles.y, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function speedLabel(clip: Clip) {
   if (clip.speed.num === clip.speed.den) return '';
   const value = clip.speed.num / clip.speed.den;
@@ -311,11 +403,8 @@ function drawClip(
     ctx.rect(x + 1, y + 1, w - 2, h - 2);
     ctx.clip();
     const visuals = input.visuals[clip.media];
-    const waveHeight = clip.audio
-      ? clip.video
-        ? Math.round((h - nameBar) * 0.38)
-        : h - nameBar
-      : 0;
+    const sound = soundBox(view, row, clip);
+    const waveHeight = sound?.h ?? 0;
     if (visuals && !offline && !generated) {
       if (clip.video && visuals.thumbnails.length)
         drawFilmstrip(ctx, input, clip, visuals, x, y + nameBar, w, h - nameBar - waveHeight);
@@ -332,6 +421,8 @@ function drawClip(
           waveHeight,
         );
     }
+    if (sound && ((clip.fadeIn ?? 0) > 0 || (clip.fadeOut ?? 0) > 0))
+      drawFades(ctx, input, clip, sound);
     if (w >= 24) {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
       ctx.fillRect(x, y, w, nameBar);
@@ -368,6 +459,8 @@ function drawClip(
     ctx.fillRect(handle, y, 4, h);
   }
   if (selected && w >= 8) drawKeyframes(ctx, input, clip, y);
+  const sound = selected ? soundBox(view, row, clip) : null;
+  if (sound && !row.track.locked) drawSoundHandles(ctx, input, clip, sound);
 }
 
 /** A selected clip's keyframes, as diamonds along its name bar. */

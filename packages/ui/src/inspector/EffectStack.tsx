@@ -251,6 +251,7 @@ function EffectPanel({
   index,
   count,
   disabled,
+  audio,
 }: {
   editor: EditorState;
   context: KeyContext;
@@ -258,12 +259,16 @@ function EffectPanel({
   index: number;
   count: number;
   disabled?: boolean;
+  audio?: boolean;
 }) {
   const [open, setOpen] = useState(true);
   const entry = editor.catalog?.find(effect.pack, effect.kind);
   const name = entry ? nameOf(entry, effect.params) : effect.kind;
   const clip = context.clip.id;
   const run = (command: Command) => void editor.project.execute(command);
+  // Sound effects list their variants as presets.
+  const presets = audio ? (entry?.variants ?? []) : [];
+  const preset = presets.find((variant) => variant.name === name);
   return (
     <div
       className="cgv-effect-panel"
@@ -329,8 +334,36 @@ function EffectPanel({
       </div>
       {open && !entry && (
         <p className="cgv-muted">
-          {effect.pack}/{effect.kind} is not in this version of CashGear Video, so it is not drawn.
+          {effect.pack}/{effect.kind} is not in this version of CashGear Video, so it is not{' '}
+          {audio ? 'heard' : 'drawn'}.
         </p>
+      )}
+      {open && entry && presets.length > 0 && (
+        <label className="cgv-field" data-testid="effect-preset">
+          <span className="cgv-field-label">Preset</span>
+          <select
+            aria-label={`${entry.name} preset`}
+            value={preset?.id ?? ''}
+            disabled={disabled}
+            onChange={(event) => {
+              const chosen = presets.find((variant) => variant.id === event.currentTarget.value);
+              if (chosen)
+                run({
+                  type: 'resetEffect',
+                  clip,
+                  effect: effect.id,
+                  params: { ...defaultsOf(entry), ...chosen.params },
+                });
+            }}
+          >
+            {!preset && <option value="">Custom</option>}
+            {presets.map((variant) => (
+              <option key={variant.id} value={variant.id}>
+                {variant.name}
+              </option>
+            ))}
+          </select>
+        </label>
       )}
       {open &&
         entry?.params.map((param) => (
@@ -347,31 +380,50 @@ function EffectPanel({
   );
 }
 
-/** The clip's effects in the order they run: switch, reorder, reset and remove them. */
+/**
+ * The clip's effects in the order they run: switch, reorder, reset and remove
+ * them. With `audio`, its sound effects, which take presets instead of keyframes.
+ */
 export function EffectStack({
   editor,
   context,
   disabled,
+  audio,
 }: {
   editor: EditorState;
   context: KeyContext;
   disabled?: boolean;
+  audio?: boolean;
 }) {
-  const effects = context.clip.effects ?? [];
-  const items = editor.catalog?.effects ?? [];
+  const effects = (audio ? context.clip.audioEffects : context.clip.effects) ?? [];
+  const items = (audio ? editor.catalog?.audio : editor.catalog?.effects) ?? [];
+  const title = audio ? 'Sound effects' : 'Effects';
+  const add = (key: string) => {
+    const item = items.find((entry) => entry.key === key);
+    if (!item) return;
+    if (!audio) return void editor.applyEffect(item, [context.clip.id]);
+    const { entry } = item;
+    void editor.project.execute({
+      type: 'addEffect',
+      clip: context.clip.id,
+      effect: { kind: entry.id, pack: entry.pack, version: entry.version, params: {} },
+      audio: true,
+    });
+  };
   return (
-    <section className="cgv-inspector-section" aria-label="Effects" data-testid="effect-stack">
-      <h3>Effects</h3>
+    <section
+      className="cgv-inspector-section"
+      aria-label={title}
+      data-testid={audio ? 'audio-effect-stack' : 'effect-stack'}
+    >
+      <h3>{title}</h3>
       <select
-        aria-label="Add an effect"
+        aria-label={audio ? 'Add a sound effect' : 'Add an effect'}
         value=""
         disabled={disabled || !items.length}
-        onChange={(event) => {
-          const item = items.find((entry) => entry.key === event.currentTarget.value);
-          if (item) void editor.applyEffect(item, [context.clip.id]);
-        }}
+        onChange={(event) => add(event.currentTarget.value)}
       >
-        <option value="">Add effect…</option>
+        <option value="">{audio ? 'Add sound effect…' : 'Add effect…'}</option>
         {items.map((item) => (
           <option key={item.key} value={item.key}>
             {item.name}
@@ -380,7 +432,9 @@ export function EffectStack({
       </select>
       {!effects.length && (
         <p className="cgv-muted">
-          Drag an effect from the Effects tab onto the clip, or add one here.
+          {audio
+            ? 'EQ, filters, compression, a noise gate, a limiter, echo and reverb.'
+            : 'Drag an effect from the Effects tab onto the clip, or add one here.'}
         </p>
       )}
       {effects.map((effect, index) => (
@@ -392,6 +446,7 @@ export function EffectStack({
           index={index}
           count={effects.length}
           disabled={disabled}
+          audio={audio}
         />
       ))}
     </section>
