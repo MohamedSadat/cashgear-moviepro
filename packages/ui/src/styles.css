@@ -1032,6 +1032,38 @@ body,
   color: var(--cgv-muted);
 }
 
+.cgv-sticker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cgv-sticker {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--cgv-surface-raised, rgba(255, 255, 255, 0.04));
+  cursor: grab;
+}
+
+.cgv-sticker:hover,
+.cgv-sticker:focus-visible {
+  border-color: var(--cgv-accent);
+}
+
+.cgv-sticker img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
 .cgv-element-list {
   display: flex;
   flex-direction: column;

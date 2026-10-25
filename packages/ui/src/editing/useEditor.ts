@@ -5,6 +5,13 @@ import type { PlaybackControls } from '../monitor/usePlayback';
 import type { ProjectState } from '../project/useProject';
 import type { ActionId } from '../shortcuts/keymap';
 import { findClip, projectEnd, withPartners } from '../timeline/controller';
+import {
+  stickerDuration,
+  stickerMediaId,
+  stickerRequest,
+  stickerScale,
+  type Sticker,
+} from '../stickers/catalog';
 import { templateSpec, type TitleTemplate } from '../titles/templates';
 import { frameDuration } from '../timeline/geometry';
 import { copyClips, planPaste, type ClipboardItem } from './clipboard';
@@ -48,6 +55,8 @@ export interface EditorState {
   addAdjustmentLayer(time?: number, track?: number): Promise<void>;
   /** Adds a title from `template` at `time` (the playhead) on `track`, or above the others. */
   addTitle(template: TitleTemplate, time?: number, track?: number): Promise<void>;
+  /** Adds `sticker` (importing it the first time) at `time` on `track`, or above the others. */
+  addSticker(sticker: Sticker, time?: number, track?: number): Promise<void>;
   tool: Tool;
   setTool(tool: Tool): void;
   snapping: boolean;
@@ -243,6 +252,23 @@ export function useEditor(
     [addGenerated],
   );
 
+  const addSticker = useCallback(
+    async (sticker: Sticker, time?: number, track?: number) => {
+      const { project, current } = state.current;
+      if (!current) return;
+      const id = stickerMediaId(sticker);
+      if (!current.media.some((media) => media.id === id))
+        await project.importRequests([stickerRequest(sticker)]);
+      const frame = frameDuration(current.settings.frameRate);
+      const duration = Math.round(stickerDuration / frame) * frame;
+      const label = 'Add ' + sticker.name.toLowerCase();
+      // A third of the frame's height or so, not filling it as a picture does.
+      const properties = { transform: { scaleX: stickerScale, scaleY: stickerScale } };
+      await addGenerated(label, { media: id, duration, properties }, time, track);
+    },
+    [addGenerated],
+  );
+
   const playhead = useCallback(() => state.current.playback.state?.time ?? 0, []);
 
   const run = useCallback(
@@ -379,6 +405,7 @@ export function useEditor(
     applyTransition,
     addAdjustmentLayer,
     addTitle,
+    addSticker,
     tool,
     setTool,
     snapping: options.snapping,

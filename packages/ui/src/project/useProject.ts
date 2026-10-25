@@ -1,3 +1,4 @@
+import { imageDuration } from '../media/lengths';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Autosaver,
@@ -113,7 +114,6 @@ export interface ProjectOptions {
 
 const untitled = 'Untitled project';
 /** Stills dropped on the timeline last this long. */
-const stillDuration = 5 * FLICKS_PER_SECOND;
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -684,7 +684,9 @@ export function useProject(
       const { num, den } = current.project.settings.frameRate;
       const frame = (FLICKS_PER_SECOND * den) / num;
       const duration =
-        media.kind === 'image' ? stillDuration : Math.floor(media.duration / frame) * frame;
+        media.kind === 'image'
+          ? imageDuration(media, frame)
+          : Math.floor(media.duration / frame) * frame;
       if (duration < frame) {
         notice(`${media.name} is shorter than one frame.`);
         return;

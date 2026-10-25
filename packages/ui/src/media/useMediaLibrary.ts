@@ -1,3 +1,4 @@
+import { packSource } from '../stickers/catalog';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createJobsClient,
@@ -355,12 +356,23 @@ export function useMediaLibrary(
             setItems([]);
             dropVisuals(null);
             expected.current = new Map(media.map((ref) => [ref.id, ref]));
-            const located = await platform.locate(media);
+            // Pack media (stickers) is in this build, wherever the project opens.
+            const packed: ImportRequest[] = [];
+            const lost: string[] = [];
+            for (const ref of media)
+              if (ref.location.kind === 'pack') {
+                const source = packSource(ref.location.path);
+                if (source) packed.push({ id: ref.id, source });
+                else lost.push(ref.id);
+              }
+            const located = await platform.locate(
+              media.filter((ref) => ref.location.kind !== 'pack'),
+            );
             setWaiting(located.waiting);
-            const { failed, changed } = await importInto(engine, located.ready, {
+            const { failed, changed } = await importInto(engine, [...packed, ...located.ready], {
               remember: false,
             });
-            return { missing: [...located.missing, ...failed], changed };
+            return { missing: [...lost, ...located.missing, ...failed], changed };
           },
           { missing: [], changed: [] },
         ),

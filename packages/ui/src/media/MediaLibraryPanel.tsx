@@ -26,7 +26,11 @@ export function describe(item: MediaItem): string[] {
     );
     if (item.video.rotation) parts.push(`rotated ${item.video.rotation}°`);
   }
-  if (item.image) parts.push(`${item.image.width}×${item.image.height}`, item.image.codecLabel);
+  if (item.image)
+    parts.push(
+      `${item.image.width}×${item.image.height}`,
+      item.image.animated ? `animated ${item.image.codecLabel}` : item.image.codecLabel,
+    );
   if (item.audio)
     parts.push(
       `${item.audio.codecLabel} ${item.audio.sampleRate / 1000} kHz ${item.audio.channelLabel}`,

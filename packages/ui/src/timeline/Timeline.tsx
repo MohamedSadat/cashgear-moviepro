@@ -383,6 +383,8 @@ export function Timeline({ editor, diagnostic }: { editor: EditorState; diagnost
         editorRef.current.addAdjustmentLayer(time, track ?? undefined),
       addTitle: (template, time, track) =>
         editorRef.current.addTitle(template, time, track ?? undefined),
+      addSticker: (sticker, time, track) =>
+        editorRef.current.addSticker(sticker, time, track ?? undefined),
       scrolled: (top) => {
         if (headers.current) headers.current.style.transform = `translateY(${-top}px)`;
       },

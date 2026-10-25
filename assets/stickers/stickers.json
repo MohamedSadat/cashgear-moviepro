@@ -1,0 +1,270 @@
+{
+  "comment": "Built-in stickers, written by scripts/make-stickers.mjs. The Emoji are animated from Noto Emoji images (Apache-2.0, see LICENSE-noto-emoji.txt) at the commit below.",
+  "notoEmoji": {
+    "commit": "41e31b110b4eb929dffb410264694a06205b7ad7",
+    "images": {
+      "2705": "15498400df3a3df6255ec1de724a4ec0da2bedb1f9d799f5d0accab7eab07603",
+      "2764": "79c60b2176040ee485b9b28183eaee52df95d26659478e6bbc33839888009b92",
+      "1f600": "d6e6be1b18cd8ae3f56556d171cc7d8eecd293bdbbc1aa66ab5493a66ba4dae0",
+      "1f602": "0636bb1d507a7dae9eda8b826ff535dd40f6d7bdb1945af13fb8abba589cac75",
+      "1f60d": "88b7d69b72e8459f24eed007a1ccce894ab9cfc24d3b3f40a6299a7a1271e415",
+      "1f60e": "c26a10fb9345e5a7eb78210b112863792ab71bd5fb72cc428e3ef83ae31177d7",
+      "1f914": "671fc355662f523ef433e9b3392ebe7acb5d2b6ca3873c75fb0dcce37539013d",
+      "1f62e": "867c630e1347c8e3fad24619452404d9b0722a03e28e7e481a1e883462c6b1b9",
+      "1f622": "6a456656d62cb96adc0fb15a812d226e2f392a6e0d306cd346749385e34fc203",
+      "1f621": "f8da3e33d2aea9527083a68a0953a659f3441f581e6b4a49815a981eae6771b1",
+      "1f44d": "7ffa6126ee0749703e69dc1d779f60143e82a8e835578d6d953dc359cf939b93",
+      "1f44f": "40c515cf9498ef60c5cbf5e5f76b55986d6ec7087226baef47715373887fd20b",
+      "1f64f": "f955c066ec9a3bd50056c6f3d736febf5a2d0c6d430176a3b3417f03c534d385",
+      "1f525": "961bd999ffe3518f728f675091812a7f601941c49260b67d480f31794cbf0dd2",
+      "2b50": "4bd86e289d7b490bbdbe94ab250e81ec5a49b6f3b15acb6d92b3a47a3439cb56",
+      "1f389": "ef246b8111cc01763eafa4baf3ce30dac8449a1935a8096d646feb2e7e5461b4",
+      "1f4af": "37c3ac8d9ab3b9b38935320bcc6d6bb0c0d9025372a5d3059958dc54151fe0b0",
+      "274c": "f0807f27df1e90a027a19e862d04845a4a885a200fa64f37c1a8e349266c3cf3",
+      "1f440": "5dad11e1033a02196a2da35a13209677f978c9dc618c2f1eb86f07daf56747f2",
+      "1f680": "a477bf2e112db11a99926a6c300618f9274b6df405b8a67d64f87fb54c833b52"
+    }
+  },
+  "stickers": [
+    {
+      "id": "grinning",
+      "name": "Grinning face",
+      "category": "Emoji",
+      "file": "stickers/grinning.webp",
+      "bytes": 110908,
+      "seconds": 2
+    },
+    {
+      "id": "joy",
+      "name": "Tears of joy",
+      "category": "Emoji",
+      "file": "stickers/joy.webp",
+      "bytes": 144856,
+      "seconds": 2
+    },
+    {
+      "id": "heart-eyes",
+      "name": "Heart eyes",
+      "category": "Emoji",
+      "file": "stickers/heart-eyes.webp",
+      "bytes": 112306,
+      "seconds": 2
+    },
+    {
+      "id": "cool",
+      "name": "Sunglasses",
+      "category": "Emoji",
+      "file": "stickers/cool.webp",
+      "bytes": 105824,
+      "seconds": 2
+    },
+    {
+      "id": "thinking",
+      "name": "Thinking",
+      "category": "Emoji",
+      "file": "stickers/thinking.webp",
+      "bytes": 120342,
+      "seconds": 2
+    },
+    {
+      "id": "wow",
+      "name": "Open mouth",
+      "category": "Emoji",
+      "file": "stickers/wow.webp",
+      "bytes": 56268,
+      "seconds": 2
+    },
+    {
+      "id": "crying",
+      "name": "Crying",
+      "category": "Emoji",
+      "file": "stickers/crying.webp",
+      "bytes": 112678,
+      "seconds": 2
+    },
+    {
+      "id": "angry",
+      "name": "Angry",
+      "category": "Emoji",
+      "file": "stickers/angry.webp",
+      "bytes": 112694,
+      "seconds": 2
+    },
+    {
+      "id": "thumbs-up",
+      "name": "Thumbs up",
+      "category": "Emoji",
+      "file": "stickers/thumbs-up.webp",
+      "bytes": 81808,
+      "seconds": 2
+    },
+    {
+      "id": "clap",
+      "name": "Clapping",
+      "category": "Emoji",
+      "file": "stickers/clap.webp",
+      "bytes": 141304,
+      "seconds": 2
+    },
+    {
+      "id": "pray",
+      "name": "Folded hands",
+      "category": "Emoji",
+      "file": "stickers/pray.webp",
+      "bytes": 101134,
+      "seconds": 2
+    },
+    {
+      "id": "heart",
+      "name": "Heart",
+      "category": "Emoji",
+      "file": "stickers/heart.webp",
+      "bytes": 43804,
+      "seconds": 2
+    },
+    {
+      "id": "fire",
+      "name": "Fire",
+      "category": "Emoji",
+      "file": "stickers/fire.webp",
+      "bytes": 101912,
+      "seconds": 2
+    },
+    {
+      "id": "star",
+      "name": "Star",
+      "category": "Emoji",
+      "file": "stickers/star.webp",
+      "bytes": 88076,
+      "seconds": 2
+    },
+    {
+      "id": "party",
+      "name": "Party popper",
+      "category": "Emoji",
+      "file": "stickers/party.webp",
+      "bytes": 227576,
+      "seconds": 2
+    },
+    {
+      "id": "hundred",
+      "name": "Hundred points",
+      "category": "Emoji",
+      "file": "stickers/hundred.webp",
+      "bytes": 118862,
+      "seconds": 2
+    },
+    {
+      "id": "check",
+      "name": "Check mark",
+      "category": "Emoji",
+      "file": "stickers/check.webp",
+      "bytes": 24026,
+      "seconds": 2
+    },
+    {
+      "id": "cross",
+      "name": "Cross mark",
+      "category": "Emoji",
+      "file": "stickers/cross.webp",
+      "bytes": 128330,
+      "seconds": 2
+    },
+    {
+      "id": "eyes",
+      "name": "Eyes",
+      "category": "Emoji",
+      "file": "stickers/eyes.webp",
+      "bytes": 91892,
+      "seconds": 2
+    },
+    {
+      "id": "rocket",
+      "name": "Rocket",
+      "category": "Emoji",
+      "file": "stickers/rocket.webp",
+      "bytes": 144162,
+      "seconds": 2
+    },
+    {
+      "id": "arrow",
+      "name": "Pointing arrow",
+      "category": "Callouts",
+      "file": "stickers/arrow.webp",
+      "bytes": 31018,
+      "seconds": 2
+    },
+    {
+      "id": "circle",
+      "name": "Circle highlight",
+      "category": "Callouts",
+      "file": "stickers/circle.webp",
+      "bytes": 17038,
+      "seconds": 2
+    },
+    {
+      "id": "underline",
+      "name": "Underline",
+      "category": "Callouts",
+      "file": "stickers/underline.webp",
+      "bytes": 7656,
+      "seconds": 2
+    },
+    {
+      "id": "bubble",
+      "name": "Speech bubble",
+      "category": "Callouts",
+      "file": "stickers/bubble.webp",
+      "bytes": 11090,
+      "seconds": 2
+    },
+    {
+      "id": "click",
+      "name": "Click",
+      "category": "Callouts",
+      "file": "stickers/click.webp",
+      "bytes": 107620,
+      "seconds": 2
+    },
+    {
+      "id": "new",
+      "name": "New badge",
+      "category": "Badges",
+      "file": "stickers/new.webp",
+      "bytes": 92856,
+      "seconds": 2
+    },
+    {
+      "id": "sale",
+      "name": "Sale tag",
+      "category": "Badges",
+      "file": "stickers/sale.webp",
+      "bytes": 78444,
+      "seconds": 2
+    },
+    {
+      "id": "burst",
+      "name": "Starburst",
+      "category": "Badges",
+      "file": "stickers/burst.webp",
+      "bytes": 119802,
+      "seconds": 2
+    },
+    {
+      "id": "tick",
+      "name": "Done",
+      "category": "Badges",
+      "file": "stickers/tick.webp",
+      "bytes": 16160,
+      "seconds": 2
+    },
+    {
+      "id": "sparkles",
+      "name": "Sparkles",
+      "category": "Badges",
+      "file": "stickers/sparkles.webp",
+      "bytes": 25528,
+      "seconds": 2
+    }
+  ]
+}

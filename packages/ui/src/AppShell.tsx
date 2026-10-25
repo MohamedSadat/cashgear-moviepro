@@ -14,6 +14,7 @@ import { DevOverlay } from './DevOverlay';
 import { useCatalog } from './effects/catalog';
 import { EffectsBrowser } from './effects/EffectsBrowser';
 import { usePreviews } from './effects/usePreviews';
+import { StickersBrowser } from './stickers/StickersBrowser';
 import { TitlesBrowser } from './titles/TitlesBrowser';
 import { useTitlePreviews } from './titles/useTitlePreviews';
 import { useEditor, type EditorState } from './editing/useEditor';
@@ -280,6 +281,11 @@ export function AppShell({ platform }: Props) {
                 id: 'titles',
                 label: 'Titles',
                 render: () => <TitlesBrowser editor={editor} previews={titlePreviews} />,
+              },
+              {
+                id: 'stickers',
+                label: 'Stickers',
+                render: () => <StickersBrowser editor={editor} />,
               },
               {
                 id: 'effects',

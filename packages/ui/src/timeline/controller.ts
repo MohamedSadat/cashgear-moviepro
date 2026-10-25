@@ -10,6 +10,7 @@ import {
   type ProjectSnapshot,
   type Transition,
 } from '@cgv/engine-client';
+import { imageDuration } from '../media/lengths';
 import type { MediaVisuals } from '../media/useMediaLibrary';
 import type { Gesture } from '../editing/gesture';
 import {
@@ -21,6 +22,7 @@ import {
 } from '../editing/transitions';
 import type { CatalogItem } from '../effects/catalog';
 import type { DraggedEffect } from '../effects/dragging';
+import { stickerDuration, type Sticker } from '../stickers/catalog';
 import type { TitleTemplate } from '../titles/templates';
 import { effectDragType } from '../effects/dragging';
 import {
@@ -59,7 +61,6 @@ import { ImageCache, PeakCache } from './visuals';
 export const mediaDragType = 'application/x-cgv-media';
 
 /** Stills dropped on the timeline last this long. */
-const stillDuration = 5 * FLICKS_PER_SECOND;
 /** Pixels a press must travel before it drags. */
 const dragThreshold = 4;
 
@@ -94,6 +95,7 @@ export interface TimelineHost {
   applyTransition(item: CatalogItem, target: { track: number } & CutTarget): Promise<void>;
   addAdjustmentLayer(time: number, track: number | null): Promise<void>;
   addTitle(template: TitleTemplate, time: number, track: number | null): Promise<void>;
+  addSticker(sticker: Sticker, time: number, track: number | null): Promise<void>;
   /** Vertical scroll, for the track headers. */
   scrolled(scrollTop: number): void;
   /** The zoom changed, in pixels per second. */
@@ -808,7 +810,9 @@ export class TimelineController {
     const project = snapshot.project;
     const frame = this.frame(project);
     const duration =
-      media.kind === 'image' ? stillDuration : Math.floor(media.duration / frame) * frame;
+      media.kind === 'image'
+        ? imageDuration(media, frame)
+        : Math.floor(media.duration / frame) * frame;
     if (duration < frame) return null;
     const { x, y } = this.local(event);
     let start = Math.max(0, snapToFrame(xToTime(this.view, x), frame));
@@ -854,7 +858,7 @@ export class TimelineController {
     const { x, y } = this.local(event);
     const time = xToTime(this.view, x);
     const row = rowAt(this.rows, this.view, y);
-    if (dragged.kind === 'adjustment' || dragged.kind === 'title') {
+    if (dragged.kind === 'adjustment' || dragged.kind === 'title' || dragged.kind === 'sticker') {
       // Clips without media go on a free track, or a new one, never the main track.
       const frame = this.frame(project);
       const above = aboveRows(this.rows, this.view, y);
@@ -864,7 +868,9 @@ export class TimelineController {
       const duration =
         dragged.kind === 'title'
           ? Math.round((dragged.template.seconds * FLICKS_PER_SECOND) / frame) * frame
-          : adjustmentDuration;
+          : dragged.kind === 'sticker'
+            ? Math.round(stickerDuration / frame) * frame
+            : adjustmentDuration;
       return { adjustment: { row: main ? null : row, start, duration } };
     }
     if (!row || row.track.locked) return null;
@@ -914,9 +920,11 @@ export class TimelineController {
     if (!at) return;
     if (at.adjustment) {
       const track = at.adjustment.row?.track.id ?? null;
-      return dragged.kind === 'title'
-        ? this.host.addTitle(dragged.template, at.adjustment.start, track)
-        : this.host.addAdjustmentLayer(at.adjustment.start, track);
+      if (dragged.kind === 'title')
+        return this.host.addTitle(dragged.template, at.adjustment.start, track);
+      if (dragged.kind === 'sticker')
+        return this.host.addSticker(dragged.sticker, at.adjustment.start, track);
+      return this.host.addAdjustmentLayer(at.adjustment.start, track);
     }
     if (dragged.kind !== 'item') return;
     if (at.effect) {
