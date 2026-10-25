@@ -1643,14 +1643,7 @@ impl Edit {
             }
             _ => {}
         }
-        for clip in before.iter().chain(&after) {
-            if clip.is_adjustment() {
-                return Err("Adjustment layers fade with their opacity, not transitions".into());
-            }
-            if !clip.video {
-                return Err(format!("Clip {} has no picture to transition", clip.id));
-            }
-        }
+        Clip::can_transition(before.as_ref(), after.as_ref())?;
         let duration = self.snap(spec.duration)?;
         if duration < self.frame {
             return Err("A transition lasts at least one frame".into());
@@ -1833,12 +1826,7 @@ impl Edit {
             }
             let track = &self.project.tracks[index];
             let clip = |id: ClipId| track.clip(id).expect("clip on the track");
-            let usable = |c: &Clip| c.video && !c.is_adjustment();
-            if [transition.from, transition.to]
-                .into_iter()
-                .flatten()
-                .any(|id| !usable(clip(id)))
-            {
+            if Clip::can_transition(transition.from.map(clip), transition.to.map(clip)).is_err() {
                 continue;
             }
             match (transition.from, transition.to) {
@@ -1850,7 +1838,7 @@ impl Edit {
                 (None, Some(b)) => {
                     let start = clip(b).start;
                     if let Some(before) = track.clips.iter().find(|c| c.end() == start) {
-                        if !usable(before) {
+                        if Clip::can_transition(Some(before), Some(clip(b))).is_err() {
                             continue;
                         }
                         transition.from = Some(before.id);
@@ -1859,7 +1847,7 @@ impl Edit {
                 (Some(a), None) => {
                     let end = clip(a).end();
                     if let Some(after) = track.clips.iter().find(|c| c.start == end) {
-                        if !usable(after) {
+                        if Clip::can_transition(Some(clip(a)), Some(after)).is_err() {
                             continue;
                         }
                         transition.to = Some(after.id);

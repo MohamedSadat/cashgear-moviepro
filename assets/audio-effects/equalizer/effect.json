@@ -1,0 +1,193 @@
+{
+  "id": "equalizer",
+  "name": "Equalizer",
+  "category": "Tone",
+  "type": "audio",
+  "version": 1,
+  "description": "Raises or lowers the lows, two middle bands and the highs.",
+  "params": [
+    {
+      "id": "lowFrequency",
+      "name": "Low frequency",
+      "type": "number",
+      "min": 20,
+      "max": 1000,
+      "default": 100,
+      "step": 1,
+      "unit": "Hz",
+      "animate": false
+    },
+    {
+      "id": "lowGain",
+      "name": "Low",
+      "type": "number",
+      "min": -24,
+      "max": 24,
+      "default": 0,
+      "step": 0.1,
+      "unit": "dB",
+      "animate": false
+    },
+    {
+      "id": "midFrequency",
+      "name": "Mid frequency",
+      "type": "number",
+      "min": 100,
+      "max": 8000,
+      "default": 400,
+      "step": 1,
+      "unit": "Hz",
+      "animate": false
+    },
+    {
+      "id": "midGain",
+      "name": "Mid",
+      "type": "number",
+      "min": -24,
+      "max": 24,
+      "default": 0,
+      "step": 0.1,
+      "unit": "dB",
+      "animate": false
+    },
+    {
+      "id": "midQ",
+      "name": "Mid width (Q)",
+      "type": "number",
+      "min": 0.3,
+      "max": 8,
+      "default": 1,
+      "step": 0.05,
+      "animate": false
+    },
+    {
+      "id": "presenceFrequency",
+      "name": "Presence frequency",
+      "type": "number",
+      "min": 500,
+      "max": 12000,
+      "default": 3000,
+      "step": 1,
+      "unit": "Hz",
+      "animate": false
+    },
+    {
+      "id": "presenceGain",
+      "name": "Presence",
+      "type": "number",
+      "min": -24,
+      "max": 24,
+      "default": 0,
+      "step": 0.1,
+      "unit": "dB",
+      "animate": false
+    },
+    {
+      "id": "presenceQ",
+      "name": "Presence width (Q)",
+      "type": "number",
+      "min": 0.3,
+      "max": 8,
+      "default": 1,
+      "step": 0.05,
+      "animate": false
+    },
+    {
+      "id": "highFrequency",
+      "name": "High frequency",
+      "type": "number",
+      "min": 1000,
+      "max": 20000,
+      "default": 8000,
+      "step": 1,
+      "unit": "Hz",
+      "animate": false
+    },
+    {
+      "id": "highGain",
+      "name": "High",
+      "type": "number",
+      "min": -24,
+      "max": 24,
+      "default": 0,
+      "step": 0.1,
+      "unit": "dB",
+      "animate": false
+    }
+  ],
+  "variants": [
+    {
+      "id": "flat",
+      "name": "Flat",
+      "params": {}
+    },
+    {
+      "id": "voice-clarity",
+      "name": "Voice clarity",
+      "params": {
+        "lowFrequency": 120,
+        "lowGain": -4,
+        "midFrequency": 300,
+        "midGain": -2,
+        "presenceFrequency": 3500,
+        "presenceGain": 4,
+        "highGain": 2
+      }
+    },
+    {
+      "id": "podcast",
+      "name": "Podcast",
+      "params": {
+        "lowFrequency": 100,
+        "lowGain": -6,
+        "midFrequency": 250,
+        "midGain": -3,
+        "presenceFrequency": 4000,
+        "presenceGain": 3,
+        "highGain": 1
+      }
+    },
+    {
+      "id": "bass-boost",
+      "name": "Bass boost",
+      "params": {
+        "lowFrequency": 120,
+        "lowGain": 6
+      }
+    },
+    {
+      "id": "treble-boost",
+      "name": "Treble boost",
+      "params": {
+        "highFrequency": 6000,
+        "highGain": 5
+      }
+    },
+    {
+      "id": "warm",
+      "name": "Warm",
+      "params": {
+        "lowGain": 3,
+        "presenceGain": -2,
+        "highGain": -2
+      }
+    },
+    {
+      "id": "bright",
+      "name": "Bright",
+      "params": {
+        "presenceGain": 3,
+        "highGain": 4
+      }
+    },
+    {
+      "id": "reduce-mud",
+      "name": "Reduce mud",
+      "params": {
+        "midFrequency": 350,
+        "midGain": -5,
+        "midQ": 1.4
+      }
+    }
+  ]
+}

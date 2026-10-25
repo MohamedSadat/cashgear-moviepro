@@ -3,6 +3,9 @@
 //! built-in pack is every folder in `assets/effects` and `assets/transitions`,
 //! embedded at build time. Pure Rust: the renderer compiles the shaders, and the
 //! UI reads the catalogue to build its controls.
+//!
+//! Sound effects (`assets/audio-effects`) are definitions without a shader: their
+//! settings are data, and the mixer runs the processor named by their id.
 use std::collections::BTreeSet;
 
 use cgv_model::{ParamValue, Params, BUILTIN_PACK};
@@ -16,7 +19,7 @@ pub use shader::{pack_params, shader_source, Layout};
 
 /// One file of the embedded pack.
 pub(crate) struct Embedded {
-    /// `effects/<id>` or `transitions/<id>`, under `assets`.
+    /// `effects/<id>`, `transitions/<id>` or `audio-effects/<id>`, under `assets`.
     folder: &'static str,
     definition: &'static str,
     shader: &'static str,
@@ -31,6 +34,8 @@ pub enum Kind {
     Effect,
     /// Blends from one picture to another as its progress runs from 0 to 1.
     Transition,
+    /// Changes a clip's sound; the mixer runs it.
+    Audio,
 }
 
 /// The colour a shader reads and returns.
@@ -272,6 +277,16 @@ impl Definition {
                 }
                 ParamKind::Lut => luts += 1,
                 ParamKind::Bool { .. } => {}
+            }
+            let sound_setting = matches!(
+                param.kind,
+                ParamKind::Number { .. } | ParamKind::Bool { .. } | ParamKind::Choice { .. }
+            );
+            if self.kind == Kind::Audio && (!sound_setting || param.animate) {
+                return Err(at(format!(
+                    "{} is not a number, switch or choice that stays still",
+                    param.id
+                )));
             }
         }
         if luts > 1 {

@@ -1,0 +1,68 @@
+{
+  "id": "noise-gate",
+  "name": "Noise gate",
+  "category": "Dynamics",
+  "type": "audio",
+  "version": 1,
+  "description": "Silences hiss and room noise between words.",
+  "params": [
+    {
+      "id": "threshold",
+      "name": "Threshold",
+      "type": "number",
+      "min": -80,
+      "max": 0,
+      "default": -45,
+      "step": 0.5,
+      "unit": "dB",
+      "animate": false
+    },
+    {
+      "id": "reduction",
+      "name": "Reduction",
+      "type": "number",
+      "min": 0,
+      "max": 80,
+      "default": 40,
+      "step": 0.5,
+      "unit": "dB",
+      "animate": false
+    },
+    {
+      "id": "attack",
+      "name": "Attack",
+      "type": "number",
+      "min": 0.0001,
+      "max": 0.1,
+      "default": 0.002,
+      "step": 0.0001,
+      "unit": "ms",
+      "display": 1000,
+      "animate": false
+    },
+    {
+      "id": "hold",
+      "name": "Hold",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.08,
+      "step": 0.001,
+      "unit": "ms",
+      "display": 1000,
+      "animate": false
+    },
+    {
+      "id": "release",
+      "name": "Release",
+      "type": "number",
+      "min": 0.005,
+      "max": 2,
+      "default": 0.15,
+      "step": 0.001,
+      "unit": "ms",
+      "display": 1000,
+      "animate": false
+    }
+  ]
+}

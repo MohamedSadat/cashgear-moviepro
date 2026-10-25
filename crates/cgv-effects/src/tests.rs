@@ -65,6 +65,14 @@ fn the_builtin_pack_loads_with_about_twenty_effects_and_transitions() {
         "{}",
         items(&registry, Kind::Transition)
     );
+    assert_eq!(
+        registry
+            .entries()
+            .iter()
+            .filter(|entry| entry.definition.kind == Kind::Audio)
+            .count(),
+        8
+    );
     let blur = registry.get(BUILTIN_PACK, "gaussian-blur").unwrap();
     assert_eq!(blur.folder, "effects/gaussian-blur");
     assert_eq!(blur.definition.passes.len(), 2);
@@ -74,10 +82,10 @@ fn the_builtin_pack_loads_with_about_twenty_effects_and_transitions() {
             folder_id, entry.definition.id,
             "a folder is named after its effect"
         );
-        let group = if entry.definition.kind == Kind::Effect {
-            "effects/"
-        } else {
-            "transitions/"
+        let group = match entry.definition.kind {
+            Kind::Effect => "effects/",
+            Kind::Transition => "transitions/",
+            Kind::Audio => "audio-effects/",
         };
         assert!(
             entry.folder.starts_with(group),
@@ -91,6 +99,10 @@ fn the_builtin_pack_loads_with_about_twenty_effects_and_transitions() {
 fn every_builtin_shader_validates_and_translates_for_webgl2() {
     let registry = Registry::builtin().unwrap();
     for entry in registry.entries() {
+        if entry.definition.kind == Kind::Audio {
+            assert!(entry.source.is_empty());
+            continue;
+        }
         let source = shader_source(entry);
         let (module, _) = validate(&source);
         let passes = entry.definition.passes.len();

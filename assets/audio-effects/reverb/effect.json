@@ -1,0 +1,87 @@
+{
+  "id": "reverb",
+  "name": "Reverb",
+  "category": "Space",
+  "type": "audio",
+  "version": 1,
+  "description": "Places the sound in a room.",
+  "params": [
+    {
+      "id": "roomSize",
+      "name": "Room size",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.5,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100,
+      "animate": false
+    },
+    {
+      "id": "damping",
+      "name": "Damping",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.5,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100,
+      "animate": false
+    },
+    {
+      "id": "width",
+      "name": "Width",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 1,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100,
+      "animate": false
+    },
+    {
+      "id": "mix",
+      "name": "Mix",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.25,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100,
+      "animate": false
+    }
+  ],
+  "variants": [
+    {
+      "id": "small-room",
+      "name": "Small room",
+      "params": {
+        "roomSize": 0.3,
+        "damping": 0.6,
+        "mix": 0.18
+      }
+    },
+    {
+      "id": "hall",
+      "name": "Hall",
+      "params": {
+        "roomSize": 0.8,
+        "damping": 0.4,
+        "mix": 0.3
+      }
+    },
+    {
+      "id": "cathedral",
+      "name": "Cathedral",
+      "params": {
+        "roomSize": 0.95,
+        "damping": 0.2,
+        "mix": 0.4
+      }
+    }
+  ]
+}

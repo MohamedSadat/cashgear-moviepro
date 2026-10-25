@@ -1,0 +1,33 @@
+{
+  "id": "limiter",
+  "name": "Limiter",
+  "category": "Dynamics",
+  "type": "audio",
+  "version": 1,
+  "description": "Keeps peaks below a ceiling.",
+  "params": [
+    {
+      "id": "ceiling",
+      "name": "Ceiling",
+      "type": "number",
+      "min": -24,
+      "max": 0,
+      "default": -1,
+      "step": 0.1,
+      "unit": "dB",
+      "animate": false
+    },
+    {
+      "id": "release",
+      "name": "Release",
+      "type": "number",
+      "min": 0.01,
+      "max": 1,
+      "default": 0.1,
+      "step": 0.001,
+      "unit": "ms",
+      "display": 1000,
+      "animate": false
+    }
+  ]
+}

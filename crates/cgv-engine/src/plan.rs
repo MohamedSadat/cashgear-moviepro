@@ -1,8 +1,7 @@
-//! What the timeline holds at a time: the pure half of `renderFrame(t)`, and the
-//! clips the mixer plays. Same project and time, same plan, at any seek position.
+//! What the timeline holds at a time: the pure half of `renderFrame(t)`. Same
+//! project and time, same plan, at any seek position. (`sound` plans the mix.)
 use std::collections::BTreeMap;
 
-use cgv_audio::{db_to_gain, AudioClip};
 use cgv_model::{
     parse_lut_ref, Clip, ClipId, Crop, LutId, LutShape, ParamValue, Params, Project, Speed, Title,
     Track, TrackId, Transform, Transition,
@@ -354,82 +353,6 @@ pub fn upcoming_layers(project: &Project, from: Flicks, horizon: Flicks) -> Vec<
     upcoming.into_iter().map(|(_, layer)| layer).collect()
 }
 
-/// Whether `clip` can play sound in this phase: only at normal speed (time-stretch
-/// comes in Phase 9).
-fn audible(project: &Project, clip: &Clip) -> bool {
-    clip.audio
-        && clip.speed == Speed::NORMAL
-        && project
-            .media(&clip.media)
-            .is_some_and(|media| media.has_audio)
-}
-
-/// True when `next` starts where `clip` ends and continues the same source audio.
-fn continues(clip: &Clip, next: &Clip) -> bool {
-    next.media == clip.media
-        && next.start == clip.end()
-        && next.source_in == clip.source_out()
-        && next.volume_db == clip.volume_db
-        && !clip.has_volume_keyframes()
-        && !next.has_volume_keyframes()
-}
-
-/// Samples between the points of an animated volume's envelope (about 5 ms).
-const ENVELOPE_STEP: i64 = 256;
-
-/// Animated volume as linear gains at timeline samples, covering `from..to` of the clip.
-fn envelope(clip: &Clip, rate: u32, from: i64, to: i64) -> Vec<(i64, f32)> {
-    if !clip.has_volume_keyframes() {
-        return Vec::new();
-    }
-    let start = clip.start.to_samples(rate);
-    let (first, last) = (from.max(start), to.min(clip.end().to_samples(rate)));
-    let mut points = Vec::new();
-    let mut at = first - (first - start).rem_euclid(ENVELOPE_STEP);
-    loop {
-        let offset = Flicks::from_samples(at - start, rate);
-        points.push((at, db_to_gain(clip.volume_db_at(offset))));
-        if at >= last {
-            break;
-        }
-        at += ENVELOPE_STEP;
-    }
-    points
-}
-
-/// The clips heard between timeline samples `from` and `to`, at the project rate.
-pub fn audio_clips(project: &Project, from: i64, to: i64) -> Vec<AudioClip> {
-    let rate = project.settings.sample_rate;
-    let mut clips = Vec::new();
-    for track in project.tracks.iter().filter(|track| !track.muted) {
-        for (index, clip) in track.clips.iter().enumerate() {
-            if !audible(project, clip) {
-                continue;
-            }
-            let start = clip.start.to_samples(rate);
-            let end = clip.end().to_samples(rate);
-            if end <= from || start >= to {
-                continue;
-            }
-            let before = index.checked_sub(1).map(|i| &track.clips[i]);
-            let after = track.clips.get(index + 1);
-            clips.push(AudioClip {
-                media: clip.media.clone(),
-                start,
-                end,
-                source_start: clip.source_in.to_samples(rate),
-                gain: db_to_gain(clip.volume_db),
-                envelope: envelope(clip, rate, from, to),
-                fade_in: !before
-                    .is_some_and(|before| audible(project, before) && continues(before, clip)),
-                fade_out: !after
-                    .is_some_and(|after| audible(project, after) && continues(clip, after)),
-            });
-        }
-    }
-    clips
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -598,64 +521,6 @@ mod tests {
         assert_eq!(upcoming[0].source_time, Flicks::ZERO);
         assert!(upcoming_layers(session.project(), Flicks::ZERO, Flicks(FRAME * 29)).is_empty());
         let _ = top;
-    }
-
-    #[test]
-    fn audio_clips_cover_audible_clips_in_samples() {
-        let mut session = session();
-        let (bottom, top) = (track(&session, 0), track(&session, 1));
-        let video = append(&mut session, bottom, "video", 30);
-        append(&mut session, top, "sound", 60);
-        append(&mut session, top, "still", 30);
-        let clips = audio_clips(session.project(), 0, 48_000 * 10);
-        assert_eq!(clips.len(), 2);
-        assert_eq!((clips[0].start, clips[0].end), (0, 48_000));
-        assert!(clips[0].fade_in && clips[0].fade_out);
-        assert_eq!(clips[1].end, 96_000);
-        assert!(audio_clips(session.project(), 96_000, 200_000).is_empty());
-        session
-            .execute(&Command::SetClipProperties {
-                clip: video,
-                properties: cgv_model::ClipProperties {
-                    volume_db: Some(-6.0),
-                    ..Default::default()
-                },
-            })
-            .unwrap();
-        assert!((audio_clips(session.project(), 0, 10)[0].gain - 0.501_187).abs() < 1e-5);
-        session
-            .execute(&Command::SetTrackMuted {
-                track: top,
-                muted: true,
-            })
-            .unwrap();
-        assert_eq!(audio_clips(session.project(), 0, 48_000 * 10).len(), 1);
-        session
-            .execute(&Command::SetSpeed {
-                clip: video,
-                speed: Speed::new(1, 2).unwrap(),
-            })
-            .unwrap();
-        assert!(audio_clips(session.project(), 0, 48_000 * 10).is_empty());
-    }
-
-    #[test]
-    fn a_split_plays_through_without_edge_fades() {
-        let mut session = session();
-        let bottom = track(&session, 0);
-        append(&mut session, bottom, "video", 60);
-        session
-            .execute(&Command::Split {
-                at: Flicks(FRAME * 20),
-                clips: vec![],
-            })
-            .unwrap();
-        let clips = audio_clips(session.project(), 0, 48_000 * 10);
-        assert_eq!(clips.len(), 2);
-        assert!(clips[0].fade_in && !clips[0].fade_out);
-        assert!(!clips[1].fade_in && clips[1].fade_out);
-        assert_eq!(clips[1].source_start, 32_000);
-        assert_eq!(clips[1].start, 32_000);
     }
 
     fn set_key(session: &mut Session, clip: ClipId, property: &str, frames: i64, value: f64) {
@@ -1021,28 +886,5 @@ mod tests {
             upcoming_layers(session.project(), Flicks(FRAME * 46), Flicks(FRAME * 30)).is_empty(),
             "b is already drawn by then"
         );
-    }
-
-    #[test]
-    fn animated_volume_becomes_a_gain_envelope() {
-        let mut session = session();
-        let bottom = track(&session, 0);
-        let clip = append(&mut session, bottom, "sound", 60);
-        set_key(&mut session, clip, "volumeDb", 0, -96.0);
-        set_key(&mut session, clip, "volumeDb", 30, 0.0);
-        let clips = audio_clips(session.project(), 0, 48_000);
-        let envelope = &clips[0].envelope;
-        assert_eq!(envelope[0], (0, db_to_gain(-96.0)));
-        assert!(envelope.windows(2).all(|pair| pair[1].0 - pair[0].0 == 256));
-        assert!(envelope.last().unwrap().0 >= 48_000);
-        let at_half = envelope
-            .iter()
-            .find(|(t, _)| *t >= 24_000)
-            .map(|(_, gain)| *gain)
-            .unwrap();
-        assert!((at_half - db_to_gain(-48.0)).abs() < 1e-3, "{at_half}");
-        // A window later in the clip covers only that window.
-        let later = audio_clips(session.project(), 30_000, 31_000);
-        assert!(later[0].envelope[0].0 <= 30_000 && later[0].envelope[0].0 > 29_000);
     }
 }

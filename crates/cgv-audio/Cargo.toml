@@ -7,5 +7,6 @@ publish.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+cgv-dsp.workspace = true
 # Sinc resampling only: the FFT resampler would add rustfft to the WASM.
 rubato = { version = "=5.0.1", default-features = false }

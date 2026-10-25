@@ -547,13 +547,17 @@ mod bridge {
         inner: cgv_audio::Mixer,
     }
 
-    fn audio_clips(
-        session: &ProjectSession,
-        start: f64,
-        frames: usize,
-    ) -> Vec<cgv_audio::AudioClip> {
+    /// The mixer's plan around a stretch, with room for effect warm-up, ducking
+    /// and the limiter's look-ahead.
+    fn audio_plan(session: &ProjectSession, start: f64, frames: usize) -> cgv_audio::AudioPlan {
+        let project = session.inner.project();
+        let rate = project.settings.sample_rate as f64;
         let start = start as i64;
-        cgv_engine::plan::audio_clips(session.inner.project(), start, start + frames as i64)
+        cgv_engine::sound::audio_plan(
+            project,
+            start - (cgv_engine::sound::MARGIN_BEFORE * rate) as i64,
+            start + frames as i64 + (cgv_engine::sound::MARGIN_AFTER * rate) as i64,
+        )
     }
 
     #[wasm_bindgen]
@@ -582,13 +586,13 @@ mod bridge {
             start: f64,
             frames: usize,
         ) -> Result<String, JsValue> {
-            let clips = audio_clips(session, start, frames);
-            let missing = self.inner.missing(&clips, start as i64, frames);
+            let plan = audio_plan(session, start, frames);
+            let missing = self.inner.missing(&plan, start as i64, frames);
             serde_json::to_string(&missing).map_err(js_error)
         }
         pub fn ready(&self, session: &ProjectSession, start: f64, frames: usize) -> bool {
-            let clips = audio_clips(session, start, frames);
-            self.inner.ready(&clips, start as i64, frames)
+            let plan = audio_plan(session, start, frames);
+            self.inner.ready(&plan, start as i64, frames)
         }
         /// The source span `[start, end]` in seconds to decode for `block`.
         pub fn block_span(&self, block: f64) -> Vec<f64> {
@@ -617,8 +621,45 @@ mod bridge {
         }
         /// Interleaved samples for `frames` from timeline sample `start`.
         pub fn mix(&mut self, session: &ProjectSession, start: f64, frames: usize) -> Vec<f32> {
-            let clips = audio_clips(session, start, frames);
-            self.inner.mix(&clips, start as i64, frames)
+            let plan = audio_plan(session, start, frames);
+            self.inner.mix(&plan, start as i64, frames)
+        }
+        /// Meters every track and the master while mixing; on starts them afresh.
+        pub fn set_metering(&mut self, on: bool) {
+            self.inner.set_metering(on);
+        }
+        /// The readings since the last call, flat: per reading the timeline sample,
+        /// momentary, short-term and integrated LUFS, the master's peak (left,
+        /// right) and RMS (left, right), the track count, then per track its id,
+        /// peak and RMS likewise. Levels are linear.
+        pub fn take_readings(&mut self) -> Vec<f64> {
+            let mut out = Vec::new();
+            for reading in self.inner.take_readings() {
+                let level = |out: &mut Vec<f64>, level: &cgv_audio::Level| {
+                    out.extend(level.peak.iter().chain(&level.rms).map(|&v| v as f64));
+                };
+                out.extend([
+                    reading.sample as f64,
+                    reading.momentary,
+                    reading.short_term,
+                    reading.integrated,
+                ]);
+                level(&mut out, &reading.master);
+                out.push(reading.tracks.len() as f64);
+                for (id, track) in &reading.tracks {
+                    out.push(*id as f64);
+                    level(&mut out, track);
+                }
+            }
+            out
+        }
+        /// Exports: a gain in dB on the master, then a true-peak limiter at
+        /// `ceiling_db`; the result is not delayed.
+        pub fn set_mastering(&mut self, gain_db: f32, ceiling_db: f32) {
+            self.inner.set_mastering(Some((gain_db, ceiling_db)));
+        }
+        pub fn clear_mastering(&mut self) {
+            self.inner.set_mastering(None);
         }
         pub fn forget(&mut self, media: &str) {
             self.inner.forget(media);
@@ -628,6 +669,48 @@ mod bridge {
         }
         pub fn cached_bytes(&self) -> usize {
             self.inner.cached_bytes()
+        }
+    }
+
+    /// Loudness after EBU R128 of interleaved sound, for the export's measuring pass.
+    #[wasm_bindgen]
+    pub struct LoudnessMeter {
+        inner: cgv_dsp::loudness::Loudness,
+        channels: usize,
+    }
+
+    #[wasm_bindgen]
+    impl LoudnessMeter {
+        #[wasm_bindgen(constructor)]
+        pub fn new(rate: u32, channels: usize) -> Result<LoudnessMeter, JsValue> {
+            if rate == 0 || !(1..=2).contains(&channels) {
+                return Err(js_error("Loudness needs a rate and one or two channels"));
+            }
+            Ok(LoudnessMeter {
+                inner: cgv_dsp::loudness::Loudness::new(rate, channels, true),
+                channels,
+            })
+        }
+        /// Adds interleaved samples.
+        pub fn add(&mut self, samples: &[f32]) {
+            let frames = samples.len() / self.channels;
+            let planes: Vec<Vec<f32>> = (0..self.channels)
+                .map(|c| {
+                    (0..frames)
+                        .map(|i| samples[i * self.channels + c])
+                        .collect()
+                })
+                .collect();
+            let views: Vec<&[f32]> = planes.iter().map(Vec::as_slice).collect();
+            self.inner.add(&views);
+        }
+        /// LUFS of everything added; -200 for silence.
+        pub fn integrated(&self) -> f64 {
+            self.inner.integrated()
+        }
+        /// The highest true peak, in dBTP.
+        pub fn true_peak_db(&self) -> f64 {
+            20.0 * self.inner.true_peak().max(1e-10).log10()
         }
     }
 

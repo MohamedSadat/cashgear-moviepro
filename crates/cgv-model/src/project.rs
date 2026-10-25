@@ -734,6 +734,26 @@ impl Clip {
         self.start + self.duration
     }
 
+    /// Whether a transition may join `before` and `after` (either may be a free
+    /// edge): two pictures, or at a cut two sounds, which then crossfade.
+    pub fn can_transition(before: Option<&Clip>, after: Option<&Clip>) -> Result<(), String> {
+        for clip in before.iter().chain(&after) {
+            if clip.is_adjustment() {
+                return Err("Adjustment layers fade with their opacity, not transitions".into());
+            }
+        }
+        match (before, after) {
+            (Some(a), Some(b)) if a.video != b.video => {
+                Err("A transition joins two pictures or two sounds".into())
+            }
+            (Some(clip), None) | (None, Some(clip)) if !clip.video => Err(format!(
+                "Clip {} has no picture to transition; fade its sound instead",
+                clip.id
+            )),
+            _ => Ok(()),
+        }
+    }
+
     /// Whether the clip has sound settings beyond its volume.
     pub fn has_sound_settings(&self) -> bool {
         self.fade_in != Flicks::ZERO

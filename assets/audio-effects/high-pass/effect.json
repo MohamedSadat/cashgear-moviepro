@@ -1,0 +1,38 @@
+{
+  "id": "high-pass",
+  "name": "High-pass filter",
+  "category": "Tone",
+  "type": "audio",
+  "version": 1,
+  "description": "Removes rumble and hum below a frequency.",
+  "params": [
+    {
+      "id": "frequency",
+      "name": "Frequency",
+      "type": "number",
+      "min": 20,
+      "max": 2000,
+      "default": 80,
+      "step": 1,
+      "unit": "Hz",
+      "animate": false
+    },
+    {
+      "id": "slope",
+      "name": "Slope",
+      "type": "choice",
+      "options": [
+        {
+          "id": "gentle",
+          "name": "12 dB an octave"
+        },
+        {
+          "id": "steep",
+          "name": "24 dB an octave"
+        }
+      ],
+      "default": "gentle",
+      "animate": false
+    }
+  ]
+}

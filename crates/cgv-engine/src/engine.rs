@@ -29,6 +29,9 @@ fn effect_run<'a>(
 ) -> Option<EffectRun<'a>> {
     let entry = registry.get(&effect.pack, &effect.kind)?;
     let definition = &entry.definition;
+    if definition.kind == cgv_effects::Kind::Audio {
+        return None;
+    }
     let lut = definition
         .lut_param()
         .and_then(|param| match effect.params.get(param) {

@@ -1,0 +1,111 @@
+{
+  "id": "compressor",
+  "name": "Compressor",
+  "category": "Dynamics",
+  "type": "audio",
+  "version": 1,
+  "description": "Evens out loud and quiet parts.",
+  "params": [
+    {
+      "id": "threshold",
+      "name": "Threshold",
+      "type": "number",
+      "min": -60,
+      "max": 0,
+      "default": -18,
+      "step": 0.5,
+      "unit": "dB",
+      "animate": false
+    },
+    {
+      "id": "ratio",
+      "name": "Ratio",
+      "type": "number",
+      "min": 1,
+      "max": 20,
+      "default": 3,
+      "step": 0.1,
+      "unit": ":1",
+      "animate": false
+    },
+    {
+      "id": "knee",
+      "name": "Knee",
+      "type": "number",
+      "min": 0,
+      "max": 24,
+      "default": 6,
+      "step": 0.5,
+      "unit": "dB",
+      "animate": false
+    },
+    {
+      "id": "attack",
+      "name": "Attack",
+      "type": "number",
+      "min": 0.0001,
+      "max": 0.2,
+      "default": 0.01,
+      "step": 0.0001,
+      "unit": "ms",
+      "display": 1000,
+      "animate": false
+    },
+    {
+      "id": "release",
+      "name": "Release",
+      "type": "number",
+      "min": 0.01,
+      "max": 2,
+      "default": 0.15,
+      "step": 0.001,
+      "unit": "ms",
+      "display": 1000,
+      "animate": false
+    },
+    {
+      "id": "makeup",
+      "name": "Make-up gain",
+      "type": "number",
+      "min": 0,
+      "max": 24,
+      "default": 0,
+      "step": 0.1,
+      "unit": "dB",
+      "animate": false
+    }
+  ],
+  "variants": [
+    {
+      "id": "gentle",
+      "name": "Gentle",
+      "params": {
+        "threshold": -20,
+        "ratio": 2,
+        "makeup": 2
+      }
+    },
+    {
+      "id": "voice",
+      "name": "Voice",
+      "params": {
+        "threshold": -24,
+        "ratio": 4,
+        "attack": 0.005,
+        "release": 0.12,
+        "makeup": 6
+      }
+    },
+    {
+      "id": "punchy",
+      "name": "Punchy",
+      "params": {
+        "threshold": -16,
+        "ratio": 6,
+        "attack": 0.02,
+        "release": 0.08,
+        "makeup": 4
+      }
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "id": "echo",
+  "name": "Echo",
+  "category": "Space",
+  "type": "audio",
+  "version": 1,
+  "description": "Repeats the sound after a delay, each repeat a little quieter and darker.",
+  "params": [
+    {
+      "id": "delay",
+      "name": "Delay",
+      "type": "number",
+      "min": 0.02,
+      "max": 2,
+      "default": 0.3,
+      "step": 0.001,
+      "unit": "ms",
+      "display": 1000,
+      "animate": false
+    },
+    {
+      "id": "feedback",
+      "name": "Feedback",
+      "type": "number",
+      "min": 0,
+      "max": 0.9,
+      "default": 0.35,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100,
+      "animate": false
+    },
+    {
+      "id": "level",
+      "name": "Level",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.4,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100,
+      "animate": false
+    },
+    {
+      "id": "damping",
+      "name": "Damping",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.3,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100,
+      "animate": false
+    }
+  ]
+}

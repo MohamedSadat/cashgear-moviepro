@@ -11,6 +11,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 cgv-audio.workspace = true
+cgv-dsp.workspace = true
 cgv-effects.workspace = true
 cgv-engine.workspace = true
 cgv-media.workspace = true

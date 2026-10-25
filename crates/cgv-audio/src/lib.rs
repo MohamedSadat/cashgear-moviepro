@@ -1,6 +1,14 @@
 //! Audio mixing for preview and export. Decoded source audio is kept in blocks
-//! of one second at the project rate; mixing a stretch of the timeline is a pure
-//! function of the clips and those blocks, so preview and export sound the same.
+//! of one second at the project rate; mixing a stretch of the timeline depends
+//! only on the plan, those blocks and the state the effect chains carry from
+//! the stretch before, so preview and export sound the same.
+//!
+//! A plan is a list of audible tracks. Each track is a bus: its clips' sound
+//! passes through their fades, noise reduction and effect chains, and the bus
+//! is then turned up or down, panned, ducked under dialogue and metered. The
+//! buses add up to the master. Effect chains carry their state from one stretch
+//! to the next; after a seek they first hear the second before it, so a sound
+//! picked up mid-way matches the same sound played from the start.
 //!
 //! Sources at another rate are resampled with `rubato` when a block is stored.
 //! Each block is resampled from slightly more audio than it holds, so blocks do
@@ -10,17 +18,27 @@ use std::collections::HashMap;
 use rubato::audioadapter_buffers::direct::SequentialSlice;
 use rubato::{Async, FixedAsync, Resampler, SincInterpolationParameters, WindowFunction};
 
-/// Length of the anti-click ramps at clip edges.
+mod mix;
+
+pub use cgv_dsp::duck::DuckSettings;
+pub use cgv_dsp::meter::Level;
+pub use cgv_dsp::Settings;
+pub use mix::Reading;
+
+/// Length of the anti-click ramps at clip edges without fades.
 pub const FADE_SECONDS: f64 = 0.005;
 /// Audio decoded beyond each side of a block, so resampling and codec priming
 /// never touch the samples a block keeps.
 pub const BLOCK_PAD_SECONDS: f64 = 0.1;
 /// Default memory budget for decoded blocks.
 pub const DEFAULT_BUDGET_BYTES: usize = 64 * 1024 * 1024;
+/// Seconds an effect chain hears before the first sample it plays after a seek.
+pub const WARMUP_SECONDS: f64 = 1.0;
 
 /// A clip as the mixer sees it. Positions are samples at the project rate.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AudioClip {
+    /// The medium whose blocks it plays.
     pub media: String,
     /// First timeline sample and the one after the last.
     pub start: i64,
@@ -32,23 +50,105 @@ pub struct AudioClip {
     /// Linear gains at timeline samples, in order, joined by straight lines and
     /// held beyond the ends: animated volume. Empty means `gain` throughout.
     pub envelope: Vec<(i64, f32)>,
-    /// False where the neighbouring clip continues the same audio seamlessly.
-    pub fade_in: bool,
-    pub fade_out: bool,
+    /// Samples of the equal-power fade at each edge (crossfades included).
+    /// Without one, an edge gets a 5 ms ramp unless it is seamless.
+    pub fade_in: i64,
+    pub fade_out: i64,
+    /// The neighbouring clip continues the same audio at this edge: no ramp.
+    pub seamless_in: bool,
+    pub seamless_out: bool,
+    /// Blocks of the noise-reduced sound, and how much of it to hear (0 to 1).
+    pub denoised: Option<(String, f32)>,
+    /// Sound effects, in order.
+    pub effects: Vec<Settings>,
+    /// Clips with the same key, one after another on a track, run through one
+    /// effect chain, so a seamless cut keeps reverb and echo tails.
+    pub chain: u64,
 }
 
-/// The gain of `envelope` at sample `t`. `cursor` remembers the segment, so a run
-/// of rising `t` walks the envelope once.
-fn envelope_gain(envelope: &[(i64, f32)], t: i64, cursor: &mut usize) -> f32 {
-    while *cursor + 1 < envelope.len() && envelope[*cursor + 1].0 <= t {
-        *cursor += 1;
-    }
-    let (at, gain) = envelope[*cursor];
-    match envelope.get(*cursor + 1) {
-        Some(&(next, next_gain)) if t > at => {
-            gain + (next_gain - gain) * ((t - at) as f32 / (next - at) as f32)
+impl AudioClip {
+    /// A clip of `media` with no fades, effects or noise reduction.
+    pub fn plain(media: &str, start: i64, end: i64, source_start: i64) -> AudioClip {
+        AudioClip {
+            media: media.into(),
+            start,
+            end,
+            source_start,
+            gain: 1.0,
+            envelope: Vec::new(),
+            fade_in: 0,
+            fade_out: 0,
+            seamless_in: false,
+            seamless_out: false,
+            denoised: None,
+            effects: Vec::new(),
+            chain: 0,
         }
-        _ => gain,
+    }
+
+    /// The media keys whose blocks the clip reads.
+    fn sources(&self) -> impl Iterator<Item = &str> {
+        let wet = self
+            .denoised
+            .as_ref()
+            .map(|(key, amount)| (key.as_str(), *amount));
+        let dry = match wet {
+            Some((_, amount)) if amount >= 1.0 => None,
+            _ => Some(self.media.as_str()),
+        };
+        dry.into_iter().chain(wet.map(|(key, _)| key))
+    }
+}
+
+/// What a track does in the mix.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Role {
+    #[default]
+    Other,
+    /// Music tracks with ducking dip while dialogue tracks have speech.
+    Dialogue,
+    Music,
+}
+
+/// An audible track.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AudioTrack {
+    pub id: u64,
+    /// By start time.
+    pub clips: Vec<AudioClip>,
+    pub gain: f32,
+    /// -1 (left) to 1 (right).
+    pub pan: f32,
+    pub role: Role,
+    /// How the track dips under dialogue.
+    pub duck: Option<DuckSettings>,
+}
+
+impl AudioTrack {
+    pub fn new(id: u64, clips: Vec<AudioClip>) -> AudioTrack {
+        AudioTrack {
+            id,
+            clips,
+            gain: 1.0,
+            pan: 0.0,
+            role: Role::Other,
+            duck: None,
+        }
+    }
+}
+
+/// What the mixer plays: the audible tracks, bottom first.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AudioPlan {
+    pub tracks: Vec<AudioTrack>,
+}
+
+impl AudioPlan {
+    /// One track holding `clips`.
+    pub fn single(clips: Vec<AudioClip>) -> AudioPlan {
+        AudioPlan {
+            tracks: vec![AudioTrack::new(0, clips)],
+        }
     }
 }
 
@@ -75,7 +175,7 @@ impl Block {
     }
 }
 
-/// Mixes clips at the project rate and channel count (mono or stereo).
+/// Mixes plans at the project rate and channel count (mono or stereo).
 pub struct Mixer {
     rate: u32,
     channels: usize,
@@ -84,6 +184,7 @@ pub struct Mixer {
     budget: usize,
     clock: u64,
     resamplers: HashMap<(u32, usize), Async<f32>>,
+    state: mix::State,
 }
 
 impl Mixer {
@@ -97,6 +198,7 @@ impl Mixer {
             budget,
             clock: 0,
             resamplers: HashMap::new(),
+            state: mix::State::default(),
         }
     }
 
@@ -126,12 +228,11 @@ impl Mixer {
         )
     }
 
-    /// The blocks `clips` need for `frames` samples from `start`, in play order,
-    /// that are not stored yet.
-    pub fn missing(&self, clips: &[AudioClip], start: i64, frames: usize) -> Vec<(String, i64)> {
+    /// The blocks the plan needs for `frames` samples from `start`, in play
+    /// order, that are not stored yet.
+    pub fn missing(&self, plan: &AudioPlan, start: i64, frames: usize) -> Vec<(String, i64)> {
         let mut missing: Vec<(String, i64)> = Vec::new();
-        for (media, block) in self.needed(clips, start, frames) {
-            let key = (media, block);
+        for key in self.needed(plan, start, frames) {
             if !self.blocks.contains_key(&key) && !missing.contains(&key) {
                 missing.push(key);
             }
@@ -139,27 +240,45 @@ impl Mixer {
         missing
     }
 
-    fn needed(&self, clips: &[AudioClip], start: i64, frames: usize) -> Vec<(String, i64)> {
+    /// Every block mixing the stretch reads: the clips heard in it, the second
+    /// before for clips with effects (their warm-up), dialogue around it for
+    /// ducking, and the limiter's look-ahead when mastering.
+    fn needed(&self, plan: &AudioPlan, start: i64, frames: usize) -> Vec<(String, i64)> {
         let len = self.block_len();
-        let end = start + frames as i64;
+        let end = start + frames as i64 + self.state.lookahead() as i64;
+        let warmup = (WARMUP_SECONDS * self.rate as f64) as i64;
+        let (before, after) = mix::duck_reach(plan, self.rate);
         let mut needed = Vec::new();
-        for clip in clips {
-            let (from, to) = (clip.start.max(start), clip.end.min(end));
-            if from >= to {
-                continue;
-            }
-            let first = (clip.source_start + from - clip.start).max(0);
-            let last = (clip.source_start + to - clip.start - 1).max(0);
-            for block in first.div_euclid(len)..=last.div_euclid(len) {
-                needed.push((clip.media.clone(), block));
+        for track in &plan.tracks {
+            for clip in &track.clips {
+                let mut from = start;
+                let mut to = end;
+                if !clip.effects.is_empty() {
+                    from -= warmup;
+                }
+                if track.role == Role::Dialogue {
+                    from = from.min(start - before);
+                    to = to.max(end + after);
+                }
+                let (from, to) = (clip.start.max(from), clip.end.min(to));
+                if from >= to {
+                    continue;
+                }
+                let first = (clip.source_start + from - clip.start).max(0);
+                let last = (clip.source_start + to - clip.start - 1).max(0);
+                for source in clip.sources() {
+                    for block in first.div_euclid(len)..=last.div_euclid(len) {
+                        needed.push((source.to_string(), block));
+                    }
+                }
             }
         }
         needed
     }
 
     /// True when every block the stretch needs is stored.
-    pub fn ready(&self, clips: &[AudioClip], start: i64, frames: usize) -> bool {
-        self.needed(clips, start, frames)
+    pub fn ready(&self, plan: &AudioPlan, start: i64, frames: usize) -> bool {
+        self.needed(plan, start, frames)
             .into_iter()
             .all(|key| self.blocks.contains_key(&key))
     }
@@ -225,6 +344,7 @@ impl Mixer {
         if let Some(old) = self.blocks.insert((media.to_string(), block), stored) {
             self.bytes -= old.bytes();
         }
+        self.state.forget_speech();
         self.evict();
         Ok(())
     }
@@ -281,81 +401,58 @@ impl Mixer {
         }
     }
 
-    /// Drops every block of `media` (it was removed or changed).
+    /// Drops every block of `media` (it was removed or changed), with its
+    /// noise-reduced variants.
     pub fn forget(&mut self, media: &str) {
-        self.blocks.retain(|(id, _), _| id != media);
+        let variant = format!("{media}#");
+        self.blocks
+            .retain(|(id, _), _| id != media && !id.starts_with(&variant));
         self.bytes = self.blocks.values().map(Block::bytes).sum();
+        self.state.forget_speech();
     }
 
     pub fn clear(&mut self) {
         self.blocks.clear();
         self.bytes = 0;
+        let metering = self.state.metering.is_some();
+        self.state = mix::State::default();
+        self.set_metering(metering);
     }
 
     /// Mixes `frames` samples from timeline sample `start`: interleaved, at the
     /// project's channel count. Audio whose block is not stored is silent.
-    pub fn mix(&mut self, clips: &[AudioClip], start: i64, frames: usize) -> Vec<f32> {
-        let out_channels = self.channels;
-        let mut out = vec![0.0f32; frames * out_channels];
-        let len = self.block_len();
-        let fade = (self.rate as f64 * FADE_SECONDS).round().max(1.0) as f32;
-        let end = start + frames as i64;
-        self.clock += 1;
-        let clock = self.clock;
-        for clip in clips {
-            let (from, to) = (clip.start.max(start), clip.end.min(end));
-            let mut cursor = 0;
-            let mut at = from;
-            while at < to {
-                let source = clip.source_start + at - clip.start;
-                if source < 0 {
-                    at += 1;
-                    continue;
-                }
-                let index = source.rem_euclid(len);
-                let run_end = to.min(at + (len - index));
-                if let Some(block) = self
-                    .blocks
-                    .get_mut(&(clip.media.clone(), source.div_euclid(len)))
-                {
-                    block.last_used = clock;
-                    for t in at..run_end {
-                        let mut gain = if clip.envelope.is_empty() {
-                            clip.gain
-                        } else {
-                            envelope_gain(&clip.envelope, t, &mut cursor)
-                        };
-                        if clip.fade_in {
-                            gain *= (((t - clip.start) as f32 + 0.5) / fade).min(1.0);
-                        }
-                        if clip.fade_out {
-                            gain *= (((clip.end - t) as f32 - 0.5) / fade).clamp(0.0, 1.0);
-                        }
-                        let sample = (index + t - at) as usize;
-                        let frame = (t - start) as usize * out_channels;
-                        match (block.channels.len(), out_channels) {
-                            (1, 1) => out[frame] += gain * block.channels[0][sample],
-                            (1, _) => {
-                                let value = gain * block.channels[0][sample];
-                                out[frame] += value;
-                                out[frame + 1] += value;
-                            }
-                            (_, 1) => {
-                                out[frame] += gain
-                                    * 0.5
-                                    * (block.channels[0][sample] + block.channels[1][sample]);
-                            }
-                            _ => {
-                                out[frame] += gain * block.channels[0][sample];
-                                out[frame + 1] += gain * block.channels[1][sample];
-                            }
-                        }
-                    }
-                }
-                at = run_end;
+    pub fn mix(&mut self, plan: &AudioPlan, start: i64, frames: usize) -> Vec<f32> {
+        let planar = self.mix_mastered(plan, start, frames);
+        let mut out = vec![0.0f32; frames * self.channels];
+        for (channel, samples) in planar.iter().enumerate() {
+            for (frame, &value) in samples.iter().enumerate() {
+                out[frame * self.channels + channel] = value;
             }
         }
         out
+    }
+
+    /// Meter every bus and the master while mixing (playback), or stop.
+    /// Turning metering on starts the meters afresh.
+    pub fn set_metering(&mut self, on: bool) {
+        self.state.metering = on.then(|| mix::Metering::new(self.rate, self.channels));
+    }
+
+    /// The readings since the last call, oldest first.
+    pub fn take_readings(&mut self) -> Vec<Reading> {
+        self.state
+            .metering
+            .as_mut()
+            .map(|metering| std::mem::take(&mut metering.readings))
+            .unwrap_or_default()
+    }
+
+    /// Exports: a fixed gain on the master, then a true-peak limiter with the
+    /// given ceiling, its delay made up by mixing ahead. None removes both.
+    pub fn set_mastering(&mut self, mastering: Option<(f32, f32)>) {
+        self.state.mastering = mastering.map(|(gain_db, ceiling_db)| {
+            mix::Mastering::new(gain_db, ceiling_db, self.rate, self.channels)
+        });
     }
 }
 
@@ -365,304 +462,4 @@ pub fn db_to_gain(db: f64) -> f32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const RATE: u32 = 48_000;
-
-    fn clip(media: &str, start: i64, end: i64, source_start: i64) -> AudioClip {
-        AudioClip {
-            media: media.into(),
-            start,
-            end,
-            source_start,
-            gain: 1.0,
-            envelope: Vec::new(),
-            fade_in: false,
-            fade_out: false,
-        }
-    }
-
-    /// Stereo audio whose left channel is the media time in seconds and right its negative.
-    fn ramp(mixer: &mut Mixer, media: &str, block: i64, rate: u32) {
-        let (start, end) = mixer.block_span(block);
-        let first = (start * rate as f64).round() as i64;
-        let frames = ((end - start) * rate as f64).round() as usize;
-        let left: Vec<f32> = (0..frames)
-            .map(|i| ((first + i as i64) as f64 / rate as f64) as f32)
-            .collect();
-        let right: Vec<f32> = left.iter().map(|value| -value).collect();
-        let data = [left, right].concat();
-        mixer
-            .insert_block(
-                media,
-                block,
-                SourceAudio {
-                    sample_rate: rate,
-                    channels: 2,
-                    data: &data,
-                    start_seconds: first as f64 / rate as f64,
-                },
-            )
-            .unwrap();
-    }
-
-    #[test]
-    fn blocks_hold_one_second_at_the_project_rate() {
-        let mut mixer = Mixer::new(RATE, 2, DEFAULT_BUDGET_BYTES);
-        assert_eq!(mixer.block_span(0), (0.0, 1.1));
-        assert_eq!(mixer.block_span(3), (2.9, 4.1));
-        ramp(&mut mixer, "a", 2, RATE);
-        let out = mixer.mix(&[clip("a", 0, 10, 2 * 48_000)], 0, 10);
-        for frame in 0..10 {
-            let expected = (2.0 + frame as f64 / 48_000.0) as f32;
-            assert_eq!(out[frame * 2], expected);
-            assert_eq!(out[frame * 2 + 1], -expected);
-        }
-        assert_eq!(mixer.cached_blocks(), 1);
-        assert_eq!(mixer.cached_bytes(), 2 * 48_000 * 4);
-    }
-
-    #[test]
-    fn missing_blocks_are_listed_in_play_order_and_play_silent() {
-        let mut mixer = Mixer::new(RATE, 2, DEFAULT_BUDGET_BYTES);
-        // A clip whose source starts half a second into block 1, heard from timeline 0.
-        let clips = [clip("a", 0, 96_000, 72_000)];
-        assert_eq!(
-            mixer.missing(&clips, 0, 96_000),
-            vec![
-                ("a".to_string(), 1),
-                ("a".to_string(), 2),
-                ("a".to_string(), 3)
-            ]
-        );
-        assert!(!mixer.ready(&clips, 0, 100));
-        ramp(&mut mixer, "a", 1, RATE);
-        assert!(mixer.ready(&clips, 0, 100));
-        assert_eq!(mixer.missing(&clips, 0, 24_000), vec![]);
-        // Block 2 is missing: silence from timeline sample 24,000.
-        let out = mixer.mix(&clips, 23_999, 2);
-        assert!((out[0] - 1.999_98).abs() < 1e-4);
-        assert_eq!(out[2], 0.0);
-    }
-
-    #[test]
-    fn clips_mix_with_gain_and_mute_outside_their_range() {
-        let mut mixer = Mixer::new(RATE, 2, DEFAULT_BUDGET_BYTES);
-        ramp(&mut mixer, "a", 0, RATE);
-        ramp(&mut mixer, "b", 0, RATE);
-        let mut quiet = clip("b", 5, 10, 0);
-        quiet.gain = db_to_gain(-6.0);
-        let out = mixer.mix(&[clip("a", 0, 10, 1000), quiet], 0, 10);
-        let a = |i: i64| ((1000 + i) as f64 / 48_000.0) as f32;
-        assert_eq!(out[0], a(0));
-        let b = |i: i64| (i as f64 / 48_000.0) as f32 * db_to_gain(-6.0);
-        assert!((out[7 * 2] - (a(7) + b(2))).abs() < 1e-7);
-        assert!((db_to_gain(-6.0) - 0.501_187).abs() < 1e-6);
-    }
-
-    #[test]
-    fn an_envelope_ramps_the_gain_between_its_points_and_holds_beyond_them() {
-        let mut mixer = Mixer::new(RATE, 1, DEFAULT_BUDGET_BYTES);
-        let data = vec![1.0f32; 48_000 + 9600];
-        mixer
-            .insert_block(
-                "dc",
-                0,
-                SourceAudio {
-                    sample_rate: RATE,
-                    channels: 1,
-                    data: &data,
-                    start_seconds: 0.0,
-                },
-            )
-            .unwrap();
-        let mut ramped = clip("dc", 0, 400, 0);
-        ramped.envelope = vec![(100, 0.0), (200, 1.0), (300, 0.5)];
-        let out = mixer.mix(&[ramped], 0, 400);
-        assert_eq!(out[50], 0.0, "held before the first point");
-        assert!((out[150] - 0.5).abs() < 1e-6);
-        assert!((out[250] - 0.75).abs() < 1e-6);
-        assert!((out[399] - 0.5).abs() < 1e-6, "held after the last point");
-        // Mixing from the middle gives the same samples.
-        let mut ramped = clip("dc", 0, 400, 0);
-        ramped.envelope = vec![(100, 0.0), (200, 1.0), (300, 0.5)];
-        let tail = mixer.mix(&[ramped], 240, 20);
-        assert!((tail[10] - out[250]).abs() < 1e-7);
-    }
-
-    #[test]
-    fn clip_edges_ramp_over_five_milliseconds_except_at_seamless_cuts() {
-        let mut mixer = Mixer::new(RATE, 1, DEFAULT_BUDGET_BYTES);
-        let data = vec![1.0f32; 48_000 + 9600];
-        mixer
-            .insert_block(
-                "dc",
-                0,
-                SourceAudio {
-                    sample_rate: RATE,
-                    channels: 1,
-                    data: &data,
-                    start_seconds: 0.0,
-                },
-            )
-            .unwrap();
-        let mut faded = clip("dc", 0, 2000, 0);
-        faded.fade_in = true;
-        faded.fade_out = true;
-        let out = mixer.mix(&[faded], 0, 2000);
-        assert!(out[0] > 0.0 && out[0] < 0.01);
-        assert!((out[120] - 120.5 / 240.0).abs() < 1e-6);
-        assert_eq!(out[240], 1.0);
-        assert_eq!(out[1000], 1.0);
-        assert!(out[1999] < 0.01);
-        // A split clip continues seamlessly: no dip at the cut.
-        let mut left = clip("dc", 0, 1000, 0);
-        left.fade_in = true;
-        let mut right = clip("dc", 1000, 2000, 1000);
-        right.fade_out = true;
-        let out = mixer.mix(&[left, right], 990, 20);
-        assert!(out.iter().all(|&value| value == 1.0), "{out:?}");
-    }
-
-    #[test]
-    fn channel_mapping() {
-        let mut stereo_out = Mixer::new(RATE, 2, DEFAULT_BUDGET_BYTES);
-        let mono = vec![0.25f32; 1000];
-        stereo_out
-            .insert_block(
-                "m",
-                0,
-                SourceAudio {
-                    sample_rate: RATE,
-                    channels: 1,
-                    data: &mono,
-                    start_seconds: 0.0,
-                },
-            )
-            .unwrap();
-        assert_eq!(
-            stereo_out.mix(&[clip("m", 0, 1, 0)], 0, 1),
-            vec![0.25, 0.25]
-        );
-        let mut mono_out = Mixer::new(RATE, 1, DEFAULT_BUDGET_BYTES);
-        // Four channels: only the first two are kept, then averaged for mono.
-        let quad: Vec<f32> = [0.2f32, 0.4, 9.0, 9.0]
-            .iter()
-            .flat_map(|&value| std::iter::repeat_n(value, 10))
-            .collect();
-        mono_out
-            .insert_block(
-                "q",
-                0,
-                SourceAudio {
-                    sample_rate: RATE,
-                    channels: 4,
-                    data: &quad,
-                    start_seconds: 0.0,
-                },
-            )
-            .unwrap();
-        let out = mono_out.mix(&[clip("q", 0, 1, 0)], 0, 1);
-        assert!((out[0] - 0.3).abs() < 1e-6);
-    }
-
-    #[test]
-    fn other_rates_are_resampled_in_time_and_in_tune() {
-        let mut mixer = Mixer::new(RATE, 1, DEFAULT_BUDGET_BYTES);
-        let source_rate = 44_100;
-        let tone = |t: f64| (2.0 * std::f64::consts::PI * 440.0 * t).sin() as f32;
-        for block in [0, 1] {
-            let (start, end) = mixer.block_span(block);
-            let first = (start * source_rate as f64).round() as i64;
-            let frames = ((end - start) * source_rate as f64).round() as i64;
-            let data: Vec<f32> = (first..first + frames)
-                .map(|i| tone(i as f64 / source_rate as f64))
-                .collect();
-            mixer
-                .insert_block(
-                    "t",
-                    block,
-                    SourceAudio {
-                        sample_rate: source_rate,
-                        channels: 1,
-                        data: &data,
-                        start_seconds: first as f64 / source_rate as f64,
-                    },
-                )
-                .unwrap();
-        }
-        // Across the block boundary the 48 kHz output is the ideal tone, give or
-        // take a constant offset under half a sample (the resampler's delay is not
-        // a whole number of samples).
-        let out = mixer.mix(&[clip("t", 0, 96_000, 0)], 47_000, 2000);
-        let worst_at = |shift: f64| {
-            out.iter()
-                .enumerate()
-                .map(|(i, &value)| (value - tone((47_000.0 + i as f64 + shift) / 48_000.0)).abs())
-                .fold(0.0f32, f32::max)
-        };
-        let best = (-10..=10)
-            .map(|step| worst_at(step as f64 * 0.05))
-            .fold(f32::MAX, f32::min);
-        assert!(best < 1e-3, "worst error {best}");
-    }
-
-    #[test]
-    fn blocks_land_on_the_same_phase_whatever_packet_decoding_started_at() {
-        let tone = |t: f64| (2.0 * std::f64::consts::PI * 440.0 * t).sin() as f32;
-        let source_rate = 44_100;
-        let block_from = |first: i64| {
-            let mut mixer = Mixer::new(RATE, 1, DEFAULT_BUDGET_BYTES);
-            let data: Vec<f32> = (first..first + 60_000)
-                .map(|i| tone(i as f64 / source_rate as f64))
-                .collect();
-            mixer
-                .insert_block(
-                    "t",
-                    1,
-                    SourceAudio {
-                        sample_rate: source_rate,
-                        channels: 1,
-                        data: &data,
-                        start_seconds: first as f64 / source_rate as f64,
-                    },
-                )
-                .unwrap();
-            mixer.mix(&[clip("t", 0, 48_000, 48_000)], 0, 48_000)
-        };
-        // Decoding started at two different AAC packets before the block.
-        assert_eq!(block_from(36_864), block_from(38_912));
-    }
-
-    #[test]
-    fn the_budget_evicts_the_least_recently_used_blocks() {
-        let one_block = 2 * 48_000 * 4;
-        let mut mixer = Mixer::new(RATE, 2, one_block * 2);
-        ramp(&mut mixer, "a", 0, RATE);
-        ramp(&mut mixer, "a", 1, RATE);
-        mixer.mix(&[clip("a", 0, 1, 0)], 0, 1);
-        ramp(&mut mixer, "a", 2, RATE);
-        assert_eq!(mixer.cached_blocks(), 2);
-        assert_eq!(
-            mixer.missing(&[clip("a", 0, 1, 48_000)], 0, 1),
-            vec![("a".to_string(), 1)]
-        );
-        assert!(mixer.ready(&[clip("a", 0, 1, 0)], 0, 1));
-        mixer.forget("a");
-        assert_eq!((mixer.cached_blocks(), mixer.cached_bytes()), (0, 0));
-    }
-
-    #[test]
-    fn invalid_audio_is_refused() {
-        let mut mixer = Mixer::new(RATE, 2, DEFAULT_BUDGET_BYTES);
-        let odd = [0.0f32; 3];
-        let source = SourceAudio {
-            sample_rate: RATE,
-            channels: 2,
-            data: &odd,
-            start_seconds: 0.0,
-        };
-        assert!(mixer.insert_block("x", 0, source).is_err());
-    }
-}
+mod tests;

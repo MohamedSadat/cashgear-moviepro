@@ -143,14 +143,8 @@ fn check_transitions(track: &Track, frame: Flicks) -> Result<(), String> {
         };
         let before = t.from.map(clip).transpose()?;
         let after = t.to.map(clip).transpose()?;
-        for c in before.iter().chain(&after) {
-            if c.is_adjustment() || !c.video {
-                return Err(format!(
-                    "Transition {} is on a clip without a picture",
-                    t.id
-                ));
-            }
-        }
+        Clip::can_transition(before, after)
+            .map_err(|error| format!("Transition {}: {error}", t.id))?;
         let free = match (before, after) {
             (Some(a), Some(b)) => a.end() == b.start,
             (None, Some(b)) => !track.clips.iter().any(|c| c.end() == b.start),

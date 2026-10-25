@@ -69,3 +69,6 @@ opt-level = "s"
 opt-level = "s"
 [profile.release.package.unicode-linebreak]
 opt-level = "s"
+# Loudness is read a few times a second; its filters are cheap either way.
+[profile.release.package.ebur128]
+opt-level = "s"
