@@ -179,6 +179,14 @@ test.describe('with the fake microphone', () => {
     await page.evaluate(() =>
       (Reflect.get(window, '__cgv') as Hooks).client.api.seek(2 * 705_600_000 + 1),
     );
+    // Recording needs the sound device the playback context runs on.
+    const running = await page.evaluate(async () => {
+      const stats = (await (Reflect.get(window, '__cgv') as Hooks).client.api.playbackStats()) as {
+        audio: { running: boolean } | null;
+      };
+      return stats.audio?.running ?? false;
+    });
+    test.skip(!running, 'No sound device to record against');
     await page.getByTestId('record-voiceover').click();
     const panel = page.getByTestId('voiceover-panel');
     await expect(panel).toHaveAttribute('data-phase', 'ready');

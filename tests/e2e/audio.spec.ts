@@ -440,6 +440,11 @@ async function playThrough(page: Page, length: number) {
   await page.getByTestId('play-toggle').click();
   await expect(transport).toHaveAttribute('data-playing', 'true');
   await expect(transport).toHaveAttribute('data-starting', 'false', { timeout: 10000 });
+  const clock = (await page.evaluate(() =>
+    (Reflect.get(window, '__cgv') as Hooks).client.api.playbackStats(),
+  )) as { clock: string | null };
+  // Without a sound device, playback follows the wall clock and nothing is mixed.
+  test.skip(clock.clock !== 'audio', 'No sound device: playback follows the wall clock');
   // Half way, the master meter on screen shows the level.
   await page.waitForTimeout((length / 2) * 1000);
   const shown = await page.getByTestId('meter-master').evaluate((element) => ({

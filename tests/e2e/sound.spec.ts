@@ -243,6 +243,11 @@ test('the mixer sets roles, solo, volume and pan, and music from the Music tab d
   await expect(page.getByTestId('transport')).toHaveAttribute('data-starting', 'false', {
     timeout: 10000,
   });
+  const stats = (await page.evaluate(() =>
+    Reflect.get(window, '__cgv').client.api.playbackStats(),
+  )) as { clock: string | null };
+  // Without a sound device, playback follows the wall clock and nothing is metered.
+  test.skip(stats.clock !== 'audio', 'No sound device: playback follows the wall clock');
   await page.waitForTimeout(1500);
   await page.getByTestId('play-toggle').click();
   const readings = (await page.evaluate(() => Reflect.get(window, '__cgv').meters.take())) as {
