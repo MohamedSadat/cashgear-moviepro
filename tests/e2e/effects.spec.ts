@@ -34,7 +34,7 @@ type Hooks = {
 
 interface Catalogued {
   id: string;
-  type: 'effect' | 'transition';
+  type: 'effect' | 'transition' | 'audio';
   variants?: { id: string }[];
 }
 
@@ -293,11 +293,14 @@ for (const backend of ['WebGPU', 'WebGL2'] as const) {
       (Reflect.get(window, '__cgv') as Hooks).client.api.effectsCatalog(),
     )) as Catalogued[];
     const names = new Set(all.map((fixture) => fixture.name));
-    const items = catalog.flatMap((entry) =>
-      entry.type === 'transition' && entry.variants?.length
-        ? entry.variants.map((variant) => variant.id)
-        : [entry.id],
-    );
+    // Sound effects have no picture to compare.
+    const items = catalog
+      .filter((entry) => entry.type !== 'audio')
+      .flatMap((entry) =>
+        entry.type === 'transition' && entry.variants?.length
+          ? entry.variants.map((variant) => variant.id)
+          : [entry.id],
+      );
     expect(items.filter((item) => !names.has(item))).toEqual([]);
     expect(items.length).toBeGreaterThanOrEqual(40);
 

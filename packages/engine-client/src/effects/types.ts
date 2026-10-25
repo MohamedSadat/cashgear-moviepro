@@ -1,7 +1,8 @@
 // Mirrors the JSON of crates/cgv-effects (Definition, ParamDef, CatalogEntry).
 import type { ParamValue } from '../project/types';
 
-export type EffectKind = 'effect' | 'transition';
+/** Sound effects have no shader: the mixer runs them. */
+export type EffectKind = 'effect' | 'transition' | 'audio';
 
 export interface EffectChoice {
   id: string;
