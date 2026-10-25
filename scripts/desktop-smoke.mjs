@@ -5,10 +5,11 @@
 // .cgvproj that reopens, and an autosave that recovers after the app is killed),
 // playback, and exports: MP4 written natively, GIF and MP3 converted by FFmpeg.
 import { spawn, spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { chromium, expect } from '@playwright/test';
 import { PNG } from 'pngjs';
 import { barMismatches, sweepBand } from '../tests/e2e/pattern.mjs';
@@ -123,7 +124,9 @@ async function launch() {
   // Page errors show in the smoke's output, so a failure says what went wrong inside.
   page.on('pageerror', (error) => console.error('Page error: ' + error.message));
   page.on('console', (message) => {
-    if (message.type() === 'error') console.error('Console error: ' + message.text());
+    if (message.type() !== 'error') return;
+    const { url, lineNumber } = message.location();
+    console.error('Console error: ' + message.text() + (url ? ` (${url}:${lineNumber})` : ''));
   });
   return { child, browser, page };
 }
@@ -452,6 +455,91 @@ try {
     };
   }
   results.push({ exported });
+
+  // Sound: a voiceover take is kept beside the project by the native side, and a
+  // sound from the app's pack plays (and meters) in WebView2.
+  const voiceover = await page.evaluate(async (projectPath) => {
+    const hooks = window.__cgv;
+    // Half a second of 440 Hz, as a 16-bit mono WAV.
+    const frames = 24_000;
+    const view = new DataView(new ArrayBuffer(44 + frames * 2));
+    const text = (at, value) =>
+      [...value].forEach((c, i) => view.setUint8(at + i, c.charCodeAt(0)));
+    text(0, 'RIFF');
+    view.setUint32(4, 36 + frames * 2, true);
+    text(8, 'WAVEfmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, 48_000, true);
+    view.setUint32(28, 96_000, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    text(36, 'data');
+    view.setUint32(40, frames * 2, true);
+    for (let i = 0; i < frames; i++)
+      view.setInt16(
+        44 + i * 2,
+        Math.round(8000 * Math.sin((2 * Math.PI * 440 * i) / 48_000)),
+        true,
+      );
+    const request = await hooks.platform.saveRecording(
+      'Voiceover 1.wav',
+      new Uint8Array(view.buffer),
+      projectPath,
+    );
+    const [media] = await hooks.library.importRequests([request]);
+    return { path: media.location.path, duration: media.duration / 705_600_000 };
+  }, projectPath);
+  const expectedTake = join(dirname(projectPath), 'Voiceovers', 'Voiceover 1.wav');
+  if (voiceover.path !== expectedTake || !existsSync(expectedTake))
+    throw new Error('The voiceover was not kept beside the project: ' + JSON.stringify(voiceover));
+  if (Math.abs(voiceover.duration - 0.5) > 0.01)
+    throw new Error('The voiceover file lasts ' + voiceover.duration + ' s');
+  await page.getByTestId('library-tab-sounds').click();
+  await page.locator('[data-testid="sound-item"][data-key="whoosh"]').dblclick();
+  const pack = await page.evaluate(async () => {
+    const hooks = window.__cgv;
+    const deadline = performance.now() + 30_000;
+    let clip = null;
+    while (!clip && performance.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      clip = (await hooks.client.api.projectSnapshot()).project.tracks
+        .flatMap((track) => track.clips)
+        .find((c) => c.media === 'sound-whoosh');
+    }
+    if (!clip) {
+      const { project } = await hooks.client.api.projectSnapshot();
+      throw new Error(
+        'The whoosh did not reach the timeline: ' +
+          JSON.stringify({
+            items: document.querySelectorAll('[data-testid="sound-item"]').length,
+            media: project.media.map((m) => [m.id, m.location.kind]),
+            library: hooks.library.notices,
+            alerts: [...document.querySelectorAll('[role="alert"]')].map((n) => n.textContent),
+          }),
+      );
+    }
+    await hooks.client.api.seek(clip.start + 1);
+    hooks.meters.take();
+    await hooks.client.play();
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await hooks.client.togglePlay();
+    const readings = hooks.meters.take();
+    // Its own track's meter: the master also carries the clips placed earlier.
+    const track = (await hooks.client.api.projectSnapshot()).project.tracks.find((t) =>
+      t.clips.some((c) => c.id === clip.id),
+    ).id;
+    const peak = Math.max(
+      0,
+      ...readings.flatMap((r) =>
+        r.tracks.filter((t) => t.id === track).map((t) => t.level.peak[0]),
+      ),
+    );
+    return { peak, peakDb: 20 * Math.log10(peak), readings: readings.length };
+  });
+  if (pack.peak < 0.01) throw new Error('The pack sound did not play: ' + JSON.stringify(pack));
+  results.push({ sound: { voiceover, pack } });
 
   // Titles: an installed font (Arial, on every Windows) reaches the engine through
   // the media protocol and draws differently from the fallback a missing family gets.
