@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use cgv_audio::{db_to_gain, AudioClip};
 use cgv_model::{
-    parse_lut_ref, Clip, ClipId, Crop, LutId, LutShape, ParamValue, Params, Project, Speed, Track,
-    TrackId, Transform, Transition,
+    parse_lut_ref, Clip, ClipId, Crop, LutId, LutShape, ParamValue, Params, Project, Speed, Title,
+    Track, TrackId, Transform, Transition,
 };
 use cgv_time::Flicks;
 use serde::{Deserialize, Serialize};
@@ -50,6 +50,10 @@ pub struct LayerPlan {
     /// The transform or crop is keyframed, so its drawn size may change each frame.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub moving: bool,
+    /// A title's text and shapes at this frame, keyframes applied: the engine
+    /// draws them itself, and the layer has no media.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<Title>,
 }
 
 /// How a frame is drawn, bottom track first.
@@ -134,8 +138,35 @@ fn effect_plans(clip: &Clip, offset: Flicks) -> Vec<EffectPlan> {
 /// the media then continues past the clip's edges, holding its first or last frame
 /// where it runs out.
 fn visual_layer(project: &Project, track: TrackId, clip: &Clip, time: Flicks) -> Option<LayerPlan> {
-    let media = project.media(&clip.media)?;
     let offset = time - clip.start;
+    if let Some(title) = clip.title.as_ref().filter(|_| clip.is_title()) {
+        let opacity = clip.opacity_at(offset);
+        if !clip.video || opacity <= 0.0 {
+            return None;
+        }
+        return Some(LayerPlan {
+            clip: clip.id,
+            track,
+            media: String::new(),
+            still: false,
+            source_time: Flicks::ZERO,
+            transform: clip.transform_at(offset),
+            crop: clip.crop_at(offset),
+            opacity,
+            clip_start: clip.start,
+            clip_end: clip.end(),
+            source_in: Flicks::ZERO,
+            speed: clip.speed,
+            clip_seconds: offset.as_seconds(),
+            seed: seed(clip.id),
+            effects: effect_plans(clip, offset),
+            // Animated elements move and resize what is drawn, as a keyframed
+            // transform does.
+            moving: !clip.keyframes.is_empty(),
+            title: Some(title.at(&clip.keyframes, offset)),
+        });
+    }
+    let media = project.media(&clip.media)?;
     let opacity = clip.opacity_at(offset);
     if !clip.video || !media.has_video || opacity <= 0.0 {
         return None;
@@ -164,6 +195,7 @@ fn visual_layer(project: &Project, track: TrackId, clip: &Clip, time: Flicks) ->
         seed: seed(clip.id),
         effects: effect_plans(clip, offset),
         moving: clip.has_moving_keyframes(),
+        title: None,
     })
 }
 
@@ -304,7 +336,7 @@ pub fn upcoming_layers(project: &Project, from: Flicks, horizon: Flicks) -> Vec<
                 .copied()
                 .unwrap_or(clip.start)
                 .min(clip.start);
-            if first > from && first <= from + horizon {
+            if first > from && first <= from + horizon && !clip.is_generated() {
                 if let Some(layer) = visual_layer(project, track.id, clip, first) {
                     upcoming.push((first, layer));
                 }
@@ -790,6 +822,80 @@ mod tests {
             panic!("a transition on the top track")
         };
         assert_eq!((*from, *to), (None, Some(1)));
+    }
+
+    #[test]
+    fn titles_are_layers_without_media_drawn_as_their_keyframes_say() {
+        use cgv_model::title::{Content, Element, Font, Text};
+        let mut session = session();
+        let top = track(&session, 1);
+        let text = Text {
+            text: "Hello".into(),
+            font: Font {
+                family: "Inter".into(),
+                weight: 700,
+                italic: false,
+            },
+            size: 96.0,
+            align: Default::default(),
+            direction: Default::default(),
+            line_spacing: 1.0,
+            letter_spacing: 0.0,
+            wrap: None,
+            background: None,
+            reveal: 1.0,
+            reveal_by: Default::default(),
+        };
+        let clip = ClipId(
+            session
+                .execute(&Command::Append {
+                    track: top,
+                    clip: ClipSpec {
+                        kind: cgv_model::ClipKind::Title,
+                        duration: Flicks(FRAME * 60),
+                        title: Some(Title {
+                            elements: vec![Element {
+                                id: cgv_model::ElementId(1),
+                                x: 0.0,
+                                y: 0.0,
+                                scale: 1.0,
+                                rotation: 0.0,
+                                opacity: 1.0,
+                                fill: cgv_model::Color {
+                                    r: 1.0,
+                                    g: 1.0,
+                                    b: 1.0,
+                                    a: 1.0,
+                                },
+                                stroke: None,
+                                shadow: None,
+                                content: Content::Text(text),
+                            }],
+                        }),
+                        ..Default::default()
+                    },
+                })
+                .unwrap()
+                .created[0],
+        );
+        let plan = plan_frame(session.project(), Flicks(FRAME * 5));
+        assert_eq!(plan.steps, [Step::Layer { layer: 0 }]);
+        let layer = &plan.layers[0];
+        assert!(layer.media.is_empty() && !layer.still && !layer.moving);
+        let element = layer.title.as_ref().unwrap().elements[0].id;
+        // A reveal keyframed from 0 to 1 over the first second.
+        let name = cgv_model::element_property(element, "reveal");
+        set_key(&mut session, clip, &name, 0, 0.0);
+        set_key(&mut session, clip, &name, 30, 1.0);
+        let plan = plan_frame(session.project(), Flicks(FRAME * 15));
+        let title = plan.layers[0].title.as_ref().unwrap();
+        let Content::Text(text) = &title.elements[0].content else {
+            panic!("text")
+        };
+        assert!((text.reveal - 0.5).abs() < 1e-9);
+        assert!(plan.layers[0].moving);
+        // No decoder starts early for a title.
+        assert!(upcoming_layers(session.project(), Flicks::ZERO, Flicks(FRAME * 90)).is_empty());
     }
 
     #[test]

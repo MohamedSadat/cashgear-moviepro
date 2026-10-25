@@ -1,3 +1,4 @@
+import { FontLoader, fontCatalog } from '../fonts/loader';
 import { loadPackImages } from '../effects/assets';
 import { expose } from 'comlink';
 import { AudioBlocks } from '../media/audio-blocks';
@@ -50,6 +51,7 @@ const api: ExportWorkerApi = {
       return await runExport(
         {
           engine,
+          fonts: new FontLoader(engine, fontCatalog()),
           media,
           session,
           blocks,

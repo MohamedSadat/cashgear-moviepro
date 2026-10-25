@@ -1,3 +1,4 @@
+import type { FontLoader } from '../fonts/loader';
 import {
   AudioSampleSource,
   EncodedAudioPacketSource,
@@ -53,6 +54,8 @@ const reportMs = 100;
 
 export interface ExportDeps {
   engine: Engine;
+  /** Gives the engine the fonts its titles need. */
+  fonts: FontLoader;
   media: MediaService;
   session: ProjectSession;
   blocks: AudioBlocks;
@@ -257,7 +260,10 @@ export async function runExport(
         const planJson = session.plan_frame(time);
         const plan = JSON.parse(planJson) as FramePlan;
         const upcoming = JSON.parse(session.upcoming_layers(time, upcomingFlicks)) as LayerPlan[];
-        const layers = await sources.gather(plan, upcoming);
+        const [layers] = await Promise.all([
+          sources.gather(plan, upcoming),
+          deps.fonts.ensure(planJson, plan),
+        ]);
         drawFrame(engine, session, planJson, plan, layers, scale, false);
         pending.push({
           index,

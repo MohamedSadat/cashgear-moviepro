@@ -258,6 +258,97 @@ pub fn size_step(side: f64) -> f64 {
     (side / step).ceil() * step
 }
 
+/// The part of a picture a title draws, and the pixels it is drawn in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DrawnPart {
+    /// Upright `u0, v0, u1, v1`.
+    pub visible: [f64; 4],
+    pub size: (u32, u32),
+}
+
+/// The part of a generated picture (a title's frame-sized canvas) worth drawing:
+/// what is visible after the crop, on screen, and inside `content` (canvas
+/// pixels `left, top, right, bottom`) when given, grown by an output pixel. It is
+/// drawn at the size it shows, so text stays sharp however far it is scaled up;
+/// a `moving` one's size is rounded up as [`effect_size`] does.
+pub fn drawn_part(
+    project: (f64, f64),
+    output_scale: f64,
+    transform: &LayerTransform,
+    crop: &CropRect,
+    content: Option<[f64; 4]>,
+    moving: bool,
+    limit: u32,
+) -> Option<DrawnPart> {
+    let picture = Picture {
+        width: project.0,
+        height: project.1,
+        rotation: 0,
+    };
+    let geometry = layer_geometry(project, output_scale, &picture, transform, crop)?;
+    let map = to_project(project, &picture, transform);
+    let det = map.a * map.d - map.b * map.c;
+    if det.abs() < 1e-12 {
+        return None;
+    }
+    // The frame's corners in upright (u, v).
+    let inverse = |x: f64, y: f64| {
+        let (x, y) = (x - map.tx, y - map.ty);
+        (
+            (map.d * x - map.c * y) / det,
+            (-map.b * x + map.a * y) / det,
+        )
+    };
+    let corners = [
+        inverse(0.0, 0.0),
+        inverse(project.0, 0.0),
+        inverse(0.0, project.1),
+        inverse(project.0, project.1),
+    ];
+    let fold = |pick: fn(&(f64, f64)) -> f64, min: bool| {
+        corners
+            .iter()
+            .map(pick)
+            .fold(if min { f64::MAX } else { f64::MIN }, |a, b| {
+                if min {
+                    a.min(b)
+                } else {
+                    a.max(b)
+                }
+            })
+    };
+    let (grow_u, grow_v) = (1.0 / geometry.per_u, 1.0 / geometry.per_v);
+    let mut part = [
+        fold(|c| c.0, true).max(geometry.visible[0]),
+        fold(|c| c.1, true).max(geometry.visible[1]),
+        fold(|c| c.0, false).min(geometry.visible[2]),
+        fold(|c| c.1, false).min(geometry.visible[3]),
+    ];
+    if let Some([left, top, right, bottom]) = content {
+        part = [
+            part[0].max(left / project.0 - grow_u),
+            part[1].max(top / project.1 - grow_v),
+            part[2].min(right / project.0 + grow_u),
+            part[3].min(bottom / project.1 + grow_v),
+        ];
+    }
+    if part[2] <= part[0] || part[3] <= part[1] {
+        return None;
+    }
+    let side = |drawn: f64| {
+        let drawn = if moving { size_step(drawn) } else { drawn };
+        // Rounding noise must not add a pixel.
+        ((drawn - 1e-6).ceil().max(1.0) as u32).min(limit.max(1))
+    };
+    Some(DrawnPart {
+        visible: part,
+        size: (
+            side(geometry.per_u * (part[2] - part[0])),
+            side(geometry.per_v * (part[3] - part[1])),
+        ),
+    })
+}
+
 /// Upright `(u, v)` inside the visible part to coordinates of a texture that holds
 /// just that part: what a layer's effects leave.
 pub fn visible_map(visible: [f64; 4]) -> Affine {
@@ -578,5 +669,54 @@ mod tests {
         assert_eq!(nv12_texels((1080, 1920)), (270, 2880));
         // Widths that are not a multiple of four leave padding in the last texel.
         assert_eq!(nv12_texels((1282, 720)), (321, 1080));
+    }
+
+    #[test]
+    fn titles_draw_only_what_shows_at_the_size_it_shows() {
+        let still = LayerTransform::default();
+        let none = CropRect::default();
+        // A lower third: its content only, grown by an output pixel.
+        let content = Some([560.0, 840.0, 1360.0, 960.0]);
+        let part = drawn_part(HD, 1.0, &still, &none, content, false, 8192).unwrap();
+        assert!((part.visible[0] - (560.0 / 1920.0 - 1.0 / 1920.0)).abs() < 1e-12);
+        assert_eq!(part.size, (802, 122));
+        // At half preview, half the pixels.
+        let half = drawn_part(HD, 0.5, &still, &none, content, false, 8192).unwrap();
+        assert_eq!(half.size, (402, 62));
+        // Scaled up 4×, only the part on screen is drawn, at 4× the density.
+        let zoomed = LayerTransform {
+            scale_x: 4.0,
+            scale_y: 4.0,
+            ..Default::default()
+        };
+        let part = drawn_part(HD, 1.0, &zoomed, &none, None, false, 8192).unwrap();
+        assert!((part.visible[0] - 0.375).abs() < 1e-9 && (part.visible[2] - 0.625).abs() < 1e-9);
+        assert_eq!(part.size, (1920, 1080));
+        // Off screen: nothing.
+        let away = LayerTransform {
+            x: 4000.0,
+            ..Default::default()
+        };
+        assert_eq!(drawn_part(HD, 1.0, &away, &none, None, false, 8192), None);
+        // Turned a quarter: the screen's corners bound the part.
+        let turned = LayerTransform {
+            rotation: 90.0,
+            ..Default::default()
+        };
+        let part = drawn_part(HD, 1.0, &turned, &none, None, false, 8192).unwrap();
+        assert!(
+            (part.visible[0] - (960.0 - 540.0) / 1920.0).abs() < 1e-9,
+            "{part:?}"
+        );
+        assert!(part.visible[1].abs() < 1e-9 && (part.visible[3] - 1.0).abs() < 1e-9);
+        // Moving layers round their size up; the GPU's limit caps it.
+        let moving = drawn_part(HD, 1.0, &still, &none, content, true, 8192).unwrap();
+        assert_eq!(moving.size, (832, 124));
+        assert_eq!(
+            drawn_part(HD, 1.0, &zoomed, &none, None, false, 1024)
+                .unwrap()
+                .size,
+            (1024, 1024)
+        );
     }
 }

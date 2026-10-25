@@ -427,6 +427,7 @@ dependencies = [
  "cgv-effects",
  "cgv-model",
  "cgv-render",
+ "cgv-text",
  "cgv-time",
  "serde",
  "serde_json",
@@ -467,6 +468,7 @@ version = "0.1.0"
 dependencies = [
  "cgv-effects",
  "cgv-model",
+ "cgv-text",
  "js-sys",
  "naga",
  "wasm-bindgen",

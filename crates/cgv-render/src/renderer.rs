@@ -335,7 +335,33 @@ impl Renderer {
         steps: &[Step],
     ) -> Result<(), String> {
         self.compositor
-            .compose(&self.device, project, output, steps)
+            .compose(&self.device, &self.queue, project, output, steps)
+    }
+
+    /// Gives layer `index` of the frame being built a title, drawn at compose time.
+    pub fn set_title(
+        &mut self,
+        index: usize,
+        title: cgv_model::title::Title,
+    ) -> Result<(), String> {
+        self.compositor.set_title(index, title)
+    }
+
+    pub fn load_font(
+        &mut self,
+        source: &str,
+        data: Vec<u8>,
+    ) -> Result<Vec<cgv_text::FaceInfo>, String> {
+        self.compositor.load_font(source, data)
+    }
+    pub fn has_font(&self, source: &str) -> bool {
+        self.compositor.has_font(source)
+    }
+    pub fn font_families(&self) -> Vec<cgv_text::FaceInfo> {
+        self.compositor.font_families()
+    }
+    pub fn missing_fonts(&mut self, title: &cgv_model::title::Title) -> Vec<String> {
+        self.compositor.missing_fonts(title)
     }
 
     fn viewport(&self) -> [f32; 4] {

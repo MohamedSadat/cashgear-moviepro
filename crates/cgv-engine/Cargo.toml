@@ -16,5 +16,6 @@ serde.workspace = true
 serde_json.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+cgv-text.workspace = true
 web-sys = { workspace = true, features = ["ImageBitmap", "OffscreenCanvas", "VideoFrame"] }
 wgpu.workspace = true

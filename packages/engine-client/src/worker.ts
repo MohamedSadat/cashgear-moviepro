@@ -1,6 +1,7 @@
 import { expose } from 'comlink';
 import { builtinLooks, loadPackImages, lookText } from './effects/assets';
 import type { CatalogEntry } from './effects/types';
+import { FontLoader, fontCatalog } from './fonts/loader';
 import { FrameLoop, workerScheduler } from './frame-loop';
 import { AudioBlocks } from './media/audio-blocks';
 import { MediaService, type DecodePreference } from './media/service';
@@ -102,6 +103,7 @@ const api: EngineApi = {
     const running = engine;
     const controller = new PlaybackController({
       engine: running,
+      fonts: new FontLoader(running, fontCatalog()),
       session: () => project.current,
       media: () => media,
       audio: () => audio,

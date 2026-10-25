@@ -1,4 +1,5 @@
 // Mirrors the JSON of crates/cgv-engine (plan::FramePlan, stats::StatsSummary).
+import type { Title } from '../project/title';
 import type { Crop, Params, Speed, Transform } from '../project/types';
 import type { AudioReport } from './audio-player';
 
@@ -32,6 +33,8 @@ export interface LayerPlan {
   effects?: EffectPlan[];
   /** Its transform or crop is keyframed, so its drawn size may change each frame. */
   moving?: boolean;
+  /** A title at this frame: the engine draws it, and the layer has no media. */
+  title?: Title;
 }
 
 /** How a frame is drawn, bottom first. */

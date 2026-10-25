@@ -5,16 +5,20 @@
 //! target is presented on the monitor or read back. Preview and export share all
 //! of it.
 use std::cell::Cell;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
+use cgv_model::title::Title;
 use cgv_model::Params;
+use cgv_text::{FaceInfo, Painter, View};
 use wgpu::*;
 
 use crate::color::{rgb_to_yuv, yuv_to_rgb, FrameColor, Matrix, Transfer};
 use crate::geometry::{
-    effect_size, export_picture, layer_geometry, nv12_texels, visible_map, Affine, CropRect,
-    LayerGeometry, LayerTransform, Picture,
+    drawn_part, effect_size, export_picture, layer_geometry, nv12_texels, visible_map, Affine,
+    CropRect, LayerGeometry, LayerTransform, Picture,
 };
 
 /// Layers sample sRGB-encoded storage, which the GPU decodes to linear light.
@@ -36,6 +40,8 @@ const POOL_KEEP: usize = 6;
 /// Free textures unused for this many frames are destroyed: a layer whose size
 /// changes leaves textures of sizes no frame asks for again.
 const POOL_AGE: u64 = 30;
+/// Title drawings not used for this many frames go back to the pool.
+const TITLE_AGE: u64 = 30;
 
 /// How a CPU frame's bytes are arranged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,6 +110,8 @@ pub struct EffectRun<'a> {
 #[derive(Clone, Debug)]
 pub struct LayerStep<'a> {
     pub index: usize,
+    /// The clip it shows: a title's drawing is kept by it between frames.
+    pub key: u64,
     pub draw: LayerDraw,
     pub effects: Vec<EffectRun<'a>>,
     /// Its drawn size may change from frame to frame (see [`effect_size`]).
@@ -130,11 +138,13 @@ pub enum Step<'a> {
     },
 }
 
-/// Where a layer is drawn from: its source slot, or a texture its effects left.
+/// Where a layer is drawn from: its source slot, a texture its effects left, or a
+/// title's drawing (by its clip).
 #[derive(Clone, Copy, Debug)]
 enum Source {
     Layer(usize),
     Output(usize),
+    Title(u64),
 }
 
 /// A layer ready to draw: its texture and its layer uniforms.
@@ -314,6 +324,14 @@ struct Still {
     binding: BindGroup,
 }
 
+/// A title drawn in an earlier frame, kept while it draws the same.
+struct TitleDrawing {
+    /// What it shows: the title, the part drawn, its size and the fonts loaded.
+    key: u64,
+    texture: Pooled,
+    used: u64,
+}
+
 enum LayerTexture {
     Pooled(Pooled),
     Still(String),
@@ -323,6 +341,8 @@ enum LayerTexture {
 struct FrameBuild {
     encoder: CommandEncoder,
     layers: Vec<Option<LayerTexture>>,
+    /// Titles the engine draws itself, by layer slot.
+    titles: Vec<Option<Title>>,
     /// Plane textures to return to the pool after submission.
     planes: Vec<Pooled>,
     /// What effects and transitions left, drawn in the composition.
@@ -457,6 +477,11 @@ pub struct Compositor {
     export: Option<ExportTarget>,
     frame: Option<FrameBuild>,
     project: (u32, u32),
+    /// The text engine, with the fonts loaded so far.
+    painter: Painter,
+    titles: HashMap<u64, TitleDrawing>,
+    /// Frames begun, for retiring title drawings.
+    frames: u64,
 }
 
 fn uniform_entry(binding: u32, dynamic: bool, size: u64) -> BindGroupLayoutEntry {
@@ -741,6 +766,9 @@ impl Compositor {
             export: None,
             frame: None,
             project: (16, 16),
+            painter: Painter::default(),
+            titles: HashMap::new(),
+            frames: 0,
         }
     }
 
@@ -832,11 +860,39 @@ impl Compositor {
                 label: Some("Compose"),
             }),
             layers: (0..layers).map(|_| None).collect(),
+            titles: (0..layers).map(|_| None).collect(),
             planes: Vec::new(),
             outputs: Vec::new(),
             uniforms: Vec::new(),
             slots: 0,
         });
+    }
+
+    /// Gives layer `index` a title to draw: the engine draws it at compose time,
+    /// at the size it shows.
+    pub fn set_title(&mut self, index: usize, title: Title) -> Result<(), String> {
+        let frame = self.frame.as_mut().ok_or("No frame is being built")?;
+        let slot = frame
+            .titles
+            .get_mut(index)
+            .ok_or_else(|| format!("Layer {index} is not in this frame"))?;
+        *slot = Some(title);
+        Ok(())
+    }
+
+    /// Adds a font file's faces under the name `source` (once).
+    pub fn load_font(&mut self, source: &str, data: Vec<u8>) -> Result<Vec<FaceInfo>, String> {
+        self.painter.fonts.add(source, data)
+    }
+    pub fn has_font(&self, source: &str) -> bool {
+        self.painter.fonts.has_source(source)
+    }
+    pub fn font_families(&self) -> Vec<FaceInfo> {
+        self.painter.fonts.families()
+    }
+    /// Families `title` asks for that are not loaded, fallbacks included.
+    pub fn missing_fonts(&mut self, title: &Title) -> Vec<String> {
+        self.painter.missing(title)
     }
 
     /// Stores `bytes` in the frame's uniforms at the next aligned slots.
@@ -1332,6 +1388,7 @@ impl Compositor {
     pub fn compose(
         &mut self,
         device: &Device,
+        queue: &Queue,
         project: (u32, u32),
         output: (u32, u32),
         steps: &[Step],
@@ -1346,7 +1403,7 @@ impl Compositor {
             output,
         };
         let mut frame = self.frame.take().ok_or("No frame is being built")?;
-        let result = self.compose_steps(device, &mut frame, &scene, steps);
+        let result = self.compose_steps(device, queue, &mut frame, &scene, steps);
         self.frame = Some(frame);
         result
     }
@@ -1354,6 +1411,7 @@ impl Compositor {
     fn compose_steps(
         &mut self,
         device: &Device,
+        queue: &Queue,
         frame: &mut FrameBuild,
         scene: &Scene,
         steps: &[Step],
@@ -1363,7 +1421,9 @@ impl Compositor {
         for step in steps {
             match step {
                 Step::Layer(layer) => {
-                    if let Some(drawable) = self.prepare_layer(device, frame, scene, layer)? {
+                    if let Some(drawable) =
+                        self.prepare_layer(device, queue, frame, scene, layer)?
+                    {
                         ops.push(Op::Draw(drawable));
                     }
                 }
@@ -1374,11 +1434,11 @@ impl Compositor {
                     progress,
                 } => {
                     let from = match from {
-                        Some(side) => self.render_side(device, frame, scene, side)?,
+                        Some(side) => self.render_side(device, queue, frame, scene, side)?,
                         None => None,
                     };
                     let to = match to {
-                        Some(side) => self.render_side(device, frame, scene, side)?,
+                        Some(side) => self.render_side(device, queue, frame, scene, side)?,
                         None => None,
                     };
                     if from.is_none() && to.is_none() {
@@ -1437,6 +1497,7 @@ impl Compositor {
                 LayerTexture::Pooled(pooled) => pooled.binding.as_ref().expect("binding"),
                 LayerTexture::Still(key) => &self.stills[key].binding,
             },
+            Source::Title(key) => self.titles[&key].texture.binding.as_ref().expect("binding"),
             Source::Output(index) => frame.outputs[index].binding.as_ref().expect("binding"),
         }
     }
@@ -1463,11 +1524,15 @@ impl Compositor {
     fn prepare_layer(
         &mut self,
         device: &Device,
+        queue: &Queue,
         frame: &mut FrameBuild,
         scene: &Scene,
         step: &LayerStep,
     ) -> Result<Option<Drawable>, String> {
         let index = step.index;
+        if let Some(title) = frame.titles.get_mut(index).and_then(Option::take) {
+            return self.prepare_title(device, queue, frame, scene, step, &title);
+        }
         if !matches!(frame.layers.get(index), Some(Some(_))) {
             return Ok(None);
         }
@@ -1517,6 +1582,161 @@ impl Compositor {
             result.binding = Some(self.texture_binding(device, &result.view));
         }
         let values = layer_values(&geometry, &visible_map(geometry.visible), opacity);
+        let offset = Self::slot(frame, self.align, &values)?;
+        frame.outputs.push(result);
+        Ok(Some(Drawable {
+            source: Source::Output(frame.outputs.len() - 1),
+            offset: offset as u32,
+        }))
+    }
+
+    /// Readies a title to draw: the part of it on screen, drawn by the text engine
+    /// at the size it shows (or kept from the frame before when unchanged), then
+    /// its effects, as for any layer.
+    fn prepare_title(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        frame: &mut FrameBuild,
+        scene: &Scene,
+        step: &LayerStep,
+        title: &Title,
+    ) -> Result<Option<Drawable>, String> {
+        let draw = &step.draw;
+        let opacity = draw.opacity.clamp(0.0, 1.0);
+        if opacity <= 0.0 {
+            return Ok(None);
+        }
+        // Effects may spread past the letters: they get all of the title that shows.
+        let content = if step.effects.is_empty() {
+            match self.painter.bounds(title, scene.project) {
+                Some(r) => Some([r.left as f64, r.top as f64, r.right as f64, r.bottom as f64]),
+                None => return Ok(None),
+            }
+        } else {
+            None
+        };
+        let limit = device.limits().max_texture_dimension_2d;
+        let Some(part) = drawn_part(
+            scene.project,
+            scene.scale,
+            &draw.transform,
+            &draw.crop,
+            content,
+            step.moving,
+            limit,
+        ) else {
+            return Ok(None);
+        };
+        let Some(mut geometry) = layer_geometry(
+            scene.project,
+            scene.scale,
+            &draw.picture,
+            &draw.transform,
+            &draw.crop,
+        ) else {
+            return Ok(None);
+        };
+        let (grow_u, grow_v) = (1.0 / geometry.per_u, 1.0 / geometry.per_v);
+        let [u0, v0, u1, v1] = part.visible;
+        geometry.visible = part.visible;
+        geometry.quad = [u0 - grow_u, v0 - grow_v, u1 + grow_u, v1 + grow_v];
+        let key = {
+            let mut hasher = DefaultHasher::new();
+            format!("{title:?}").hash(&mut hasher);
+            for value in part.visible {
+                value.to_bits().hash(&mut hasher);
+            }
+            part.size.hash(&mut hasher);
+            self.painter.fonts.generation().hash(&mut hasher);
+            hasher.finish()
+        };
+        if self
+            .titles
+            .get(&step.key)
+            .is_none_or(|drawn| drawn.key != key)
+        {
+            let (width, height) = part.size;
+            let texture = self.pool.acquire(
+                device,
+                TextureKey {
+                    width,
+                    height,
+                    format: LAYER_FORMAT,
+                },
+            );
+            let view = View {
+                left: u0 * scene.project.0,
+                top: v0 * scene.project.1,
+                scale_x: width as f64 / ((u1 - u0) * scene.project.0),
+                scale_y: height as f64 / ((v1 - v0) * scene.project.1),
+                width,
+                height,
+            };
+            self.painter
+                .draw(title, scene.project, view, |top, rows, bytes| {
+                    queue.write_texture(
+                        TexelCopyTextureInfo {
+                            texture: &texture.texture,
+                            mip_level: 0,
+                            origin: Origin3d { x: 0, y: top, z: 0 },
+                            aspect: TextureAspect::All,
+                        },
+                        bytes,
+                        TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(width * 4),
+                            rows_per_image: None,
+                        },
+                        Extent3d {
+                            width,
+                            height: rows,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+                });
+            let drawn = TitleDrawing {
+                key,
+                texture,
+                used: self.frames,
+            };
+            if let Some(old) = self.titles.insert(step.key, drawn) {
+                self.pool.release(old.texture);
+            }
+        }
+        let needs_binding = self.titles[&step.key].texture.binding.is_none();
+        if needs_binding {
+            let binding = self.texture_binding(device, &self.titles[&step.key].texture.view);
+            self.titles.get_mut(&step.key).unwrap().texture.binding = Some(binding);
+        }
+        self.titles.get_mut(&step.key).unwrap().used = self.frames;
+        let to_drawing = visible_map(part.visible);
+        if step.effects.is_empty() {
+            let values = layer_values(&geometry, &to_drawing, opacity);
+            let offset = Self::slot(frame, self.align, &values)?;
+            return Ok(Some(Drawable {
+                source: Source::Title(step.key),
+                offset: offset as u32,
+            }));
+        }
+        // Effects run on a copy, so the drawing stays for the next frame.
+        let values = layer_values(&geometry, &to_drawing, 1.0);
+        let extract = Self::slot(frame, self.align, &values)?;
+        let input = self.pool.acquire(device, self.target_key(part.size));
+        {
+            let binding = self.binding(frame, Source::Title(step.key)).clone();
+            let mut pass = begin_pass(&mut frame.encoder, "Title effect input", &input.view, true);
+            pass.set_pipeline(&self.extract_pipeline);
+            pass.set_bind_group(0, &self.layer_uniforms, &[extract as u32]);
+            pass.set_bind_group(1, &binding, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        let aspect = part.size.0 as f64 / part.size.1 as f64;
+        let mut result = self.run_effects(device, frame, input, aspect, &step.effects)?;
+        if result.binding.is_none() {
+            result.binding = Some(self.texture_binding(device, &result.view));
+        }
+        let values = layer_values(&geometry, &to_drawing, opacity);
         let offset = Self::slot(frame, self.align, &values)?;
         frame.outputs.push(result);
         Ok(Some(Drawable {
@@ -1704,11 +1924,12 @@ impl Compositor {
     fn render_side(
         &mut self,
         device: &Device,
+        queue: &Queue,
         frame: &mut FrameBuild,
         scene: &Scene,
         side: &LayerStep,
     ) -> Result<Option<Pooled>, String> {
-        let Some(drawable) = self.prepare_layer(device, frame, scene, side)? else {
+        let Some(drawable) = self.prepare_layer(device, queue, frame, scene, side)? else {
             return Ok(None);
         };
         let target = self.pool.acquire(device, self.target_key(scene.output));
@@ -2013,6 +2234,20 @@ impl Compositor {
     }
 
     fn recycle(&mut self, frame: FrameBuild) {
+        // Titles not drawn for a while give their drawings back.
+        self.frames += 1;
+        let oldest = self.frames.saturating_sub(TITLE_AGE);
+        let retired: Vec<u64> = self
+            .titles
+            .iter()
+            .filter(|(_, drawn)| drawn.used < oldest)
+            .map(|(key, _)| *key)
+            .collect();
+        for key in retired {
+            if let Some(drawn) = self.titles.remove(&key) {
+                self.pool.release(drawn.texture);
+            }
+        }
         for texture in frame.layers.into_iter().flatten() {
             if let LayerTexture::Pooled(texture) = texture {
                 self.pool.release(texture);
@@ -2285,6 +2520,9 @@ impl Compositor {
     pub fn dispose(&mut self) {
         if let Some(frame) = self.frame.take() {
             self.recycle(frame);
+        }
+        for (_, drawn) in self.titles.drain() {
+            drawn.texture.texture.destroy();
         }
         self.pool.clear();
         for (_, still) in self.stills.drain() {

@@ -65,20 +65,39 @@ mod bridge {
 
         /// Starts building the frame a `ProjectSession::plan_frame` plan describes.
         pub fn begin(&mut self, plan: &str) -> Result<(), JsValue> {
-            self.inner.begin(parse(plan)?);
-            Ok(())
+            self.inner.begin(parse(plan)?).map_err(js_error)
+        }
+        /// Adds a font file's faces, once per `source` (any name the caller keeps
+        /// for the file). Returns them as JSON `[{ family, weights, italic }]`.
+        pub fn load_font(&mut self, source: &str, data: Vec<u8>) -> Result<String, JsValue> {
+            self.inner.load_font(source, data).map_err(js_error)
+        }
+        pub fn has_font(&self, source: &str) -> bool {
+            self.inner.has_font(source)
+        }
+        /// The loaded faces, as `load_font` lists them.
+        pub fn font_families(&self) -> String {
+            self.inner.font_families()
+        }
+        /// JSON `[family]`: families the plan's titles need that are not loaded,
+        /// fallbacks included. Load them, then draw the frame.
+        pub fn fonts_needed(&mut self, plan: &str) -> Result<String, JsValue> {
+            let needed = self.inner.fonts_needed(&parse(plan)?);
+            serde_json::to_string(&needed).map_err(|error| js_error(error.to_string()))
         }
         /// Clears the monitor to black (no project open).
         pub fn clear(&mut self) -> Result<bool, JsValue> {
-            self.inner.begin(cgv_engine::plan::FramePlan {
-                frame: 0,
-                time: cgv_time::Flicks::ZERO,
-                width: 16,
-                height: 9,
-                layers: Vec::new(),
-                steps: Vec::new(),
-                luts: Vec::new(),
-            });
+            self.inner
+                .begin(cgv_engine::plan::FramePlan {
+                    frame: 0,
+                    time: cgv_time::Flicks::ZERO,
+                    width: 16,
+                    height: 9,
+                    layers: Vec::new(),
+                    steps: Vec::new(),
+                    luts: Vec::new(),
+                })
+                .map_err(js_error)?;
             self.inner.compose(1.0, true).map_err(js_error)
         }
         /// A GPU-backed decoder output for layer `index`; the browser converts it.

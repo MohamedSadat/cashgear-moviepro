@@ -1,3 +1,4 @@
+import type { FontLoader } from '../fonts/loader';
 import type { MediaService } from '../media/service';
 import type { ManagedFrame } from '../media/frames';
 import { copyPlanes } from '../media/planes';
@@ -35,6 +36,8 @@ type Clock =
 
 export interface PlaybackDeps {
   engine: Engine;
+  /** Gives the engine the fonts its titles need. */
+  fonts: FontLoader;
   session(): ProjectSession | null;
   media(): MediaService | undefined;
   audio(): AudioPlayer | null;
@@ -365,6 +368,7 @@ export class PlaybackController {
       ready = this.layersReady(plan);
     }
     if (withSound && !audio.ready(session, sample, preRollAudioSeconds)) ready = false;
+    if (this.deps.fonts.prefetch(planJson, plan)) ready = false;
     const waited = now - since;
     if (!ready && waited < preRollTimeoutMs) return false;
 
@@ -455,6 +459,8 @@ export class PlaybackController {
     const plan = JSON.parse(planJson) as FramePlan;
     this.keepStreams(session, plan, rate);
     if (frame === this.lastPresented) return false;
+    // A title's font arriving late shows from the next frame on.
+    this.deps.fonts.prefetch(planJson, plan);
     const started = performance.now();
     const sources = this.gatherNow(plan);
     if (!sources) {
@@ -714,7 +720,10 @@ export class PlaybackController {
     try {
       const planJson = session.plan_frame(time);
       const plan = JSON.parse(planJson) as FramePlan;
-      const sources = await this.gatherAwaited(plan, opened);
+      const [sources] = await Promise.all([
+        this.gatherAwaited(plan, opened),
+        this.deps.fonts.ensure(planJson, plan),
+      ]);
       // A newer request, playback or another project took over meanwhile.
       if (token !== this.renderToken || this.deps.session() !== session) return;
       if (reverse !== this.playback.playing() || this.starting) return;

@@ -1,6 +1,7 @@
 // Mirrors the JSON of crates/cgv-model (Project, Command, Outcome, Snapshot).
 // Times are flicks (705,600,000 per second), exact integers below 2^53.
 import type { FrameRate } from '../media/types';
+import type { Title } from './title';
 
 export const FLICKS_PER_SECOND = 705_600_000;
 
@@ -145,9 +146,12 @@ export interface LutInfo {
 
 export interface Clip {
   id: number;
-  /** An adjustment layer has no media: its effects apply to the tracks below. */
-  kind?: 'media' | 'adjustment';
-  /** Empty for an adjustment layer. */
+  /**
+   * An adjustment layer has no media: its effects apply to the tracks below. A
+   * title has none either: it draws `title`.
+   */
+  kind?: 'media' | 'adjustment' | 'title';
+  /** Empty for an adjustment layer or a title. */
   media: string;
   start: number;
   duration: number;
@@ -161,8 +165,13 @@ export interface Clip {
   opacity: number;
   volumeDb: number;
   effects?: Effect[];
-  /** Animated properties by name: `opacity`, `transform.x`, `effects.<id>.<setting>`… */
+  /**
+   * Animated properties by name: `opacity`, `transform.x`, `effects.<id>.<setting>`,
+   * `title.<element id>.<setting>`…
+   */
   keyframes?: Record<string, Keyframe[]>;
+  /** What a title clip draws. */
+  title?: Title;
 }
 
 export interface Track {
@@ -211,8 +220,8 @@ export interface ClipProperties {
 }
 
 export interface ClipSpec {
-  kind?: 'media' | 'adjustment';
-  /** Empty (or left out) for an adjustment layer. */
+  kind?: 'media' | 'adjustment' | 'title';
+  /** Empty (or left out) for an adjustment layer or a title. */
   media?: string;
   sourceIn?: number;
   /** Timeline length, at `speed`. */
@@ -225,6 +234,8 @@ export interface ClipSpec {
   /** Effects and keyframes, as when pasting a copy. */
   effects?: EffectSpec[];
   keyframes?: Record<string, Keyframe[]>;
+  /** What a new title clip draws; its elements get new ids, and keyframes follow them. */
+  title?: Title;
 }
 
 export type Edge = 'start' | 'end';
@@ -275,6 +286,8 @@ export type Command =
     }
   | { type: 'removeKeyframes'; clip: number; property: string; times: number[] }
   | { type: 'setKeyframes'; clip: number; property: string; keys: Keyframe[] }
+  /** Replaces a title; elements it names keep their ids and keyframes. */
+  | { type: 'setTitle'; clip: number; title: Title }
   | { type: 'moveKeyframes'; clip: number; properties?: string[]; times: number[]; delta: number }
   | {
       type: 'setInterpolation';

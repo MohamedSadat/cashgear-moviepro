@@ -53,6 +53,20 @@ fn effect_run<'a>(
     })
 }
 
+fn faces_json(faces: &[cgv_text::FaceInfo]) -> String {
+    let faces: Vec<serde_json::Value> = faces
+        .iter()
+        .map(|face| {
+            serde_json::json!({
+                "family": face.family,
+                "weights": [face.weights.0, face.weights.1],
+                "italic": face.italic,
+            })
+        })
+        .collect();
+    serde_json::Value::Array(faces).to_string()
+}
+
 fn transform(value: &cgv_model::Transform) -> LayerTransform {
     LayerTransform {
         x: value.x,
@@ -100,10 +114,47 @@ impl Engine {
 
     /// Starts building the frame `plan` describes (from `plan::plan_frame`). Sources
     /// may take a while to gather; start the frame once they are all at hand.
-    pub fn begin(&mut self, plan: FramePlan) {
+    pub fn begin(&mut self, plan: FramePlan) -> Result<(), String> {
         self.renderer.begin_frame(plan.layers.len());
         self.pictures = vec![None; plan.layers.len()];
+        // Titles need no source: their canvas is the frame, drawn at compose time.
+        for (index, layer) in plan.layers.iter().enumerate() {
+            if let Some(title) = &layer.title {
+                self.renderer.set_title(index, title.clone())?;
+                self.pictures[index] = Some(Picture {
+                    width: plan.width as f64,
+                    height: plan.height as f64,
+                    rotation: 0,
+                });
+            }
+        }
         self.plan = Some(plan);
+        Ok(())
+    }
+
+    /// Adds a font file (once per `source`); returns its faces as JSON.
+    pub fn load_font(&mut self, source: &str, data: Vec<u8>) -> Result<String, String> {
+        let faces = self.renderer.load_font(source, data)?;
+        Ok(faces_json(&faces))
+    }
+    pub fn has_font(&self, source: &str) -> bool {
+        self.renderer.has_font(source)
+    }
+    /// The loaded faces as JSON `[{ family, weights: [lo, hi], italic }]`.
+    pub fn font_families(&self) -> String {
+        faces_json(&self.renderer.font_families())
+    }
+    /// Families the plan's titles need that are not loaded, fallbacks included.
+    pub fn fonts_needed(&mut self, plan: &FramePlan) -> Vec<String> {
+        let mut needed: Vec<String> = Vec::new();
+        for title in plan.layers.iter().filter_map(|layer| layer.title.as_ref()) {
+            for family in self.renderer.missing_fonts(title) {
+                if !needed.contains(&family) {
+                    needed.push(family);
+                }
+            }
+        }
+        needed
     }
 
     /// Gives layer `index` of the planned frame its picture. `width` and `height`
@@ -138,6 +189,7 @@ impl Engine {
             let layer = plan.layers.get(index)?;
             Some(LayerStep {
                 index,
+                key: layer.clip.0,
                 draw: LayerDraw {
                     picture: (*pictures.get(index)?)?,
                     transform: transform(&layer.transform),
