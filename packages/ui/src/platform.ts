@@ -3,6 +3,7 @@ import type {
   ExportResult,
   ExportSettings,
   ExportTarget,
+  FontFamilyEntry,
   FormatInfo,
   ImportRequest,
   MediaPlatformKind,
@@ -132,6 +133,8 @@ export interface MediaPlatform {
   chooseExport(choice: ExportChoice): Promise<ExportDestination | null>;
   cache: CacheStore;
   nativeInfo(): Promise<NativeInfo | undefined>;
+  /** Desktop: the fonts installed on this computer, for titles. */
+  installedFonts?(): Promise<FontFamilyEntry[]>;
 }
 
 export const mediaAccept = {

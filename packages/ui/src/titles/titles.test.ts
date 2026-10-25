@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Clip, ProjectSettings, TitleElement } from '@cgv/engine-client';
 import { animateCommands, animationKeys } from './animations';
+import { fontGroups, missingFonts } from './fonts';
 import { fitTitle, templateSpec, templates, titleName } from './templates';
 
 const second = 705_600_000;
@@ -111,5 +112,47 @@ describe('title templates', () => {
     expect(fitted.type === 'text' && fitted.size).toBeCloseTo(54);
     expect(titleName({ elements: [heading] })).toBe('Hello');
     expect(titleName(undefined)).toBe('Title');
+  });
+});
+
+describe('font picker groups', () => {
+  it('lists bundled families by script, then imported, then installed', () => {
+    expect(
+      fontGroups([
+        { family: 'Inter', script: 'latin', origin: 'bundled' },
+        { family: 'Amiri', script: 'arabic', origin: 'bundled' },
+        { family: 'Noto Emoji', script: 'emoji', origin: 'bundled' },
+        { family: 'Mine', script: 'other', origin: 'imported' },
+        { family: 'Arial', script: 'other', origin: 'system' },
+        { family: 'Calibri', script: 'other', origin: 'system' },
+      ]),
+    ).toEqual([
+      { name: 'Latin', families: ['Inter'] },
+      { name: 'Arabic', families: ['Amiri'] },
+      { name: 'Emoji', families: ['Noto Emoji'] },
+      { name: 'Imported', families: ['Mine'] },
+      { name: 'Installed', families: ['Arial', 'Calibri'] },
+    ]);
+  });
+});
+
+describe('missing fonts', () => {
+  it('names each family titles use that the catalogue lacks, once', () => {
+    const text = (family: string) => ({ type: 'text', font: { family } }) as TitleElement;
+    const project = {
+      tracks: [
+        { clips: [{ title: { elements: [text('Inter'), text('Brand Sans')] } }, {}] },
+        { clips: [{ title: { elements: [text('brand sans'), text('Arial')] } }] },
+      ],
+    };
+    const families = [{ family: 'Inter', script: 'latin', origin: 'bundled' } as const];
+    expect(missingFonts(project, families)).toEqual(['Arial', 'Brand Sans']);
+    expect(
+      missingFonts(project, [
+        ...families,
+        { family: 'Brand Sans', script: 'other', origin: 'imported' },
+        { family: 'Arial', script: 'other', origin: 'system' },
+      ]),
+    ).toEqual([]);
   });
 });

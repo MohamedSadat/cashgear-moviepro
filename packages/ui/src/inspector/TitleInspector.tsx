@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CgButton } from '@cashgear/ui';
 import {
   elementProperty,
-  fontCatalog,
   type Clip,
   type Color,
   type Command,
@@ -16,6 +15,7 @@ import {
 import type { EditorState } from '../editing/useEditor';
 import { isAnimated, numberAt, valueAt } from '../effects/animation';
 import { animateCommands, presets, type Preset } from '../titles/animations';
+import { fontGroups, importFontFile, useFontFamilies } from '../titles/fonts';
 import {
   ColorField,
   KeyControls,
@@ -356,19 +356,16 @@ function TextSection({
 }: SectionProps & { element: TextElement }) {
   const [draft, setDraft] = useState(element.text);
   useEffect(() => setDraft(element.text), [element.text]);
-  const families = useMemo(() => fontCatalog().list(), []);
+  const families = useFontFamilies();
+  const file = useRef<HTMLInputElement>(null);
+  const [importProblem, setImportProblem] = useState<string | null>(null);
   const commit = () => {
     if (draft !== element.text) execute(update((e) => ({ ...e, text: draft })));
   };
-  const scripts: [string, string][] = [
-    ['latin', 'Latin'],
-    ['arabic', 'Arabic'],
-    ['emoji', 'Emoji'],
-    ['other', 'Other'],
-  ];
   const known = families.some((f) => f.family === element.font.family);
   const text = (change: Partial<typeof element>) =>
     execute(update((e) => ({ ...e, ...change }) as TitleElement));
+  const family = (name: string) => text({ font: { ...element.font, family: name } });
   return (
     <Section title="Text">
       <textarea
@@ -393,25 +390,48 @@ function TextSection({
           data-testid="title-font"
           value={element.font.family}
           disabled={disabled}
-          onChange={(event) =>
-            text({ font: { ...element.font, family: event.currentTarget.value } })
-          }
+          onChange={(event) => {
+            const choice = event.currentTarget.value;
+            if (choice === '__import') file.current?.click();
+            else family(choice);
+          }}
         >
           {!known && <option value={element.font.family}>{element.font.family} (missing)</option>}
-          {scripts.map(([script, name]) => {
-            const list = families.filter((f) => f.script === script);
-            return list.length ? (
-              <optgroup key={script} label={name}>
-                {list.map((f) => (
-                  <option key={f.family} value={f.family}>
-                    {f.family}
-                  </option>
-                ))}
-              </optgroup>
-            ) : null;
-          })}
+          {fontGroups(families).map((group) => (
+            <optgroup key={group.name} label={group.name}>
+              {group.families.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+          <option value="__import">Import a font file…</option>
         </select>
+        <input
+          ref={file}
+          type="file"
+          accept=".ttf,.otf,.ttc"
+          hidden
+          data-testid="font-file-input"
+          onChange={async (event) => {
+            const picked = event.currentTarget.files?.[0];
+            event.currentTarget.value = '';
+            if (!picked) return;
+            setImportProblem(null);
+            try {
+              family(await importFontFile(picked));
+            } catch (error) {
+              setImportProblem(error instanceof Error ? error.message : String(error));
+            }
+          }}
+        />
       </label>
+      {importProblem && (
+        <p className="cgv-warning" role="alert" data-testid="font-import-problem">
+          {importProblem}
+        </p>
+      )}
       <label className="cgv-field">
         <span className="cgv-field-label">Weight</span>
         <select

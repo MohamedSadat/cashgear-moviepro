@@ -4,6 +4,7 @@ import {
   mediaStore,
   projectIndex,
   type CacheStore,
+  type FontFamilyEntry,
   type ImportRequest,
   type NativeProbe,
   type ProjectEntry,
@@ -27,6 +28,13 @@ interface RegisteredMedia {
   /** ffprobe's view of the file; null if it could not read it. */
   probe?: NativeProbe | null;
   probeError?: string | null;
+}
+/** An installed font file the native side has made readable, with its faces. */
+interface InstalledFontFile {
+  id: string;
+  url: string;
+  name: string;
+  faces: { family: string; weight: number; italic: boolean }[];
 }
 type ProxyEvent = { event: 'progress'; progress: number };
 type ExportEvent = ProxyEvent;
@@ -150,6 +158,24 @@ async function chooseExport({
  * streams them to the engine through the `cgv-media` protocol, probes them with
  * ffprobe and makes proxies with ffmpeg. Projects record media by path.
  */
+/** The installed families, each with every file that holds one of its faces. */
+async function installedFonts(): Promise<FontFamilyEntry[]> {
+  const files = await invoke<InstalledFontFile[]>('fonts_installed');
+  const families = new Map<string, FontFamilyEntry>();
+  for (const file of files)
+    for (const family of new Set(file.faces.map((face) => face.family))) {
+      const entry = families.get(family) ?? {
+        family,
+        script: 'other' as const,
+        origin: 'system' as const,
+        files: [],
+      };
+      entry.files.push({ source: `system:${file.id}`, url: file.url });
+      families.set(family, entry);
+    }
+  return [...families.values()].sort((a, b) => a.family.localeCompare(b.family));
+}
+
 export const desktopPlatform: MediaPlatform = {
   kind: 'desktop',
   projects,
@@ -263,4 +289,5 @@ export const desktopPlatform: MediaPlatform = {
   chooseExport,
   cache: nativeCache,
   nativeInfo: () => invoke<NativeInfo>('native_info'),
+  installedFonts,
 };

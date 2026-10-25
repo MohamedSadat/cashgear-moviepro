@@ -27,6 +27,8 @@ import { TransportBar } from './monitor/TransportBar';
 import { usePlayback, type PlaybackControls } from './monitor/usePlayback';
 import type { MediaLibraryState } from './media/useMediaLibrary';
 import type { MediaPlatform, NativeInfo } from './platform';
+import { loadExtraFonts } from './titles/fonts';
+import { MissingFontsNotice } from './titles/MissingFonts';
 import { ProgramMonitor, type MonitorState } from './ProgramMonitor';
 import { ProjectBar } from './project/ProjectBar';
 import {
@@ -138,6 +140,16 @@ export function AppShell({ platform }: Props) {
     };
   }, [platform]);
 
+  // Imported and installed fonts join the bundled ones.
+  const [fontsListed, setFontsListed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void loadExtraFonts(platform).finally(() => live && setFontsListed(true));
+    return () => {
+      live = false;
+    };
+  }, [platform]);
+
   // Dark and compact everywhere, including menus the CG library opens outside the app.
   useEffect(() => {
     const root = document.documentElement;
@@ -197,6 +209,11 @@ export function AppShell({ platform }: Props) {
           </button>
         </div>
       ))}
+      <MissingFontsNotice
+        snapshot={project.snapshot}
+        platform={platform.kind}
+        listed={fontsListed}
+      />
       {engine.status === 'error' && (
         <div className="cgv-error" role="alert" data-testid="engine-error">
           <p>{engine.message}</p>
