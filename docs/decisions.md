@@ -2,6 +2,71 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-25: Phase 8 findings and defaults
+
+Choices made while building the audio features.
+
+- **The DSP (`cgv-dsp`):** our own code apart from `ebur128`.
+  - Filters are RBJ biquads in transposed direct form II, with `f64` state.
+  - The compressor holds peaks for 20 ms, so a steady tone gives a steady level. Its gain then follows the static curve (soft knee) with separate attack and release.
+  - The gate opens at its threshold and closes 3 dB below it, after its hold.
+  - The limiter looks 3 ms ahead. The gain each sample needs is reduced to the minimum over the look-ahead, then averaged over the same length, so no sample passes the ceiling and the gain only moves in straight lines.
+  - True peaks are found by interpolating four points a sample with a 16-tap windowed sinc, which adds 7 samples of delay.
+  - Reverb follows Freeverb: eight damped combs and four all-passes a side, the right side slightly longer.
+- **The mixer:** each audible track is a bus.
+  - A clip's sound passes its fades, its noise reduction blend and its effect chain. The bus is then turned up or down, panned, ducked and metered, and the buses add up to the master.
+  - Pan keeps the centre at unity and lowers the far side along a constant-power curve (−3 dB half way). A track at the centre sounds as before.
+  - Solo leaves out every track that is not soloed, and a muted or left-out Dialogue track ducks nothing.
+- **Fades and crossfades:**
+  - Fades and crossfades follow an equal-power sine. A transition on a cut crossfades its clips' sound over the transition, using media beyond their edges; where the media runs out, there is silence.
+  - Transitions may now join two sound-only clips, which then only crossfade. A cut between a picture clip and a sound-only clip takes none.
+  - A transition at a free edge fades only the picture.
+  - Split clips keep their fades on their outer edges; trims and speed changes shorten fades that no longer fit.
+- **Effect chains:**
+  - A run of clips that continue each other with the same effects (a split) shares one chain, so tails carry across the cut.
+  - After a seek, a chain first hears the second before the playhead. Filters, dynamics and short echoes then match an export from the start; reverb and echo tails longer than a second do not, at first.
+  - A clip's reverb or echo tail stops at its end.
+  - Sound effect settings cannot be keyframed yet; their definitions say so (`animate: false`).
+  - Sound effects are catalogue definitions without a shader (`assets/audio-effects`). Unlike a picture effect, a new one also needs its processor in `cgv-dsp` and a mapping in the engine's sound plan.
+  - Equaliser, compressor and reverb presets are the definitions' variants: the inspector's Preset list sets the defaults plus the preset's own settings.
+- **Ducking:**
+  - Speech is read per 10 ms hop from the Dialogue tracks' sound before their effects: the hop's RMS against the Music track's threshold (−40 dBFS by default).
+  - The depth at each hop edge comes from the speech within reach. It falls along a raised cosine that ends as speech starts (the mixer reads ahead), holds for 0.3 s after speech, then rises over 0.6 s. Gains between hop edges are interpolated.
+  - Defaults: 12 dB down, 0.2 s attack, 0.3 s hold, 0.6 s release. Marking a track as Music turns ducking on.
+- **Meters:**
+  - Each bus and the master are metered per 10 ms hop: the hop's sample peak and the RMS of the last 300 ms. The master also reads momentary, short-term and integrated loudness, updated every 100 ms; integrated counts from when playback started.
+  - Readings wait until their sample is heard. The page gets about 30 a second, each with the highest peaks since the last, so no transient is missed between updates. Sampling one reading each time missed peaks, which the reference test found.
+  - A track's meter starts in step with the master's, so every reading carries each track's matching hop. Before, a track kept only the last hop of each mixed block, and its strip missed peaks earlier in the block (a whoosh read 0.69 on its track and 0.76 on the master).
+  - The display holds peaks for 1.5 s, then lets them fall at 20 dB per 1.7 s, as IEC peak meters do.
+- **Noise reduction:**
+  - A block of `<media>#nr` is decoded starting a second before the block, cleaned in the noise reduction worker, and moved back by RNNoise's 480-sample delay.
+  - Blocks cleaned this way match one long pass at more than 30 dB SNR, so their joins do not click.
+  - The clip's amount blends the cleaned sound with the original. Without the module, the clip plays as recorded.
+  - Run on the engine's own thread, cleaning cost the monitor 15 frames in 6 s; in its worker it costs none.
+- **Loudness on export:**
+  - The gain is capped at ±24 dB.
+  - The limiter's delay is made up by mixing ahead, so the sound is not late.
+  - The second measuring pass runs only when the gain would push the mix's true peak over the ceiling.
+- **Voiceover:**
+  - The microphone opens in the playback context. A capture worklet stamps each batch with its context frame, the clock the ring player also runs on.
+  - While the timeline plays, the engine says which timeline sample the ring rendered at a context frame (`sampleAtContextFrame`). A sample captured at frame f lines up with the one rendered at f minus the output latency, read from the output timestamp, and the input latency the browser reports (`getSettings().latency`).
+  - The take keeps the countdown's sound before the clip's start, to trim back to.
+  - Pausing ends a take; reaching the timeline's end does not, so a voiceover can run on past the picture.
+  - Each take lands on a new track named Voiceover with the Dialogue role, as one undo step.
+  - On the desktop, the page writes the WAV through the cache, and the native side moves it to the project's `Voiceovers` folder (or the app's data folder before the first save) and registers it.
+- **Measuring voiceover alignment:**
+  - Chrome's system-audio loopback cannot be driven by tests. With the auto-accept flag, `getDisplayMedia` returns a fake audio track; without it, the picker waits for a person.
+  - So the alignment test plays the timeline into a real output device (`setSinkId`) and records a real microphone input that hears it back. It skips where no such loopback exists.
+  - On the reference machine the loopback is the Zoom H5's own Loop Back switch, which sends the PC's playback back into the H5's USB input (the user's choice over installing a virtual cable). The test takes its devices from `CGV_LOOPBACK_OUTPUT` and `CGV_LOOPBACK_INPUT`; a virtual cable's names are the defaults.
+  - The flow itself is tested with Chrome's fake microphone.
+- **Sound library:** 30 effects in five groups and 10 music beds (16-bar loops, 60 to 128 BPM), synthesised by `scripts/make-sounds.mjs` and encoded as 96 kbit/s Opus: 6.2 MB.
+  - Music measures −13.7 to −17.1 LUFS.
+  - Library files are pack media like stickers: a project names them by path. Vite never inlines them, however small.
+  - Music added from the tab goes on a free Music track, or a new one with the Music role. Effects go above the other tracks.
+- **Desktop pack media:** the desktop's asset server answers range requests with the whole file (200, not 206). Mediabunny then streams the file in order and resolves its URL against `window.location`, which a worker lacks, so "/assets/…" threw. Sound and sticker URLs are now absolute, resolved against the page. Projects still name pack files by path only.
+- **UI:** the mixer is a tab beside the inspector. The voiceover panel floats over the monitor and the countdown shows large over the picture. Music and Sounds are library tabs.
+- **WASM size:** the engine is 1,954,946 bytes gzipped, with `ebur128` built for size (it saves 4 KB). The noise reduction module is 202,984 bytes gzipped and loads only when used.
+
 ## 2026-10-25: Phase 8 answers
 
 - **Sound library:** about 30 sound effects and 10 music beds made by our own script (`scripts/make-sounds.mjs`), as the stickers and looks are. No licences are involved, and the files can be made again. The music is simple; licensed music can be added before release.
