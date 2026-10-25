@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::animation::Keyframes;
 use crate::effects::{Effect, Lut, LutInfo, Transition};
+use crate::title::Title;
 
 /// The latest time the model accepts: 2^53 − 1 flicks (about 147 days), so every
 /// time stays an exact integer in JavaScript.
@@ -37,6 +38,10 @@ id_type!(
 id_type!(EffectId);
 id_type!(TransitionId);
 id_type!(LutId);
+id_type!(
+    /// A text block or shape of a title; unique within its clip.
+    ElementId
+);
 
 /// A project: settings, the media it uses, its tracks and markers.
 ///
@@ -550,6 +555,8 @@ pub enum ClipKind {
     Media,
     /// Nothing of its own: its effects apply to everything on the tracks below it.
     Adjustment,
+    /// Text and shapes the engine draws ([`Clip::title`]).
+    Title,
 }
 
 impl ClipKind {
@@ -558,14 +565,14 @@ impl ClipKind {
     }
 }
 
-/// A piece of media, or an adjustment layer, placed on a track.
+/// A piece of media, an adjustment layer or a title, placed on a track.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Clip {
     pub id: ClipId,
     #[serde(default, skip_serializing_if = "ClipKind::is_media")]
     pub kind: ClipKind,
-    /// The media file; empty for an adjustment layer.
+    /// The media file; empty for an adjustment layer or a title.
     pub media: String,
     /// Timeline position of the first frame.
     pub start: Flicks,
@@ -591,11 +598,23 @@ pub struct Clip {
     /// Animated properties by name ([`crate::Property`]).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub keyframes: Keyframes,
+    /// What a title clip draws; None for other clips.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<Title>,
 }
 
 impl Clip {
     pub fn is_adjustment(&self) -> bool {
         self.kind == ClipKind::Adjustment
+    }
+
+    pub fn is_title(&self) -> bool {
+        self.kind == ClipKind::Title
+    }
+
+    /// Adjustment layers and titles: clips without media, timing or sound.
+    pub fn is_generated(&self) -> bool {
+        self.kind != ClipKind::Media
     }
 
     pub fn end(&self) -> Flicks {

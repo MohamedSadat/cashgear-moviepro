@@ -7,6 +7,7 @@ use crate::project::{
     ClipId, ClipKind, Crop, EffectId, LutId, MarkerColor, MarkerId, MediaRef, ProjectSettings,
     Speed, TrackId, Transform, TransitionId,
 };
+use crate::title::Title;
 
 /// Which edge of a clip an edit acts on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,9 +46,13 @@ pub struct ClipSpec {
     /// Effects of the new clip, as when pasting a copy.
     #[serde(default)]
     pub effects: Vec<EffectSpec>,
-    /// Keyframes of the new clip. Effect settings are named by the ids in `effects`.
+    /// Keyframes of the new clip. Effect settings are named by the ids in `effects`,
+    /// and title settings by the element ids in `title`.
     #[serde(default)]
     pub keyframes: Keyframes,
+    /// What a new title clip draws (`kind` is title). Its elements get new ids.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<Title>,
 }
 
 /// Transform values to change; missing ones stay as they are, so edits of
@@ -380,6 +385,13 @@ pub enum Command {
         times: Vec<Flicks>,
         interpolation: Interpolation,
     },
+    /// Replaces what a title clip draws. Elements keep their ids and keyframes when
+    /// `title` names them; others get new ids, and keyframes of elements it leaves
+    /// out go with them.
+    SetTitle {
+        clip: ClipId,
+        title: Title,
+    },
     /// Removes every keyframe of `property`. With `at`, the property keeps the
     /// value it had then.
     ClearKeyframes {
@@ -486,6 +498,7 @@ impl Command {
             Command::SetSpeed { .. } => "Change speed",
             Command::SetClipProperties { .. } => "Change clip",
             Command::AddEffect { .. } => "Add effect",
+            Command::SetTitle { .. } => "Edit title",
             Command::RemoveEffect { .. } => "Remove effect",
             Command::MoveEffect { .. } => "Reorder effects",
             Command::SetEffectEnabled { enabled: true, .. } => "Turn effect on",

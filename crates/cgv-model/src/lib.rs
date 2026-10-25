@@ -15,11 +15,12 @@ pub mod lut;
 mod project;
 pub mod query;
 mod session;
+pub mod title;
 mod validate;
 
 pub use animation::{
-    effect_property, property_effect, value_at, Interpolation, KeyValue, Keyframe, Keyframes,
-    Property,
+    effect_property, property_effect, property_element, value_at, Interpolation, KeyValue,
+    Keyframe, Keyframes, Property,
 };
 pub use command::{ClipProperties, ClipSpec, Command, CropPatch, Edge, Outcome, TransformPatch};
 pub use edit::SOURCE_SLACK;
@@ -30,4 +31,5 @@ pub use effects::{
 };
 pub use project::*;
 pub use session::{Session, Snapshot, HISTORY_LIMIT};
+pub use title::{element_property, Content, Element, Font, Title};
 pub use validate::{valid_project_id, validate};

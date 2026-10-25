@@ -10,8 +10,8 @@ use cgv_time::Flicks;
 use serde::{Deserialize, Serialize};
 
 use crate::effects::{Color, ParamValue, Params};
-use crate::project::EffectId;
 use crate::project::{Clip, Crop, Transform};
+use crate::project::{EffectId, ElementId};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -220,6 +220,8 @@ pub enum Property {
     VolumeDb,
     /// A setting of one of the clip's effects.
     Effect(EffectId),
+    /// A setting of one of a title's elements ([`crate::title::ELEMENT_SETTINGS`]).
+    Element(ElementId),
 }
 
 const NAMED: [(&str, Property); 13] = [
@@ -239,11 +241,18 @@ const NAMED: [(&str, Property); 13] = [
 ];
 
 impl Property {
-    /// Reads a keyframe property name: one of the names above, or
-    /// `effects.<effect id>.<setting>`.
+    /// Reads a keyframe property name: one of the names above,
+    /// `effects.<effect id>.<setting>` or `title.<element id>.<setting>`.
     pub fn parse(name: &str) -> Option<(Property, Option<&str>)> {
         if let Some((_, property)) = NAMED.iter().find(|(n, _)| *n == name) {
             return Some((*property, None));
+        }
+        if let Some(rest) = name.strip_prefix("title.") {
+            let (id, setting) = rest.split_once('.')?;
+            let id = id.parse().ok()?;
+            return crate::title::ELEMENT_SETTINGS
+                .contains(&setting)
+                .then_some((Property::Element(ElementId(id)), Some(setting)));
         }
         let rest = name.strip_prefix("effects.")?;
         let (id, param) = rest.split_once('.')?;
@@ -267,6 +276,14 @@ pub fn effect_property(id: EffectId, param: &str) -> String {
 pub fn property_effect(name: &str) -> Option<EffectId> {
     match Property::parse(name) {
         Some((Property::Effect(id), _)) => Some(id),
+        _ => None,
+    }
+}
+
+/// The title element a keyframe property name belongs to, if any.
+pub fn property_element(name: &str) -> Option<ElementId> {
+    match Property::parse(name) {
+        Some((Property::Element(id), _)) => Some(id),
         _ => None,
     }
 }
@@ -499,5 +516,11 @@ mod tests {
         assert_eq!(effect_property(EffectId(4), "amount"), "effects.4.amount");
         assert_eq!(property_effect("effects.4.amount"), Some(EffectId(4)));
         assert!(!Property::VolumeDb.visual());
+        assert_eq!(
+            Property::parse("title.5.reveal"),
+            Some((Property::Element(ElementId(5)), Some("reveal")))
+        );
+        assert_eq!(Property::parse("title.5.text"), None);
+        assert_eq!(property_element("title.5.fill"), Some(ElementId(5)));
     }
 }

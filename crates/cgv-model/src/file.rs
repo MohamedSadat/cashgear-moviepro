@@ -7,14 +7,14 @@ use crate::validate::validate;
 
 pub const FORMAT: &str = "cashgear-video-project";
 /// The format version this build writes. Older files are migrated when opened.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 pub const EXTENSION: &str = "cgvproj";
 
 /// Upgrades the `project` object of a file from one version to the next.
 type Migration = fn(Value) -> Result<Value, String>;
 
 /// `MIGRATIONS[n - 1]` upgrades version `n` to `n + 1`. Version 1 is the first.
-const MIGRATIONS: &[Migration] = &[main_track, effect_ids];
+const MIGRATIONS: &[Migration] = &[main_track, effect_ids, titles];
 
 /// Format 2 adds the main track. A format 1 project's bottom track becomes its main
 /// track, with magnetism off, so the edit stays exactly as it was.
@@ -31,6 +31,11 @@ fn main_track(mut project: Value) -> Result<Value, String> {
         .ok_or("the project is not an object")?;
     object.insert("mainTrack".into(), bottom);
     object.insert("magnetic".into(), Value::Bool(false));
+    Ok(project)
+}
+
+/// Format 4 adds title clips. Nothing a format 3 project holds changes.
+fn titles(project: Value) -> Result<Value, String> {
     Ok(project)
 }
 
@@ -136,7 +141,7 @@ mod tests {
     fn round_trips_a_new_project() {
         let project = Project::new("p-1", "Holiday");
         let text = to_json(&project);
-        assert!(text.starts_with("{\n  \"format\": \"cashgear-video-project\",\n  \"version\": 3,"));
+        assert!(text.starts_with("{\n  \"format\": \"cashgear-video-project\",\n  \"version\": 4,"));
         let loaded = from_json(&text).unwrap();
         assert_eq!(loaded, project);
         assert_eq!(to_json(&loaded), text);

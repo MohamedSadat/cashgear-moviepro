@@ -8,6 +8,7 @@ use crate::command::Edge;
 use crate::edit::{check_crop, check_opacity, check_transform, check_volume};
 use crate::effects::MAX_EFFECTS;
 use crate::project::{Clip, ClipKind, Project, Speed, Track, MAX_TIME};
+use crate::title::{element_value_ok, Content};
 
 /// Animated properties one clip can have, and keyframes per property.
 const MAX_ANIMATED: usize = 256;
@@ -30,7 +31,7 @@ pub(crate) fn check_effects(clip: &Clip) -> Result<(), String> {
     Ok(())
 }
 
-fn check_property_value(property: Property, value: f64) -> bool {
+fn check_property_value(property: Property, setting: Option<&str>, value: f64) -> bool {
     match property {
         Property::X | Property::Y => value.is_finite() && value.abs() <= 1e6,
         Property::ScaleX | Property::ScaleY => value > 0.0 && value <= 100.0,
@@ -42,6 +43,7 @@ fn check_property_value(property: Property, value: f64) -> bool {
         }
         Property::VolumeDb => (-96.0..=24.0).contains(&value),
         Property::Effect(_) => value.is_finite() && value.abs() <= 1e9,
+        Property::Element(_) => element_value_ok(setting.unwrap_or_default(), value),
     }
 }
 
@@ -51,7 +53,7 @@ pub(crate) fn check_keyframes(clip: &Clip) -> Result<(), String> {
         return Err(format!("A clip animates at most {MAX_ANIMATED} properties"));
     }
     for (name, keys) in &clip.keyframes {
-        let (property, _) = Property::parse(name)
+        let (property, setting) = Property::parse(name)
             .ok_or_else(|| format!("{name} is not a property that can be animated"))?;
         if keys.is_empty() || keys.len() > MAX_KEYS {
             return Err(format!("{name} needs 1 to {MAX_KEYS} keyframes"));
@@ -63,6 +65,16 @@ pub(crate) fn check_keyframes(clip: &Clip) -> Result<(), String> {
             Property::Effect(id) if !clip.effects.iter().any(|e| e.id == id) => {
                 return Err(format!("Clip {} has no effect {id} to animate", clip.id))
             }
+            Property::Element(id) => {
+                let element = clip
+                    .title
+                    .as_ref()
+                    .and_then(|title| title.element(id))
+                    .ok_or_else(|| format!("Clip {} has no title element {id}", clip.id))?;
+                if setting == Some("reveal") && !matches!(element.content, Content::Text(_)) {
+                    return Err(format!("Title element {id} has no text to reveal"));
+                }
+            }
             p if p.visual() && !clip.video => {
                 return Err(format!("Clip {} has no picture to animate", clip.id))
             }
@@ -72,7 +84,11 @@ pub(crate) fn check_keyframes(clip: &Clip) -> Result<(), String> {
             .iter()
             .filter(|key| matches!(key.value, KeyValue::Color(_)))
             .count();
-        if colours != 0 && (colours != keys.len() || !matches!(property, Property::Effect(_))) {
+        let takes_colours = matches!(property, Property::Effect(_)) || setting == Some("fill");
+        if colours != keys.len() && setting == Some("fill") {
+            return Err(format!("{name} keyframes must be colours"));
+        }
+        if colours != 0 && (colours != keys.len() || !takes_colours) {
             return Err(format!("{name} keyframes mix colours and numbers"));
         }
         for (position, key) in keys.iter().enumerate() {
@@ -85,7 +101,7 @@ pub(crate) fn check_keyframes(clip: &Clip) -> Result<(), String> {
             key.interpolation.check()?;
             let ok = match key.value {
                 KeyValue::Color(color) => color.check().is_ok(),
-                KeyValue::Number(value) => check_property_value(property, value),
+                KeyValue::Number(value) => check_property_value(property, setting, value),
             };
             if !ok {
                 return Err(format!("A keyframe of {name} is out of range"));
@@ -242,7 +258,7 @@ pub fn validate(project: &Project) -> Result<(), String> {
                         return Err(format!("Still clip {} has a source position", clip.id));
                     }
                 }
-                ClipKind::Adjustment => {
+                ClipKind::Adjustment | ClipKind::Title => {
                     let plain = clip.media.is_empty()
                         && clip.video
                         && !clip.audio
@@ -250,11 +266,26 @@ pub fn validate(project: &Project) -> Result<(), String> {
                         && clip.speed == Speed::NORMAL;
                     if !plain {
                         return Err(format!(
-                            "Adjustment layer {} has media, sound or timing",
+                            "Adjustment layer or title {} has media, sound or timing",
                             clip.id
                         ));
                     }
                 }
+            }
+            match (&clip.title, clip.is_title()) {
+                (Some(title), true) => {
+                    title.check()?;
+                    for element in &title.elements {
+                        if element.id.0 == 0 || element.id.0 >= project.next_id {
+                            return Err(format!(
+                                "Title element {} is outside the id range",
+                                element.id
+                            ));
+                        }
+                    }
+                }
+                (None, false) => {}
+                _ => return Err(format!("Clip {} has a title it cannot draw", clip.id)),
             }
             if Speed::new(clip.speed.num, clip.speed.den) != Some(clip.speed) {
                 return Err(format!("Clip {} has an invalid speed", clip.id));

@@ -33,8 +33,9 @@ fn check_rules(project: &Project, frame_rate_changed: bool) {
                 clip.id
             );
         }
-        if clip.is_adjustment() {
+        if clip.is_generated() {
             assert!(clip.media.is_empty() && clip.source_in == Flicks::ZERO);
+            assert_eq!(clip.is_title(), clip.title.is_some());
             continue;
         }
         let media = project.media(&clip.media).unwrap();

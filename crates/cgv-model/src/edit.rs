@@ -4,15 +4,18 @@ use std::sync::Arc;
 
 use cgv_time::Flicks;
 
-use crate::animation::{property_effect, value_at, Keyframe, Keyframes, Property};
+use crate::animation::{
+    property_effect, property_element, value_at, Keyframe, Keyframes, Property,
+};
 use crate::command::{ClipProperties, ClipSpec, Command, Edge, Outcome};
 use crate::effects::{
     parse_lut_ref, Alignment, EffectSpec, ParamValue, Transition, TransitionSpec, MAX_EFFECTS,
 };
 use crate::project::{
-    Clip, ClipId, ClipKind, Crop, EffectId, LinkId, LutId, Marker, MarkerId, Project, Speed, Track,
-    TrackId, Transform, TransitionId, MAX_TIME,
+    Clip, ClipId, ClipKind, Crop, EffectId, ElementId, LinkId, LutId, Marker, MarkerId, Project,
+    Speed, Track, TrackId, Transform, TransitionId, MAX_TIME,
 };
+use crate::title::Content;
 use crate::validate::{check_effects, check_keyframes, check_name, validate};
 
 /// Source ranges may end this many flicks past the media's end, to absorb the
@@ -346,6 +349,36 @@ impl Edit {
                 }
                 *self.clip_mut(index, *clip) = changed;
             }
+            Command::SetTitle { clip, title } => {
+                let (index, mut changed) = self.editable(*clip)?;
+                let old = match (&changed.kind, changed.title.take()) {
+                    (ClipKind::Title, Some(old)) => old,
+                    _ => return Err(format!("Clip {clip} is not a title")),
+                };
+                let mut title = title.clone();
+                let mut kept = BTreeSet::new();
+                for element in &mut title.elements {
+                    if old.element(element.id).is_none() || !kept.insert(element.id) {
+                        element.id = ElementId(self.alloc());
+                    }
+                }
+                title.check()?;
+                // Keyframes of elements that are gone, or of a reveal a shape lacks, go.
+                changed.keyframes.retain(|name, _| {
+                    let Some(id) = property_element(name) else {
+                        return true;
+                    };
+                    match title.element(id) {
+                        Some(element) => {
+                            !name.ends_with(".reveal")
+                                || matches!(element.content, Content::Text(_))
+                        }
+                        None => false,
+                    }
+                });
+                changed.title = Some(title);
+                *self.clip_mut(index, *clip) = changed;
+            }
             Command::ClearKeyframes { clip, property, at } => {
                 let (index, mut changed) = self.editable(*clip)?;
                 if !changed.keyframes.contains_key(property) {
@@ -433,6 +466,7 @@ impl Edit {
                             | Command::MoveKeyframes { .. }
                             | Command::ClearKeyframes { .. }
                             | Command::SetTransition { .. }
+                            | Command::SetTitle { .. }
                     );
                     if !batchable {
                         return Err(format!("{} can't run in a batch", command.label()));
@@ -643,7 +677,7 @@ impl Edit {
         if clip.end() > MAX_TIME {
             return Err(format!("Clip {} would end too late", clip.id));
         }
-        if clip.is_adjustment() {
+        if clip.is_generated() {
             return Ok(());
         }
         let media = self
@@ -819,16 +853,24 @@ impl Edit {
         if Speed::new(speed.num, speed.den) != Some(speed) {
             return Err("Speed must be a reduced fraction from 0.1× to 100×".into());
         }
+        if spec.title.is_some() != (spec.kind == ClipKind::Title) {
+            return Err("Only title clips draw a title".into());
+        }
         let (media, video, audio) = match spec.kind {
-            ClipKind::Adjustment => {
+            ClipKind::Adjustment | ClipKind::Title => {
+                let what = if spec.kind == ClipKind::Title {
+                    "A title"
+                } else {
+                    "An adjustment layer"
+                };
                 if !spec.media.is_empty() {
-                    return Err("An adjustment layer has no media".into());
+                    return Err(format!("{what} has no media"));
                 }
                 if spec.audio == Some(true) || spec.video == Some(false) {
-                    return Err("An adjustment layer changes only the picture".into());
+                    return Err(format!("{what} changes only the picture"));
                 }
                 if speed != Speed::NORMAL || spec.source_in != Flicks::ZERO {
-                    return Err("Adjustment layers have no speed or source position".into());
+                    return Err(format!("{what} has no speed or source position"));
                 }
                 (String::new(), true, false)
             }
@@ -872,6 +914,7 @@ impl Edit {
             volume_db: 0.0,
             effects: Vec::new(),
             keyframes: BTreeMap::new(),
+            title: None,
         };
         if let Some(properties) = &spec.properties {
             apply_properties(&mut clip, properties)?;
@@ -896,6 +939,28 @@ impl Edit {
             return Err(format!("{name} animates an effect the clip lacks"));
         }
         clip.keyframes = rename_effects(&spec.keyframes, &renamed);
+        // Title elements get new ids too, and their keyframes follow them.
+        if let Some(title) = &spec.title {
+            let mut title = title.clone();
+            let mut elements = BTreeMap::new();
+            for element in &mut title.elements {
+                let id = ElementId(self.alloc());
+                if elements.insert(element.id, id).is_some() {
+                    return Err(format!("Two title elements share the id {}", element.id));
+                }
+                element.id = id;
+            }
+            if let Some(name) = clip
+                .keyframes
+                .keys()
+                .find(|name| property_element(name).is_some_and(|old| !elements.contains_key(&old)))
+            {
+                return Err(format!("{name} animates an element the title lacks"));
+            }
+            clip.keyframes = rename_elements(&clip.keyframes, &elements);
+            title.check()?;
+            clip.title = Some(title);
+        }
         check_effects(&clip)?;
         check_keyframes(&clip)?;
         self.check_clip(&clip)?;
@@ -1284,6 +1349,9 @@ impl Edit {
         if target.is_adjustment() {
             return Err("Adjustment layers have nothing to slip".into());
         }
+        if target.is_title() {
+            return Err("Titles have nothing to slip".into());
+        }
         if self.is_still(&target.media) {
             return Err("Stills have nothing to slip".into());
         }
@@ -1455,6 +1523,9 @@ impl Edit {
         let (_, target) = self.find(id)?;
         if target.is_adjustment() {
             return Err("Adjustment layers have no speed".into());
+        }
+        if target.is_title() {
+            return Err("Titles have no speed".into());
         }
         if self.is_still(&target.media) {
             return Err("Stills have no speed".into());
@@ -1821,6 +1892,22 @@ fn rename_effects(keyframes: &Keyframes, renamed: &BTreeMap<EffectId, EffectId>)
         .collect()
 }
 
+fn rename_elements(keyframes: &Keyframes, renamed: &BTreeMap<ElementId, ElementId>) -> Keyframes {
+    keyframes
+        .iter()
+        .map(|(name, keys)| {
+            let name = match property_element(name).and_then(|old| Some((old, renamed.get(&old)?)))
+            {
+                Some((old, new)) => {
+                    name.replacen(&format!("title.{old}."), &format!("title.{new}."), 1)
+                }
+                None => name.clone(),
+            };
+            (name, keys.clone())
+        })
+        .collect()
+}
+
 fn effect_position(clip: &Clip, id: EffectId) -> Result<usize, String> {
     clip.effects
         .iter()
@@ -1871,6 +1958,38 @@ fn freeze(clip: &mut Clip, property: &str, at: Flicks) -> Result<(), String> {
                 clip.effects[position]
                     .params
                     .insert(param.to_string(), value.param());
+            }
+        }
+        Property::Element(id) => {
+            let Some(title) = &clip.title else {
+                return Err(format!("Clip {} is not a title", clip.id));
+            };
+            let frozen = title.at(&clip.keyframes, at);
+            let element = frozen
+                .element(id)
+                .ok_or_else(|| format!("Clip {} has no title element {id}", clip.id))?
+                .clone();
+            let title = clip.title.as_mut().expect("a title");
+            let target = title
+                .elements
+                .iter_mut()
+                .find(|element| element.id == id)
+                .expect("the element");
+            match param {
+                Some("x") => target.x = element.x,
+                Some("y") => target.y = element.y,
+                Some("scale") => target.scale = element.scale,
+                Some("rotation") => target.rotation = element.rotation,
+                Some("opacity") => target.opacity = element.opacity,
+                Some("fill") => target.fill = element.fill,
+                Some("reveal") => {
+                    if let (Content::Text(target), Content::Text(frozen)) =
+                        (&mut target.content, &element.content)
+                    {
+                        target.reveal = frozen.reveal;
+                    }
+                }
+                _ => {}
             }
         }
     }

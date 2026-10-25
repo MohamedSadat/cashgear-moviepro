@@ -210,8 +210,68 @@ fn some_clips(project: &Project, rng: &mut Rng) -> Vec<ClipId> {
     chosen
 }
 
+/// A title of one to three text blocks and shapes, with ids from 1.
+pub fn random_title(rng: &mut Rng) -> Title {
+    use cgv_model::title::{Shape, ShapeKind, Text};
+    let elements = (1..=rng.range(1, 3) as u64)
+        .map(|id| Element {
+            id: ElementId(id),
+            x: rng.range(-500, 500) as f64,
+            y: rng.range(-300, 300) as f64,
+            scale: rng.range(5, 20) as f64 / 10.0,
+            rotation: rng.range(-45, 45) as f64,
+            opacity: 1.0,
+            fill: Color {
+                r: 1.0,
+                g: rng.below(11) as f64 / 10.0,
+                b: 0.0,
+                a: 1.0,
+            },
+            stroke: None,
+            shadow: None,
+            content: if rng.percent(60) {
+                Content::Text(Text {
+                    text: ["Title", "عنوان", "Mixed عربي text", ""][rng.below(4) as usize].into(),
+                    font: Font {
+                        family: "Inter".into(),
+                        weight: 400,
+                        italic: false,
+                    },
+                    size: rng.range(12, 200) as f64,
+                    align: Default::default(),
+                    direction: Default::default(),
+                    line_spacing: 1.0,
+                    letter_spacing: 0.0,
+                    wrap: None,
+                    background: None,
+                    reveal: 1.0,
+                    reveal_by: Default::default(),
+                })
+            } else {
+                Content::Shape(Shape {
+                    kind: ShapeKind::Ellipse,
+                    width: rng.range(10, 500) as f64,
+                    height: rng.range(10, 500) as f64,
+                    radius: 0.0,
+                    sides: 5,
+                    inner: 0.5,
+                })
+            },
+        })
+        .collect();
+    Title { elements }
+}
+
 fn random_spec(project: &Project, rng: &mut Rng) -> ClipSpec {
     let frame = frame(project);
+    if rng.percent(3) {
+        return ClipSpec {
+            kind: ClipKind::Title,
+            duration: Flicks(rng.range(1, 90) * frame),
+            title: Some(random_title(rng)),
+            ..Default::default()
+        };
+    }
     if rng.percent(4) {
         return ClipSpec {
             kind: ClipKind::Adjustment,
@@ -307,6 +367,11 @@ fn property(project: &Project, clip: ClipId, rng: &mut Rng) -> String {
             names.push(effect_property(effect.id, "amount"));
             names.push(effect_property(effect.id, "tint"));
         }
+        for element in c.title.iter().flat_map(|title| &title.elements) {
+            names.push(element_property(element.id, "y"));
+            names.push(element_property(element.id, "reveal"));
+            names.push(element_property(element.id, "fill"));
+        }
     }
     if rng.percent(3) {
         return "transform.bogus".into();
@@ -315,7 +380,7 @@ fn property(project: &Project, clip: ClipId, rng: &mut Rng) -> String {
 }
 
 fn key_value(name: &str, rng: &mut Rng) -> KeyValue {
-    if name.ends_with(".tint") {
+    if name.ends_with(".tint") || name.ends_with(".fill") {
         let channel = rng.below(11) as f64 / 10.0;
         return KeyValue::Color(Color {
             r: channel,
@@ -329,6 +394,7 @@ fn key_value(name: &str, rng: &mut Rng) -> KeyValue {
         "transform.scaleX" => rng.range(1, 300) as f64 / 100.0,
         "crop.left" => rng.range(0, 60) as f64 / 100.0,
         "volumeDb" => rng.range(-40, 10) as f64,
+        name if name.ends_with(".reveal") => rng.below(11) as f64 / 10.0,
         _ => rng.range(-400, 400) as f64 / 4.0,
     };
     // Sometimes out of range: refused.
@@ -493,7 +559,29 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
         .flat_map(|t| t.transitions.iter().map(|t| t.id))
         .collect();
     let transition = rng.pick(&transitions).unwrap_or(TransitionId(0));
-    match rng.below(122) {
+    match rng.below(124) {
+        122..=123 => {
+            let titles: Vec<&Clip> = project.clips().filter(|c| c.is_title()).collect();
+            let target = rng.pick(&titles);
+            // Keep some elements (edited), drop others and add new ones.
+            let mut title = target
+                .and_then(|c| c.title.clone())
+                .unwrap_or_else(|| random_title(rng));
+            title.elements.retain(|_| rng.percent(70));
+            for element in &mut title.elements {
+                element.x += 10.0;
+            }
+            for mut element in random_title(rng).elements {
+                if rng.percent(50) {
+                    element.id = ElementId(0);
+                    title.elements.push(element);
+                }
+            }
+            Command::SetTitle {
+                clip: target.map_or(any_clip, |c| c.id),
+                title,
+            }
+        }
         100..=102 => Command::AddEffect {
             clip: any_clip,
             effect: effect_spec(rng),
