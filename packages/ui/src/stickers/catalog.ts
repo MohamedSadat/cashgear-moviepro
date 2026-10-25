@@ -30,8 +30,13 @@ const urls = import.meta.glob<string>('../../../../assets/stickers/*.webp', {
 });
 
 export const stickers: Sticker[] = (manifests[assets + 'stickers/stickers.json']?.stickers ?? [])
-  .map((sticker) => ({ ...sticker, url: urls[assets + sticker.file] }))
-  .filter((sticker) => !!sticker.url);
+  .filter((sticker) => !!urls[assets + sticker.file])
+  // Absolute, because workers read it: a worker has no page to resolve "/assets/…"
+  // against (Mediabunny needs one when a server, like the desktop's, ignores ranges).
+  .map((sticker) => ({
+    ...sticker,
+    url: new URL(urls[assets + sticker.file], location.href).href,
+  }));
 
 /** A new sticker clip lasts this long; its loop repeats. */
 export const stickerDuration = 5 * FLICKS_PER_SECOND;

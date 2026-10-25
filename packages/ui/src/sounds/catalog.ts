@@ -33,8 +33,10 @@ const urls = import.meta.glob<string>('../../../../assets/sounds/*.webm', {
 });
 
 export const sounds: Sound[] = (manifests[assets + 'sounds/sounds.json']?.sounds ?? [])
-  .map((sound) => ({ ...sound, url: urls[assets + sound.file] }))
-  .filter((sound) => !!sound.url);
+  .filter((sound) => !!urls[assets + sound.file])
+  // Absolute, because workers read it: a worker has no page to resolve "/assets/…"
+  // against (Mediabunny needs one when a server, like the desktop's, ignores ranges).
+  .map((sound) => ({ ...sound, url: new URL(urls[assets + sound.file], location.href).href }));
 
 /** The project media id of a sound: the same each time it is added. */
 export const soundMediaId = (sound: Sound) => `sound-${sound.id}`;
