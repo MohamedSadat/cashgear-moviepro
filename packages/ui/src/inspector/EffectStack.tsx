@@ -263,12 +263,26 @@ function EffectPanel({
 }) {
   const [open, setOpen] = useState(true);
   const entry = editor.catalog?.find(effect.pack, effect.kind);
-  const name = entry ? nameOf(entry, effect.params) : effect.kind;
   const clip = context.clip.id;
   const run = (command: Command) => void editor.project.execute(command);
-  // Sound effects list their variants as presets.
+  // Sound effects list their variants as presets: each is the defaults with its
+  // own settings, so it matches only when every setting does.
   const presets = audio ? (entry?.variants ?? []) : [];
-  const preset = presets.find((variant) => variant.name === name);
+  const preset =
+    entry &&
+    presets.find((variant) => {
+      const settings = { ...defaultsOf(entry), ...variant.params };
+      return entry.params.every(
+        (param) =>
+          JSON.stringify(valueOf(effect.params, param)) ===
+          JSON.stringify(valueOf(settings, param)),
+      );
+    });
+  const name = entry
+    ? audio
+      ? (preset?.name ?? entry.name)
+      : nameOf(entry, effect.params)
+    : effect.kind;
   return (
     <div
       className="cgv-effect-panel"
