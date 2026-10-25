@@ -31,8 +31,10 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `cgv-wasm`: the only JS-facing API.
   - `cgv-native`: desktop-only native side.
   - `cgv-effects`: the effect and transition catalogue: JSON schema, registry, shader assembly (`prelude.wgsl`) and settings packing.
+  - `cgv-text`: fonts, shaping (rustybuzz), bidi and line breaks, and drawing titles on the CPU (`paint.rs`). No GPU code.
   - `cgv-time`, `cgv-model`, `cgv-media`, `cgv-audio`.
 - `assets/`: the built-in pack, embedded at build time. One folder per effect or transition (`effect.json` and `effect.wgsl`, plus any images) in `effects/` and `transitions/`; looks in `luts/`. `assets/README.md` is the authoring guide; `scripts/make-effect-assets.mjs` makes the looks and gradients.
+  - `fonts/` (OFL families listed in `fonts.json`, from `pnpm fetch-fonts`), `titles/` (30 templates, from `scripts/make-title-templates.mjs`) and `stickers/` (animated WebP and `stickers.json`, from `scripts/make-stickers.mjs`). Templates are bundled into the UI; font and sticker files are build assets, fetched when used, and never inside the WASM.
 - `packages/engine-client`: engine worker, comlink client, frame loop and capability probe. Generated bindings go in `src/pkg/` (gitignored).
   - `media/`: Mediabunny demuxing, WebCodecs decoder sessions, the decoder pool, the frame cache, frame-accurate seeks and probes.
   - `jobs/`: the thumbnail and waveform worker.
@@ -41,15 +43,17 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `playback/`: the playback controller (the one `renderFrame(t)` path, pre-roll, J/K/L, Auto quality) and the worker's sound player.
   - `audio/`: the SharedArrayBuffer ring, its AudioWorklet and the page's AudioContext.
   - `export/`: the export worker (its own engine and copy of the project), encoders, Mediabunny muxing, targets, and pure settings (formats, presets, codec levels, bitrates).
-  - `effects/`: catalogue types, pack images and the worker that draws the browser's previews.
-- `crates/cgv-model`: the project, every edit command, undo/redo and the `.cgvproj` format, with effects, keyframes (`animation.rs`), transitions and LUTs (`lut.rs`). `packages/ui/src/project`: opening, saving, autosave, recovery and relinking.
+  - `effects/`: catalogue types, pack images and the worker that draws the browser's previews (effects, transitions and titles).
+  - `fonts/`: the font catalogue (bundled, imported, installed), the loader that gives each engine the files its titles need, and imported fonts in OPFS.
+- `crates/cgv-model`: the project, every edit command, undo/redo and the `.cgvproj` format, with effects, keyframes (`animation.rs`), transitions, LUTs (`lut.rs`) and titles (`title.rs`). `packages/ui/src/project`: opening, saving, autosave, recovery and relinking.
 - `crates/cgv-engine`: `plan_frame` (what a frame shows), the audio clip plan, transport, Auto quality and playback stats. `crates/cgv-audio`: the block mixer. `crates/cgv-render`: the compositor and WGSL.
-- `crates/cgv-media`: the media library model (Rust, via WASM). `crates/cgv-native`: the cgv-media protocol registry, byte ranges, ffprobe, proxies, export files and their GIF and MP3 conversions, and the cache folder.
+- `crates/cgv-media`: the media library model (Rust, via WASM). `crates/cgv-native`: the cgv-media protocol registry, byte ranges, ffprobe, proxies, export files and their GIF and MP3 conversions, the cache folder and installed fonts (`fonts.rs`, fontdb).
 - `packages/ui`: React components, on the CG component library (`@cashgear/ui`).
   - `timeline/`: the canvas timeline. `controller.ts` owns the view, drawing and gestures outside React; `geometry.ts` and `draw.ts` are pure.
   - `editing/`: selection, tools, the clipboard and every editing action (`useEditor`), and drag gestures (`Gesture`, one undo step each).
   - `inspector/`: clip fields with stopwatches (`fields.tsx`), the effect stack, the curve lane and the transition inspector.
   - `effects/`: the catalogue hook, the effects and transitions browser, and keyframe helpers. `editing/transitions.ts` finds cuts and transition windows.
+  - `titles/` (the browser, templates, animation presets and fonts), `inspector/TitleInspector.tsx` and `stickers/`.
   - `shortcuts/` (the key map, presets and settings dialog), `workspace/` (resizable panels and library tabs) and `settings/` (per-user settings in `localStorage`).
   - `export/`: the export dialog, its form rules and `useExport`.
 - `apps/web`: Vite app.
@@ -111,5 +115,9 @@ Gotchas:
 - Effects run at a layer's drawn size. Keyframed layers round it up to sixteenths of an octave, and the texture pool destroys textures unused for 30 frames: never key pooled textures on a size that changes every frame.
 - Every engine (monitor, export, previews) loads the pack's images at start.
 - An inspector field with a stopwatch is a `div`, not a `label`: a label passes clicks on it to its first button.
-- `cgv-model`, `cgv-effects` and `serde_json` build at `opt-level = "s"` to keep release WASM under 1.5 MB gzipped.
+- `cgv-model`, `cgv-effects`, `serde_json` and the text crates (rustybuzz, `unicode-bidi`, `unicode-linebreak`) build at `opt-level = "s"` to keep release WASM under 2 MB gzipped.
+- Titles are drawn on the CPU at the size they show (`drawn_part`), so they stay sharp at any scale. Never draw one at a fixed size and let the GPU scale it.
+- Fonts with an optical-size axis (Inter) take the drawn size, as Chrome does. Compare layouts with Chrome at the same pixel size, or widths drift by several percent.
+- A new or pasted title clip gives its elements new ids. Tests read element ids from the snapshot.
+- Font families match in any case, and a bundled family wins over an imported or installed one of the same name. A test that needs a font no bundle has renames a bundled one in memory (`renamedFont` in `titles.spec.ts`).
 - Every Playwright run empties `test-results/`. Copy exports you want to keep (player checks) elsewhere, such as `bench/results/`.

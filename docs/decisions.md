@@ -13,6 +13,42 @@ Choices made while building titles, overlays and stickers.
   - Files whose padding shows are drawn from their planes. Seeks wait for the frame cache's copy, so there is one readback, not two. Exports decode such files in software (`fastest`), because reading every hardware frame back made a one-minute export take 57 s instead of 12 s. Playback already decodes 1080p in software.
   - Measured on the GTX 1650: uncached seeks median 70 ms (Chrome) and 60 ms (Edge), as in Phase 3. The one-minute export of the OpenH264 test clip takes 21 s, 2.8× real time (12.4 s and 4.9× before, with the weak row). Files that repeat their edge keep hardware decoding.
   - Playing and paused frames of the keyframed-transform test now match exactly (mean 0.013 before).
+- **Text engine:** a new crate, `cgv-text`, with no GPU code.
+  - Shaping uses rustybuzz 0.20, which reads fonts with `ttf-parser` 0.25. HarfRust was not used: it reads fonts through `read-fonts`, which would add a second font parser to the WASM.
+  - Direction uses `unicode-bidi` 0.3 (UAX #9), line breaks use `unicode-linebreak` 0.1 (UAX #14), and outlines are filled by `zeno` 0.3.
+  - Variable fonts follow their `wght` axis. Fonts with an optical-size axis (`opsz`, Inter) take the drawn size, as Chrome's `font-optical-sizing: auto` does. Without it, Inter words came out 532 px wide where Chrome draws 500.
+  - A family with no italic face is slanted by 0.2 (about 11°), as browsers synthesise it.
+  - Letters a font lacks come from Noto Sans Arabic, then Inter, then Noto Emoji.
+  - Digits after Arabic text are ordered as Arabic numbers (UAX #9 rule W2), as Chrome orders them.
+- **Drawing titles:** on the CPU, at the size they appear, then uploaded as a picture. Effects, transforms and transitions treat that picture like any layer's.
+  - Glyphs are filled in linear, premultiplied light, 128 rows at a time, so a 4K title never needs a whole-frame float buffer. The bytes go up sRGB-encoded and premultiplied, into `Rgba8UnormSrgb` textures.
+  - Outlines draw under the fill. Shadows are three box blurs, which approximate a Gaussian.
+  - Only the part that shows is drawn (`drawn_part`): what is on screen, inside the clip's crop and inside the title's ink. A moving title rounds its size as keyframed layers do, so pooled textures keep their keys.
+  - Each title clip keeps its last drawing. It is drawn again only when the title, the part shown, the size or the loaded fonts change, so a still title costs one upload.
+  - Reveals step by shaped cluster (letter), word or line, so Arabic letters appear already joined.
+- **Title clips:** elements are text or shapes, each with its own position, scale, rotation, opacity, fill, stroke and shadow. Their keyframes are named `title.<element>.<setting>`.
+  - A new or pasted title clip gives its elements new ids, and its keyframes follow them.
+  - Templates are designed at 1920×1080 and fitted to the project's frame when added.
+- **Animated images:** an image whose file holds more than one frame is media with a duration, and its clips loop.
+  - Frame times follow the file, except that frames of 10 ms or less count as 100 ms, as browsers play them.
+  - A new clip lasts one loop, and at least one second.
+  - Every frame is uploaded as a still texture the first time the clip shows, within 32 M pixels per file; larger animations are scaled down to fit.
+- **Pack media:** a sticker in a project names its file in the app's pack (`assets/stickers/…`), not a URL. Each build finds it at its own asset address, so the project opens the same on the web and on the desktop.
+- **Stickers:** 30, in three groups (emoji, callouts and badges), as animated WebP with alpha, 2.68 MB in all.
+  - Each is 256 px, 15 frames a second, a two-second loop, lossy quality 75 with compression 4. A first try at 24 frames a second (48 frames each) was too slow to make.
+  - `scripts/make-stickers.mjs` draws the frames in Playwright's Chrome and encodes them with the pinned FFmpeg's `libwebp_anim`.
+  - A new sticker clip lasts 5 s and is scaled to 35% of the frame.
+  - Noto Emoji's repository moved to the OFL on 2024-07-29. Its images are taken from commit `41e31b110b4eb929dffb410264694a06205b7ad7`, the last under Apache-2.0, and that licence is kept beside the stickers.
+- **Bundled fonts:** 25 families (the 24 agreed and Noto Emoji), 11.5 MB, from `google/fonts` at a pinned commit, each with its OFL text.
+  - `assets/fonts/fonts.json` records each file's hash, and `pnpm fetch-fonts` fetches or checks them.
+  - An engine fetches a family the first time a title needs it. Each frame's plan says which families its titles lack, fallbacks included.
+- **Imported and installed fonts:**
+  - Imported files (on the web and on the desktop) are kept in the browser's private storage under `fonts/`, with an index of their families. The family is read from the file's `name` table: the typographic family where there is one, as the engine and `fontdb` read it.
+  - The desktop app lists installed fonts with `fontdb` once per run, at start, and serves each file through the `cgv-media` protocol. The reference machine has 236 installed families.
+  - A bundled family wins over an installed or imported one of the same name.
+  - The page's font list is the reference. The monitor's, the previews' and each export's workers are given the extra families.
+  - A font the project names that this computer lacks gets a notice, as missing media does, and its titles draw with the fallback fonts until it is imported or installed.
+- **WASM size:** 1,884,286 bytes gzipped, within the new 2 MB budget. rustybuzz, `unicode-bidi` and `unicode-linebreak` are built at `opt-level = "s"`.
 
 ## 2026-10-25: Phase 7 answers
 
