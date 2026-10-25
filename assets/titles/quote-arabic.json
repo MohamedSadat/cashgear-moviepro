@@ -1,0 +1,68 @@
+{
+  "name": "Arabic quote",
+  "category": "Quotes and captions",
+  "seconds": 6,
+  "elements": [
+    {
+      "id": 1,
+      "x": 0,
+      "y": -30,
+      "fill": {
+        "r": 1,
+        "g": 1,
+        "b": 1,
+        "a": 1
+      },
+      "type": "text",
+      "text": "العلم نور والجهل ظلام",
+      "font": {
+        "family": "Amiri",
+        "weight": 700
+      },
+      "size": 96,
+      "shadow": {
+        "color": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 0.55
+        },
+        "x": 0,
+        "y": 6,
+        "blur": 12
+      }
+    },
+    {
+      "id": 2,
+      "x": 0,
+      "y": 90,
+      "fill": {
+        "r": 0.8862745098039215,
+        "g": 0.7607843137254902,
+        "b": 0.47843137254901963,
+        "a": 1
+      },
+      "type": "text",
+      "text": "حكمة عربية",
+      "font": {
+        "family": "Amiri",
+        "weight": 400
+      },
+      "size": 44
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "words",
+      "out": "fade",
+      "seconds": 1.2
+    },
+    {
+      "element": 2,
+      "in": "fade",
+      "out": "fade",
+      "delay": 1.2
+    }
+  ]
+}

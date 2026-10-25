@@ -1,0 +1,78 @@
+{
+  "name": "Two boxes",
+  "category": "Lower thirds",
+  "elements": [
+    {
+      "id": 1,
+      "x": -600,
+      "y": 340,
+      "fill": {
+        "r": 0.0784313725490196,
+        "g": 0.09411764705882353,
+        "b": 0.12941176470588237,
+        "a": 1
+      },
+      "type": "text",
+      "text": "Jordan Smith",
+      "font": {
+        "family": "Inter",
+        "weight": 700
+      },
+      "size": 54,
+      "background": {
+        "color": {
+          "r": 1,
+          "g": 1,
+          "b": 1,
+          "a": 1
+        },
+        "padding": 16,
+        "radius": 4
+      }
+    },
+    {
+      "id": 2,
+      "x": -600,
+      "y": 418,
+      "fill": {
+        "r": 1,
+        "g": 1,
+        "b": 1,
+        "a": 1
+      },
+      "type": "text",
+      "text": "HEAD OF PRODUCT",
+      "font": {
+        "family": "Inter",
+        "weight": 600
+      },
+      "size": 30,
+      "letterSpacing": 3,
+      "background": {
+        "color": {
+          "r": 0.1803921568627451,
+          "g": 0.4196078431372549,
+          "b": 1,
+          "a": 1
+        },
+        "padding": 12,
+        "radius": 4
+      }
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "slideUp",
+      "out": "fade",
+      "seconds": 0.5
+    },
+    {
+      "element": 2,
+      "in": "slideUp",
+      "out": "fade",
+      "seconds": 0.5,
+      "delay": 0.15
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "name": "Like and share",
+  "category": "Social",
+  "elements": [
+    {
+      "id": 1,
+      "x": -120,
+      "y": -40,
+      "fill": {
+        "r": 1,
+        "g": 1,
+        "b": 1,
+        "a": 1
+      },
+      "type": "text",
+      "text": "Like & share!",
+      "font": {
+        "family": "Caveat",
+        "weight": 700
+      },
+      "size": 110,
+      "rotation": -6
+    },
+    {
+      "id": 2,
+      "x": 320,
+      "y": 70,
+      "fill": {
+        "r": 1,
+        "g": 0.8235294117647058,
+        "b": 0.24705882352941178,
+        "a": 1
+      },
+      "type": "shape",
+      "kind": "arrow",
+      "width": 260,
+      "height": 90,
+      "rotation": 30
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "pop",
+      "out": "fade"
+    },
+    {
+      "element": 2,
+      "in": "slideRight",
+      "out": "fade",
+      "delay": 0.2
+    }
+  ]
+}

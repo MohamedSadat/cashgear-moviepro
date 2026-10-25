@@ -1,0 +1,55 @@
+{
+  "name": "Story",
+  "category": "Arabic",
+  "elements": [
+    {
+      "id": 1,
+      "x": 0,
+      "y": -40,
+      "fill": {
+        "r": 1,
+        "g": 1,
+        "b": 1,
+        "a": 1
+      },
+      "type": "text",
+      "text": "قصة نجاح",
+      "font": {
+        "family": "El Messiri",
+        "weight": 700
+      },
+      "size": 130
+    },
+    {
+      "id": 2,
+      "x": 0,
+      "y": 70,
+      "fill": {
+        "r": 0.6039215686274509,
+        "g": 0.8196078431372549,
+        "b": 1,
+        "a": 1
+      },
+      "type": "text",
+      "text": "A success story",
+      "font": {
+        "family": "Changa",
+        "weight": 500
+      },
+      "size": 46
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "slideUp",
+      "out": "fade"
+    },
+    {
+      "element": 2,
+      "in": "slideUp",
+      "out": "fade",
+      "delay": 0.2
+    }
+  ]
+}

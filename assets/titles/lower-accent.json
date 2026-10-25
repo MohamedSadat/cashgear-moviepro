@@ -1,0 +1,83 @@
+{
+  "name": "Accent bar",
+  "category": "Lower thirds",
+  "elements": [
+    {
+      "id": 1,
+      "x": -900,
+      "y": 370,
+      "fill": {
+        "r": 1,
+        "g": 0.47843137254901963,
+        "b": 0.10196078431372549,
+        "a": 1
+      },
+      "type": "shape",
+      "kind": "rectangle",
+      "width": 10,
+      "height": 130
+    },
+    {
+      "id": 2,
+      "x": -700,
+      "y": 345,
+      "fill": {
+        "r": 1,
+        "g": 1,
+        "b": 1,
+        "a": 1
+      },
+      "type": "text",
+      "text": "Jordan Smith",
+      "font": {
+        "family": "Poppins",
+        "weight": 600
+      },
+      "size": 56,
+      "align": "left",
+      "wrap": 360
+    },
+    {
+      "id": 3,
+      "x": -700,
+      "y": 405,
+      "fill": {
+        "r": 0.8509803921568627,
+        "g": 0.8666666666666667,
+        "b": 0.9098039215686274,
+        "a": 1
+      },
+      "type": "text",
+      "text": "Product designer",
+      "font": {
+        "family": "Poppins",
+        "weight": 400
+      },
+      "size": 34,
+      "align": "left",
+      "wrap": 360
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "fade",
+      "out": "fade",
+      "seconds": 0.4
+    },
+    {
+      "element": 2,
+      "in": "slideRight",
+      "out": "fade",
+      "seconds": 0.5,
+      "delay": 0.1
+    },
+    {
+      "element": 3,
+      "in": "slideRight",
+      "out": "fade",
+      "seconds": 0.5,
+      "delay": 0.25
+    }
+  ]
+}

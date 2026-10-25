@@ -1,0 +1,53 @@
+{
+  "name": "Welcome",
+  "category": "Arabic",
+  "elements": [
+    {
+      "id": 1,
+      "x": 0,
+      "y": -30,
+      "fill": {
+        "r": 0.8862745098039215,
+        "g": 0.7607843137254902,
+        "b": 0.47843137254901963,
+        "a": 1
+      },
+      "type": "text",
+      "text": "مرحباً بكم",
+      "font": {
+        "family": "Reem Kufi",
+        "weight": 600
+      },
+      "size": 140
+    },
+    {
+      "id": 2,
+      "x": 0,
+      "y": 70,
+      "fill": {
+        "r": 0.8862745098039215,
+        "g": 0.7607843137254902,
+        "b": 0.47843137254901963,
+        "a": 1
+      },
+      "type": "shape",
+      "kind": "rectangle",
+      "width": 380,
+      "height": 4
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "fade",
+      "out": "fade",
+      "seconds": 0.8
+    },
+    {
+      "element": 2,
+      "in": "scale",
+      "out": "fade",
+      "delay": 0.3
+    }
+  ]
+}

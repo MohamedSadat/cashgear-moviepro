@@ -1,0 +1,41 @@
+{
+  "name": "Boxed",
+  "category": "Basic",
+  "elements": [
+    {
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "fill": {
+        "r": 0.0784313725490196,
+        "g": 0.09411764705882353,
+        "b": 0.12941176470588237,
+        "a": 1
+      },
+      "type": "text",
+      "text": "Boxed title",
+      "font": {
+        "family": "Poppins",
+        "weight": 600
+      },
+      "size": 90,
+      "background": {
+        "color": {
+          "r": 1,
+          "g": 1,
+          "b": 1,
+          "a": 1
+        },
+        "padding": 28,
+        "radius": 14
+      }
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "pop",
+      "out": "fade"
+    }
+  ]
+}

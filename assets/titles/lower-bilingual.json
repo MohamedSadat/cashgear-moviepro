@@ -1,0 +1,78 @@
+{
+  "name": "Bilingual name",
+  "category": "Lower thirds",
+  "elements": [
+    {
+      "id": 3,
+      "x": -560,
+      "y": 376,
+      "fill": {
+        "r": 0.054901960784313725,
+        "g": 0.0784313725490196,
+        "b": 0.1411764705882353,
+        "a": 0.75
+      },
+      "type": "shape",
+      "kind": "rectangle",
+      "width": 560,
+      "height": 190,
+      "radius": 10
+    },
+    {
+      "id": 1,
+      "x": -560,
+      "y": 340,
+      "fill": {
+        "r": 1,
+        "g": 1,
+        "b": 1,
+        "a": 1
+      },
+      "type": "text",
+      "text": "Sara Haddad",
+      "font": {
+        "family": "Inter",
+        "weight": 700
+      },
+      "size": 52
+    },
+    {
+      "id": 2,
+      "x": -560,
+      "y": 412,
+      "fill": {
+        "r": 1,
+        "g": 0.8196078431372549,
+        "b": 0.4,
+        "a": 1
+      },
+      "type": "text",
+      "text": "سارة حداد",
+      "font": {
+        "family": "Cairo",
+        "weight": 700
+      },
+      "size": 52
+    }
+  ],
+  "animations": [
+    {
+      "element": 3,
+      "in": "fade",
+      "out": "fade",
+      "seconds": 0.4
+    },
+    {
+      "element": 1,
+      "in": "slideUp",
+      "out": "fade",
+      "delay": 0.1
+    },
+    {
+      "element": 2,
+      "in": "slideUp",
+      "out": "fade",
+      "delay": 0.25
+    }
+  ]
+}

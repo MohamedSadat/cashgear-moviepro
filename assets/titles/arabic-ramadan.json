@@ -1,0 +1,85 @@
+{
+  "name": "Ramadan",
+  "category": "Arabic",
+  "elements": [
+    {
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "fill": {
+        "r": 1,
+        "g": 0.8509803921568627,
+        "b": 0.5411764705882353,
+        "a": 1
+      },
+      "type": "text",
+      "text": "رمضان كريم",
+      "font": {
+        "family": "Aref Ruqaa",
+        "weight": 700
+      },
+      "size": 150,
+      "shadow": {
+        "color": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 0.7
+        },
+        "x": 0,
+        "y": 6,
+        "blur": 20
+      }
+    },
+    {
+      "id": 2,
+      "x": -420,
+      "y": -110,
+      "fill": {
+        "r": 1,
+        "g": 0.8509803921568627,
+        "b": 0.5411764705882353,
+        "a": 1
+      },
+      "type": "shape",
+      "kind": "star",
+      "width": 70,
+      "height": 70
+    },
+    {
+      "id": 3,
+      "x": 430,
+      "y": -140,
+      "fill": {
+        "r": 1,
+        "g": 0.8509803921568627,
+        "b": 0.5411764705882353,
+        "a": 1
+      },
+      "type": "shape",
+      "kind": "star",
+      "width": 50,
+      "height": 50
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "scale",
+      "out": "fade",
+      "seconds": 0.8
+    },
+    {
+      "element": 2,
+      "in": "pop",
+      "out": "fade",
+      "delay": 0.4
+    },
+    {
+      "element": 3,
+      "in": "pop",
+      "out": "fade",
+      "delay": 0.55
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "name": "Handwritten",
+  "category": "Quotes and captions",
+  "elements": [
+    {
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "fill": {
+        "r": 1,
+        "g": 0.8784313725490196,
+        "b": 0.4,
+        "a": 1
+      },
+      "type": "text",
+      "text": "A handwritten note",
+      "font": {
+        "family": "Caveat",
+        "weight": 600
+      },
+      "size": 110,
+      "rotation": -2
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "typewriter",
+      "out": "fade",
+      "seconds": 1.2
+    }
+  ]
+}

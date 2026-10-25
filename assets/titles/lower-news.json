@@ -1,0 +1,89 @@
+{
+  "name": "News ticker",
+  "category": "Lower thirds",
+  "elements": [
+    {
+      "id": 1,
+      "x": 0,
+      "y": 440,
+      "fill": {
+        "r": 0.7019607843137254,
+        "g": 0.07058823529411765,
+        "b": 0.12156862745098039,
+        "a": 0.92
+      },
+      "type": "shape",
+      "kind": "rectangle",
+      "width": 1920,
+      "height": 96
+    },
+    {
+      "id": 2,
+      "x": -840,
+      "y": 440,
+      "fill": {
+        "r": 0.7019607843137254,
+        "g": 0.07058823529411765,
+        "b": 0.12156862745098039,
+        "a": 1
+      },
+      "type": "text",
+      "text": "LIVE",
+      "font": {
+        "family": "Oswald",
+        "weight": 700
+      },
+      "size": 46,
+      "background": {
+        "color": {
+          "r": 1,
+          "g": 1,
+          "b": 1,
+          "a": 1
+        },
+        "padding": 10,
+        "radius": 4
+      }
+    },
+    {
+      "id": 3,
+      "x": -280,
+      "y": 440,
+      "fill": {
+        "r": 1,
+        "g": 1,
+        "b": 1,
+        "a": 1
+      },
+      "type": "text",
+      "text": "Reporting from the studio tonight",
+      "font": {
+        "family": "Oswald",
+        "weight": 500
+      },
+      "size": 48,
+      "align": "left",
+      "wrap": 1000
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "slideUp",
+      "out": "slideDown",
+      "seconds": 0.4
+    },
+    {
+      "element": 2,
+      "in": "pop",
+      "out": "fade",
+      "delay": 0.3
+    },
+    {
+      "element": 3,
+      "in": "slideLeft",
+      "out": "fade",
+      "delay": 0.35
+    }
+  ]
+}

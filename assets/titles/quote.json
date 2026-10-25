@@ -1,0 +1,60 @@
+{
+  "name": "Quote",
+  "category": "Quotes and captions",
+  "seconds": 6,
+  "elements": [
+    {
+      "id": 1,
+      "x": 0,
+      "y": -40,
+      "fill": {
+        "r": 1,
+        "g": 1,
+        "b": 1,
+        "a": 1
+      },
+      "type": "text",
+      "text": "“Simplicity is the ultimate sophistication.”",
+      "font": {
+        "family": "Playfair Display",
+        "weight": 400,
+        "italic": true
+      },
+      "size": 76,
+      "wrap": 1300,
+      "lineSpacing": 1.1
+    },
+    {
+      "id": 2,
+      "x": 0,
+      "y": 130,
+      "fill": {
+        "r": 0.788235294117647,
+        "g": 0.807843137254902,
+        "b": 0.8509803921568627,
+        "a": 1
+      },
+      "type": "text",
+      "text": "— Leonardo da Vinci",
+      "font": {
+        "family": "Inter",
+        "weight": 400
+      },
+      "size": 36
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "words",
+      "out": "fade",
+      "seconds": 1.6
+    },
+    {
+      "element": 2,
+      "in": "fade",
+      "out": "fade",
+      "delay": 1.6
+    }
+  ]
+}

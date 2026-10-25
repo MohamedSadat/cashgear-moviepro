@@ -1,0 +1,71 @@
+{
+  "name": "Callout",
+  "category": "Social",
+  "elements": [
+    {
+      "id": 1,
+      "x": 260,
+      "y": -260,
+      "fill": {
+        "r": 1,
+        "g": 0.9529411764705882,
+        "b": 0.4196078431372549,
+        "a": 1
+      },
+      "type": "text",
+      "text": "Look here!",
+      "font": {
+        "family": "Permanent Marker",
+        "weight": 400
+      },
+      "size": 96,
+      "stroke": {
+        "color": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 1
+        },
+        "width": 8
+      }
+    },
+    {
+      "id": 2,
+      "x": 0,
+      "y": -120,
+      "fill": {
+        "r": 1,
+        "g": 0.9529411764705882,
+        "b": 0.4196078431372549,
+        "a": 1
+      },
+      "type": "shape",
+      "kind": "arrow",
+      "width": 300,
+      "height": 110,
+      "rotation": 150,
+      "stroke": {
+        "color": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 1
+        },
+        "width": 6
+      }
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "pop",
+      "out": "fade"
+    },
+    {
+      "element": 2,
+      "in": "pop",
+      "out": "fade",
+      "delay": 0.15
+    }
+  ]
+}

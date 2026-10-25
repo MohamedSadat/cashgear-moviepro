@@ -1,0 +1,80 @@
+{
+  "name": "Minimal",
+  "category": "Lower thirds",
+  "elements": [
+    {
+      "id": 1,
+      "x": -620,
+      "y": 350,
+      "fill": {
+        "r": 1,
+        "g": 1,
+        "b": 1,
+        "a": 1
+      },
+      "type": "text",
+      "text": "Alex Morgan",
+      "font": {
+        "family": "Inter",
+        "weight": 600
+      },
+      "size": 52,
+      "align": "left",
+      "wrap": 600
+    },
+    {
+      "id": 2,
+      "x": -620,
+      "y": 388,
+      "fill": {
+        "r": 1,
+        "g": 1,
+        "b": 1,
+        "a": 0.7
+      },
+      "type": "shape",
+      "kind": "rectangle",
+      "width": 600,
+      "height": 2
+    },
+    {
+      "id": 3,
+      "x": -620,
+      "y": 420,
+      "fill": {
+        "r": 0.788235294117647,
+        "g": 0.807843137254902,
+        "b": 0.8509803921568627,
+        "a": 1
+      },
+      "type": "text",
+      "text": "Director of photography",
+      "font": {
+        "family": "Inter",
+        "weight": 400
+      },
+      "size": 30,
+      "align": "left",
+      "wrap": 600
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "fade",
+      "out": "fade"
+    },
+    {
+      "element": 2,
+      "in": "scale",
+      "out": "fade",
+      "delay": 0.15
+    },
+    {
+      "element": 3,
+      "in": "fade",
+      "out": "fade",
+      "delay": 0.3
+    }
+  ]
+}

@@ -443,3 +443,64 @@ fn text_stays_sharp_when_drawn_large() {
         assert!(edge_width(&mut painter, scale) <= 2, "scale {scale}");
     }
 }
+
+/// Every bundled font file, as the app ships them.
+fn all_fonts() -> Fonts {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts");
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("fonts.json")).unwrap()).unwrap();
+    let mut fonts = Fonts::new();
+    for family in manifest["families"].as_array().unwrap() {
+        let folder = family["family"]
+            .as_str()
+            .unwrap()
+            .to_lowercase()
+            .replace(' ', "-");
+        for file in family["files"].as_array().unwrap() {
+            let name = file["file"].as_str().or(file["from"].as_str()).unwrap();
+            fonts.add(name, font_file(&folder, name)).unwrap();
+        }
+    }
+    fonts
+}
+
+#[test]
+fn every_template_is_a_valid_title_drawn_with_bundled_fonts() {
+    let mut painter = Painter::new(all_fonts());
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/titles");
+    let mut count = 0;
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        let file: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let title: Title =
+            serde_json::from_value(serde_json::json!({ "elements": file["elements"] }))
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        title
+            .check()
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        for font in title.fonts() {
+            assert!(
+                painter.fonts.has_family(&font.family),
+                "{}: {}",
+                path.display(),
+                font.family
+            );
+        }
+        assert!(painter.missing(&title).is_empty(), "{}", path.display());
+        let canvas = (1920.0, 1080.0);
+        let bounds = painter.bounds(&title, canvas).unwrap();
+        // Designed to sit inside the frame (bounds take a pixel more for smoothing).
+        let inside = bounds.left >= -2.0
+            && bounds.top >= -2.0
+            && bounds.right <= 1922.0
+            && bounds.bottom <= 1082.0;
+        assert!(
+            inside,
+            "{} reaches out of the frame: {bounds:?}",
+            path.display()
+        );
+        count += 1;
+    }
+    assert_eq!(count, 30);
+}

@@ -12,3 +12,6 @@ rustybuzz.workspace = true
 unicode-bidi.workspace = true
 unicode-linebreak.workspace = true
 zeno.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

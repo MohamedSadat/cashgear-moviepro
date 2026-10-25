@@ -1,0 +1,54 @@
+{
+  "name": "Subscribe button",
+  "category": "Social",
+  "elements": [
+    {
+      "id": 1,
+      "x": 0,
+      "y": 300,
+      "fill": {
+        "r": 1,
+        "g": 0,
+        "b": 0.2,
+        "a": 1
+      },
+      "type": "shape",
+      "kind": "rectangle",
+      "width": 520,
+      "height": 140,
+      "radius": 24
+    },
+    {
+      "id": 2,
+      "x": 0,
+      "y": 300,
+      "fill": {
+        "r": 1,
+        "g": 1,
+        "b": 1,
+        "a": 1
+      },
+      "type": "text",
+      "text": "SUBSCRIBE",
+      "font": {
+        "family": "Montserrat",
+        "weight": 800
+      },
+      "size": 64,
+      "letterSpacing": 3
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "pop",
+      "out": "scale"
+    },
+    {
+      "element": 2,
+      "in": "pop",
+      "out": "scale",
+      "delay": 0.1
+    }
+  ]
+}

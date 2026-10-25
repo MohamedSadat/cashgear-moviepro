@@ -1,0 +1,56 @@
+{
+  "name": "Breaking news",
+  "category": "Headlines",
+  "elements": [
+    {
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "fill": {
+        "r": 0.8431372549019608,
+        "g": 0.14901960784313725,
+        "b": 0.23921568627450981,
+        "a": 1
+      },
+      "type": "shape",
+      "kind": "rectangle",
+      "width": 1100,
+      "height": 200,
+      "radius": 6
+    },
+    {
+      "id": 2,
+      "x": 0,
+      "y": 8,
+      "fill": {
+        "r": 1,
+        "g": 1,
+        "b": 1,
+        "a": 1
+      },
+      "type": "text",
+      "text": "BREAKING NEWS",
+      "font": {
+        "family": "Bebas Neue",
+        "weight": 400
+      },
+      "size": 170,
+      "letterSpacing": 6
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "slideLeft",
+      "out": "slideLeft",
+      "seconds": 0.5
+    },
+    {
+      "element": 2,
+      "in": "slideLeft",
+      "out": "slideLeft",
+      "seconds": 0.5,
+      "delay": 0.1
+    }
+  ]
+}

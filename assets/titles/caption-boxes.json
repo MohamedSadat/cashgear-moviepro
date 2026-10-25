@@ -1,0 +1,44 @@
+{
+  "name": "Boxed caption",
+  "category": "Quotes and captions",
+  "elements": [
+    {
+      "id": 1,
+      "x": 0,
+      "y": 360,
+      "fill": {
+        "r": 1,
+        "g": 1,
+        "b": 1,
+        "a": 1
+      },
+      "type": "text",
+      "text": "Captions sit on boxes of their own, line by line",
+      "font": {
+        "family": "Inter",
+        "weight": 600
+      },
+      "size": 54,
+      "wrap": 1100,
+      "background": {
+        "color": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 0.65
+        },
+        "padding": 12,
+        "radius": 6,
+        "perLine": true
+      }
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "fade",
+      "out": "fade",
+      "seconds": 0.3
+    }
+  ]
+}

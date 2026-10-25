@@ -1,0 +1,54 @@
+{
+  "name": "Elegant serif",
+  "category": "Basic",
+  "elements": [
+    {
+      "id": 1,
+      "x": 0,
+      "y": -30,
+      "fill": {
+        "r": 1,
+        "g": 1,
+        "b": 1,
+        "a": 1
+      },
+      "type": "text",
+      "text": "Elegant Title",
+      "font": {
+        "family": "Playfair Display",
+        "weight": 700
+      },
+      "size": 120
+    },
+    {
+      "id": 2,
+      "x": 0,
+      "y": 60,
+      "fill": {
+        "r": 0.8862745098039215,
+        "g": 0.7607843137254902,
+        "b": 0.47843137254901963,
+        "a": 1
+      },
+      "type": "shape",
+      "kind": "rectangle",
+      "width": 420,
+      "height": 4
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "fade",
+      "out": "fade",
+      "seconds": 0.9
+    },
+    {
+      "element": 2,
+      "in": "scale",
+      "out": "fade",
+      "seconds": 0.9,
+      "delay": 0.3
+    }
+  ]
+}

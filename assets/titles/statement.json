@@ -1,0 +1,43 @@
+{
+  "name": "Bold statement",
+  "category": "Headlines",
+  "elements": [
+    {
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "fill": {
+        "r": 1,
+        "g": 0.8235294117647058,
+        "b": 0.24705882352941178,
+        "a": 1
+      },
+      "type": "text",
+      "text": "Big Bold Statement",
+      "font": {
+        "family": "Anton",
+        "weight": 400
+      },
+      "size": 150,
+      "stroke": {
+        "color": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 1
+        },
+        "width": 14
+      },
+      "rotation": -3,
+      "wrap": 1500,
+      "lineSpacing": 0.95
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "scale",
+      "out": "scale"
+    }
+  ]
+}

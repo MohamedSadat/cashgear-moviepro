@@ -1,0 +1,42 @@
+{
+  "name": "Title",
+  "category": "Basic",
+  "elements": [
+    {
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "fill": {
+        "r": 1,
+        "g": 1,
+        "b": 1,
+        "a": 1
+      },
+      "type": "text",
+      "text": "Your title",
+      "font": {
+        "family": "Inter",
+        "weight": 700
+      },
+      "size": 120,
+      "shadow": {
+        "color": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 0.55
+        },
+        "x": 0,
+        "y": 6,
+        "blur": 12
+      }
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "fade",
+      "out": "fade"
+    }
+  ]
+}

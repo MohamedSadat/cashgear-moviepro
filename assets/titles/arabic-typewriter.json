@@ -1,0 +1,43 @@
+{
+  "name": "Typewriter",
+  "category": "Arabic",
+  "elements": [
+    {
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "fill": {
+        "r": 1,
+        "g": 1,
+        "b": 1,
+        "a": 1
+      },
+      "type": "text",
+      "text": "بسم الله نبدأ",
+      "font": {
+        "family": "Noto Naskh Arabic",
+        "weight": 700
+      },
+      "size": 110,
+      "shadow": {
+        "color": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 0.55
+        },
+        "x": 0,
+        "y": 6,
+        "blur": 12
+      }
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "typewriter",
+      "out": "fade",
+      "seconds": 1.5
+    }
+  ]
+}

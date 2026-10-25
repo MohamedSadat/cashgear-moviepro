@@ -1,0 +1,41 @@
+{
+  "name": "Special offer",
+  "category": "Arabic",
+  "elements": [
+    {
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "fill": {
+        "r": 1,
+        "g": 1,
+        "b": 1,
+        "a": 1
+      },
+      "type": "text",
+      "text": "عرض خاص",
+      "font": {
+        "family": "Lalezar",
+        "weight": 400
+      },
+      "size": 160,
+      "background": {
+        "color": {
+          "r": 0.9019607843137255,
+          "g": 0.2235294117647059,
+          "b": 0.27450980392156865,
+          "a": 1
+        },
+        "padding": 30,
+        "radius": 18
+      }
+    }
+  ],
+  "animations": [
+    {
+      "element": 1,
+      "in": "pop",
+      "out": "scale"
+    }
+  ]
+}
