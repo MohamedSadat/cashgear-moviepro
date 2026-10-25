@@ -48,6 +48,9 @@ async function open(page: Page, query = '') {
   await page.waitForFunction(
     () =>
       !!Reflect.get(window, '__cgv')?.client &&
+      // The project can open before the engine has started, after a reload under load.
+      document.querySelector<HTMLElement>('[data-testid="engine-status"]')?.dataset.state ===
+        'ready' &&
       !['Opening…', undefined].includes(
         document.querySelector('[data-testid="project-name"]')?.textContent ?? undefined,
       ) &&
