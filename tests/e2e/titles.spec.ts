@@ -627,3 +627,130 @@ test('every title template adds with one click and stays editable', async ({ pag
     timings,
   });
 });
+
+/** A bundled font under another family name (same length): one no bundle has, to import. */
+function renamedFont(path: string, from: string, to: string): Buffer {
+  expect(to.length).toBe(from.length);
+  const bytes = Buffer.from(readFileSync(path));
+  const utf16 = (text: string) => Buffer.from(text, 'utf16le').swap16();
+  for (let i = 0; i < bytes.readUInt16BE(4); i++) {
+    const record = 12 + i * 16;
+    if (bytes.toString('latin1', record, record + 4) !== 'name') continue;
+    const start = bytes.readUInt32BE(record + 8);
+    const end = start + bytes.readUInt32BE(record + 12);
+    for (const [a, b] of [
+      [utf16(from), utf16(to)],
+      [Buffer.from(from, 'latin1'), Buffer.from(to, 'latin1')],
+    ])
+      for (let at = bytes.indexOf(a, start); at >= 0 && at < end; at = bytes.indexOf(a, at + 1))
+        b.copy(bytes, at);
+  }
+  return bytes;
+}
+
+test('an imported font draws titles in the monitor, exports and after a reload', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(software ? 6 * 60_000 : 2 * 60_000);
+  await open(page);
+  const [, top] = await clear(page, 960, 540);
+  const title = (family: string) => ({
+    elements: [
+      {
+        id: 1,
+        x: 0,
+        y: 0,
+        fill: { r: 1, g: 1, b: 1 },
+        type: 'text',
+        text: 'Imported fonts',
+        font: { family },
+        size: 110,
+      },
+    ],
+  });
+  const [clip] = await run(page, {
+    type: 'append',
+    track: top,
+    clip: { kind: 'title', duration: 30 * FRAME, title: title('Pacifiko') },
+  });
+  // Before the import the family is missing, so the fallback draws it.
+  const fallback = await render(page, 12 * FRAME);
+  await run(page, { type: 'setTitle', clip, title: title('Pacifico') });
+  const reference = await render(page, 12 * FRAME);
+  const apart = compare(fallback, reference);
+  expect(apart.mean).toBeGreaterThan(1);
+  await run(page, { type: 'setTitle', clip, title: title('Pacifiko') });
+
+  await page.evaluate((clip) => {
+    (Reflect.get(window, '__cgv') as { editor: { select(ids: number[]): void } }).editor.select([
+      clip,
+    ]);
+  }, clip);
+  await page.getByTestId('title-element').first().click();
+  const picker = page.getByTestId('title-font');
+  await expect(picker.locator('option[value="Pacifiko"]')).toHaveText('Pacifiko (missing)');
+  // The project says so, as it does for missing media.
+  await expect(page.getByTestId('font-notice')).toContainText('Missing font: Pacifiko.');
+  await page.getByTestId('font-file-input').setInputFiles({
+    name: 'Pacifiko-Regular.ttf',
+    mimeType: 'font/ttf',
+    buffer: renamedFont(join(fontsDir, 'pacifico/Pacifico-Regular.ttf'), 'Pacifico', 'Pacifiko'),
+  });
+  await expect(picker).toHaveValue('Pacifiko');
+  await expect(page.getByTestId('font-notice')).toHaveCount(0);
+  await expect(picker.locator('optgroup[label="Imported"] option')).toHaveText(['Pacifiko']);
+  const imported = compare(await render(page, 12 * FRAME), reference);
+  expect(imported.worst, JSON.stringify(imported)).toBeLessThanOrEqual(2);
+
+  // The export worker gets the imported family too.
+  let exported: { reference: number; fallback: number } | null = null;
+  if (existsSync(ffmpeg) || process.env.CGV_REQUIRE_FFMPEG === '1') {
+    const file = testInfo.outputPath('imported-font.mp4');
+    const download = page.waitForEvent('download', { timeout: 5 * 60_000 });
+    const started = await page.evaluate(
+      (settings) =>
+        (Reflect.get(window, '__cgv') as Hooks).exporter.start(settings, { download: true }),
+      {
+        format: 'mp4',
+        width: 960,
+        height: 540,
+        frameRate: { num: 30, den: 1 },
+        video: { codec: 'avc', bitrate: 8e6 },
+        audio: null,
+      },
+    );
+    expect(started).toBe(true);
+    const status = await page.evaluate(() =>
+      (Reflect.get(window, '__cgv') as Hooks).exporter.settled(),
+    );
+    expect(status, JSON.stringify(status)).toMatchObject({ state: 'done' });
+    await (await download).saveAs(file);
+    const rgb = spawnSync(
+      ffmpeg,
+      [
+        ...['-v', 'error', '-i', file],
+        ...['-vf', 'select=eq(n\\,12),format=rgb24', '-frames:v', '1', '-f', 'rawvideo', '-'],
+      ],
+      { maxBuffer: 1 << 26 },
+    ).stdout as Buffer;
+    expect(rgb.length).toBe(960 * 540 * 3);
+    const frame = { width: 960, height: 540, data: new Uint8Array(960 * 540 * 4) };
+    for (let i = 0; i < 960 * 540; i++) {
+      frame.data.set(rgb.subarray(i * 3, i * 3 + 3), i * 4);
+      frame.data[i * 4 + 3] = 255;
+    }
+    exported = {
+      reference: compare(frame, reference).mean,
+      fallback: compare(frame, fallback).mean,
+    };
+    expect(exported.reference * 4, JSON.stringify(exported)).toBeLessThan(exported.fallback);
+  }
+
+  // Imported fonts stay in the browser's storage: the saved title draws the same after a reload.
+  await page.keyboard.press('Control+s');
+  await expect(page.getByTestId('project-bar')).toHaveAttribute('data-busy', 'false');
+  await open(page);
+  const reopened = compare(await render(page, 12 * FRAME), reference);
+  expect(reopened.worst, JSON.stringify(reopened)).toBeLessThanOrEqual(2);
+  await record('title-imported-font', testInfo, { apart, imported, exported, reopened });
+});

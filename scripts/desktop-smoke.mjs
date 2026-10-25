@@ -453,6 +453,60 @@ try {
   }
   results.push({ exported });
 
+  // Titles: an installed font (Arial, on every Windows) reaches the engine through
+  // the media protocol and draws differently from the fallback a missing family gets.
+  const installedFonts = await page.evaluate(async () => {
+    const hooks = window.__cgv;
+    const started = performance.now();
+    const installed = await hooks.platform.installedFonts();
+    const listMs = performance.now() - started;
+    if (!installed.some((entry) => entry.family === 'Arial'))
+      throw new Error('Arial is not among the installed fonts');
+    const tracks = (await hooks.client.api.projectSnapshot()).project.tracks;
+    const title = (family) => ({
+      elements: [
+        {
+          id: 1,
+          x: 0,
+          y: 0,
+          fill: { r: 1, g: 1, b: 1 },
+          type: 'text',
+          text: 'Installed fonts',
+          font: { family },
+          size: 120,
+        },
+      ],
+    });
+    const outcome = await hooks.project.execute({
+      type: 'append',
+      track: tracks[tracks.length - 1].id,
+      clip: { kind: 'title', duration: 705_600_000, title: title('Arial') },
+    });
+    const clip = outcome.created[0];
+    const start = (await hooks.client.api.projectSnapshot()).project.tracks
+      .flatMap((track) => track.clips)
+      .find((c) => c.id === clip).start;
+    const draw = async (family) => {
+      await hooks.project.execute({ type: 'setTitle', clip, title: title(family) });
+      return (await hooks.client.api.renderPixels(start + 352_800_000)).data;
+    };
+    const missing = await draw('No Such Family');
+    let differing = 0;
+    // The page passes installed families to the engine's worker as it starts.
+    for (let attempt = 0; attempt < 20 && !differing; attempt++) {
+      if (attempt) await new Promise((resolve) => setTimeout(resolve, 500));
+      const arial = await draw('Arial');
+      differing = 0;
+      for (let i = 0; i < arial.length; i += 4)
+        if (Math.abs(arial[i] - missing[i]) > 16) differing++;
+    }
+    await hooks.project.execute({ type: 'delete', clips: [clip] });
+    return { families: installed.length, listMs: Math.round(listMs), differing };
+  });
+  if (installedFonts.differing < 500)
+    throw new Error('Arial drew like the fallback: ' + JSON.stringify(installedFonts));
+  results.push({ installedFonts });
+
   await page.screenshot({ path: join(root, 'bench/results/desktop.png') });
   await writeFile(
     join(root, 'bench/results/desktop-smoke.json'),
