@@ -15,7 +15,8 @@ export interface FrameResult {
   decoded: number;
   /**
    * The frame is a hardware decoder's output, on the GPU: the browser converts it
-   * correctly there. Cached copies are CPU frames, converted from their planes.
+   * correctly there. Cached copies are CPU frames, converted from their planes, and
+   * so are hardware frames the browser would convert wrongly (see `paddingShows`).
    */
   gpu: boolean;
 }
@@ -28,7 +29,7 @@ export interface FrameResult {
 export class VideoReader {
   private queue: Promise<unknown> = Promise.resolve();
   /** Cache copies being read back from the GPU. */
-  private copying = new Set<Promise<void>>();
+  private copying = new Set<Promise<unknown>>();
   private epoch = 0;
 
   constructor(
@@ -40,6 +41,8 @@ export class VideoReader {
     private readonly cache: FrameCache<ManagedFrame>,
     /** Told when the hardware decoder failed and reading fell back to any decoder. */
     private readonly onHardwareFailure: () => void = () => {},
+    /** The browser draws this track's hardware frames wrongly (see `paddingShows`). */
+    private readonly padded = false,
   ) {}
 
   /** Reads are serialized: one decoder, one position. */
@@ -74,10 +77,17 @@ export class VideoReader {
     const session = this.pool.acquire(this.key, () => new VideoDecoderSession(this.config));
     try {
       const { frame, decoded } = await this.decode(session, frameNumber, target);
+      const gpu = this.config.hardwareAcceleration === 'prefer-hardware';
       // The caller gets the decoder's frame at once. The cache keeps a copy in
       // memory the page owns, so the decoder gets its surface back soon after.
-      this.keepCopy(key, frame);
-      return { frame, decoded, gpu: this.config.hardwareAcceleration === 'prefer-hardware' };
+      // A padded hardware frame waits for that copy instead: one readback, not two.
+      const padded = gpu && this.padded;
+      const copy = this.keepCopy(key, frame, padded);
+      if (!padded) return { frame, decoded, gpu };
+      const planes = await copy;
+      if (!planes) return { frame, decoded, gpu };
+      frame.close();
+      return { frame: planes, decoded, gpu: false };
     } catch (error) {
       // A failed or stalled decoder is in an unknown state: start over next time.
       this.pool.release(this.key);
@@ -92,21 +102,25 @@ export class VideoReader {
     }
   }
 
-  private keepCopy(key: string, frame: ManagedFrame) {
+  /** Caches a copy of `frame`; with `wanted`, resolves to a reference of its own. */
+  private keepCopy(key: string, frame: ManagedFrame, wanted = false) {
     const epoch = this.epoch;
     const source = frame.clone();
-    const job: Promise<void> = detachFrame(source.raw)
+    const job: Promise<ManagedFrame | null> = detachFrame(source.raw)
       .then((copy) => {
         const managed = ManagedFrame.wrap(copy);
+        const mine = wanted ? managed.clone() : null;
         if (epoch === this.epoch) this.cache.put(key, managed);
         else managed.close();
+        return mine;
       })
-      .catch(() => {})
+      .catch(() => null)
       .finally(() => {
         source.close();
         this.copying.delete(job);
       });
     this.copying.add(job);
+    return job;
   }
 
   /** Returns the decoder-backed target frame; the caller must close it promptly. */

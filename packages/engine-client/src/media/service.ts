@@ -1,9 +1,10 @@
-import type { Input, InputAudioTrack } from 'mediabunny';
+import type { EncodedPacketSink, Input, InputAudioTrack } from 'mediabunny';
 import type { MediaLibrary } from '../pkg/cgv_wasm';
 import { readBarcode } from './barcode';
 import { DecoderPool } from './decoder-pool';
 import { FrameCache } from './frame-cache';
 import { openFrameCount, readPlanes, type ManagedFrame } from './frames';
+import { paddingShows } from './padding';
 import { probeAudio, probeMedia, probeVideo } from './probe';
 import { ProjectService } from '../project/service';
 import { copyToOpfs, openInput, readAll, sourceModified } from './sources';
@@ -32,8 +33,12 @@ const decoderCapacity = 4;
  */
 const softwarePixels = 1920 * 1088;
 
-/** How playback picks decoders: by the rule above, or forced (diagnostics). */
-export type DecodePreference = 'auto' | 'software' | 'hardware';
+/**
+ * How decoders are picked: playback by the rule above (`auto`); exports in
+ * hardware unless its frames would be read back from the GPU (`fastest`); or
+ * forced (diagnostics).
+ */
+export type DecodePreference = 'auto' | 'fastest' | 'software' | 'hardware';
 
 interface OpenMedia {
   source: MediaSourceRef;
@@ -44,8 +49,11 @@ interface OpenMedia {
   kind: MediaItem['kind'];
   /** Clockwise degrees that show the video upright. */
   rotation: number;
-  /** The decoders the browser has for the reader's track, and its frame size. */
-  decoders: { hardware: boolean; software: boolean; pixels: number };
+  /**
+   * The decoders the browser has for the reader's track, its frame size, and
+   * whether the browser draws its hardware frames wrongly (see `paddingShows`).
+   */
+  decoders: { hardware: boolean; software: boolean; pixels: number; padded: boolean };
   /** The decodable sound track, from the original or else the proxy. */
   audio: InputAudioTrack | null;
 }
@@ -62,11 +70,20 @@ async function supports(config: VideoDecoderConfig, hardwareAcceleration: Hardwa
 }
 
 /** The browser's hardware and software decoders for `config`. Hardware frames stay on the GPU. */
-async function decodersFor(config: VideoDecoderConfig, width: number, height: number) {
+async function decodersFor(
+  sink: EncodedPacketSink,
+  config: VideoDecoderConfig,
+  width: number,
+  height: number,
+) {
+  const hardware = await supports(config, 'prefer-hardware');
+  // H.264 codes whole 16-pixel macroblocks: 1080p frames are 1088 rows high.
+  const coded = /^avc[13]\./.test(config.codec) && (width % 16 !== 0 || height % 16 !== 0);
   return {
-    hardware: await supports(config, 'prefer-hardware'),
+    hardware,
     software: await supports(config, 'prefer-software'),
     pixels: width * height,
+    padded: hardware && coded && (await paddingShows(sink, config)),
   };
 }
 
@@ -117,8 +134,13 @@ export class MediaService {
     const video = probed.video;
     const decodable = video?.probe.decodable && video.config ? video : null;
     const decoders = decodable
-      ? await decodersFor(decodable.config!, video!.probe.codedWidth, video!.probe.codedHeight)
-      : { hardware: false, software: false, pixels: 0 };
+      ? await decodersFor(
+          decodable.sink,
+          decodable.config!,
+          video!.probe.codedWidth,
+          video!.probe.codedHeight,
+        )
+      : { hardware: false, software: false, pixels: 0, padded: false };
     const reader = decodable
       ? new VideoReader(
           id,
@@ -128,6 +150,7 @@ export class MediaService {
           this.pool,
           this.cache,
           () => this.noHardware(id),
+          decoders.padded,
         )
       : null;
     this.media.set(id, {
@@ -160,6 +183,7 @@ export class MediaService {
       if (!video.probe.decodable || !video.config)
         throw new Error('The proxy itself cannot be decoded');
       const decoders = await decodersFor(
+        video.sink,
         video.config,
         video.probe.codedWidth,
         video.probe.codedHeight,
@@ -176,6 +200,7 @@ export class MediaService {
         this.pool,
         this.cache,
         () => this.noHardware(id),
+        decoders.padded,
       );
       if (!media.audio) {
         const track = await input.getPrimaryAudioTrack();
@@ -208,7 +233,8 @@ export class MediaService {
     const { sink, index, config } = media.reader;
     // A proxy decodes differently from its original: its decoders are not shared.
     const key = media.proxy ? id + ':proxy' : id;
-    return { key, sink, index, config, hardware: this.useHardware(media.decoders) };
+    const hardware = this.useHardware(media.decoders);
+    return { key, sink, index, config, hardware, padded: media.decoders.padded };
   }
 
   /**
@@ -221,7 +247,9 @@ export class MediaService {
   }
 
   /** The decoder policy: software up to 1080p where the browser has it. */
-  private useHardware({ hardware, software, pixels }: OpenMedia['decoders']) {
+  private useHardware({ hardware, software, pixels, padded }: OpenMedia['decoders']) {
+    // Padded hardware frames are read back to be drawn right: software is quicker.
+    if (this.decode === 'fastest') return hardware && !(padded && software);
     const preferHardware =
       this.decode === 'hardware' ||
       (this.decode === 'auto' && pixels > softwarePixels) ||

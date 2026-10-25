@@ -31,7 +31,7 @@ const api: ExportWorkerApi = {
     await loadPackImages(engine);
     const media = new MediaService(new MediaLibrary(job.platform));
     // Exports wait for every frame, so the decoders' stalls at clip ends cost nothing.
-    media.decode = job.decode && job.decode !== 'auto' ? job.decode : 'hardware';
+    media.decode = job.decode && job.decode !== 'auto' ? job.decode : 'fastest';
     let session: ProjectSession | null = null;
     try {
       const outcomes = await media.import(job.media.map(({ id, source }) => ({ id, source })));

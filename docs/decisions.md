@@ -2,6 +2,18 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-25: Phase 7 findings and defaults
+
+Choices made while building titles, overlays and stickers.
+
+- **The weak last row (Phase 6 gap):** the Phase 6 entry had the cause the wrong way round. Our planes path is right; Chrome's own conversion of hardware frames is wrong.
+  - H.264 codes whole 16-pixel macroblocks, so a 1080p frame is 1088 rows high, with 8 rows of padding below the picture. Chrome converts a hardware frame by sampling chroma across that padding, so the last row shown mixes in a quarter of the padding's colour.
+  - That only shows when the padding differs from the picture's edge. OpenH264 (our test media, and the browsers' software H.264 encoder) pads with black. Media Foundation repeats the edge row, and its files convert exactly.
+  - Each H.264 file whose size is not a multiple of 16 is checked once when it opens: one frame is decoded in hardware, and its last rows shown are compared with its first padding rows (`paddingShows`). HEVC 1080p and VP9 720p hardware frames are not padded on the reference machine.
+  - Files whose padding shows are drawn from their planes. Seeks wait for the frame cache's copy, so there is one readback, not two. Exports decode such files in software (`fastest`), because reading every hardware frame back made a one-minute export take 57 s instead of 12 s. Playback already decodes 1080p in software.
+  - Measured on the GTX 1650: uncached seeks median 70 ms (Chrome) and 60 ms (Edge), as in Phase 3. The one-minute export of the OpenH264 test clip takes 21 s, 2.8× real time (12.4 s and 4.9× before, with the weak row). Files that repeat their edge keep hardware decoding.
+  - Playing and paused frames of the keyframed-transform test now match exactly (mean 0.013 before).
+
 ## 2026-10-25: Phase 7 answers
 
 - **Fonts:** a curated set of about 24 OFL families from `github.com/google/fonts`, roughly 10 MB in the repository.

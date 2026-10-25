@@ -83,6 +83,26 @@ export async function detachFrame(frame: VideoFrame): Promise<VideoFrame> {
   });
 }
 
+/** The parts of a decoder frame `drawsWhole` reads; tests substitute fakes. */
+export type FrameRect = Pick<VideoFrame, 'codedWidth' | 'codedHeight' | 'visibleRect'>;
+
+/**
+ * Whether the browser may draw a hardware decoder frame as it is. Chrome converts
+ * a frame coded larger than it shows (1080p H.264 is coded 1088 rows high) by
+ * sampling chroma across the padding, so its last visible row shows its colour a
+ * quarter weaker. Such frames take their planes, converted by the compositor.
+ */
+export function drawsWhole(frame: FrameRect): boolean {
+  const rect = frame.visibleRect;
+  return (
+    !!rect &&
+    rect.x === 0 &&
+    rect.y === 0 &&
+    rect.width === frame.codedWidth &&
+    rect.height === frame.codedHeight
+  );
+}
+
 export interface Planes {
   width: number;
   height: number;

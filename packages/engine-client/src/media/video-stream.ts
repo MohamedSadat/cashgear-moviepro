@@ -17,6 +17,8 @@ export interface StreamSource {
    * outputs are CPU-backed and are copied to planes for the compositor instead.
    */
   hardware: boolean;
+  /** The browser draws its hardware frames wrongly: they are copied too (see `paddingShows`). */
+  padded: boolean;
 }
 
 /** A decoded frame, ready to draw. */
@@ -161,7 +163,7 @@ export class VideoStream {
       return;
     }
     const managed = ManagedFrame.wrap(frame);
-    if (this.source.hardware && !this.planes) {
+    if (this.gpuFrames) {
       this.add({ frame: number, item: { kind: 'gpu', frame: managed } });
       return;
     }
@@ -206,7 +208,7 @@ export class VideoStream {
     if (this.feeding || this.closed || this.error || (!this.playing && !tick)) return;
     this.feeding = true;
     const epoch = this.epoch;
-    const limit = this.source.hardware && !this.planes ? holdGpu : holdCpu;
+    const limit = this.gpuFrames ? holdGpu : holdCpu;
     let budget = this.playing ? Infinity : upcomingPackets;
     try {
       while (
@@ -276,6 +278,11 @@ export class VideoStream {
     if (this.playing) return;
     this.playing = true;
     void this.pump();
+  }
+
+  /** Decoder outputs are drawn as they are, not copied to planes. */
+  private get gpuFrames() {
+    return this.source.hardware && !this.planes && !this.source.padded;
   }
 
   /** The stream decodes in hardware. */

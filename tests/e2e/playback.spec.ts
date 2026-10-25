@@ -1,4 +1,5 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { compare, passes, type Pixels } from './golden-tools';
@@ -265,6 +266,55 @@ test('the frame drawn while playing matches the frame drawn when paused', async 
   expect(worst).toBeLessThanOrEqual(24);
 });
 
+test('frames coded taller than they show keep the colour of their last row', async ({
+  page,
+}, testInfo) => {
+  const ffmpeg = join(
+    process.env.CGV_FFMPEG_DIR ?? join(process.cwd(), '.tools/ffmpeg/bin'),
+    process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg',
+  );
+  test.skip(
+    !existsSync(ffmpeg) && process.env.CGV_REQUIRE_FFMPEG !== '1',
+    'FFmpeg is missing: run pnpm setup:ffmpeg',
+  );
+  // 1080p H.264 is coded 1088 rows high. Chrome converted such hardware frames
+  // with the padding's chroma in their last row, a quarter weaker.
+  const clip = testInfo.outputPath('red-1080p.mp4');
+  const filter =
+    'color=c=0xC02020:s=1920x1080:r=30,format=yuv420p,' +
+    'setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv';
+  const made = spawnSync(ffmpeg, [
+    ...['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', filter],
+    ...['-t', '1', '-c:v', 'libopenh264', '-b:v', '4M', clip],
+  ]);
+  expect(made.status, made.stderr.toString()).toBe(0);
+  await open(page);
+  await page.getByTestId('media-file-input').setInputFiles(clip);
+  await expect(page.getByTestId('media-item')).toHaveAttribute('data-status', 'ready', {
+    timeout: 60000,
+  });
+  const { project } = await call(page, 'projectSnapshot');
+  const [track] = await tracks(page, 1);
+  await run(page, {
+    type: 'append',
+    track,
+    clip: { media: project.media[0].id, duration: 30 * FRAME },
+  });
+  const rows = (shown: Pixels) =>
+    [1078, 1079].map((row) => {
+      const sum = [0, 0, 0];
+      for (let x = 0; x < shown.width; x++)
+        for (let c = 0; c < 3; c++) sum[c] += shown.data[(row * shown.width + x) * 4 + c];
+      return sum.map((value) => value / shown.width);
+    });
+  // First from the decoder (hardware where it can), then from the frame cache.
+  for (const source of ['decoder', 'cache']) {
+    const [above, last] = rows(await pixels(page, 'renderPixels', 5 * FRAME));
+    for (let c = 0; c < 3; c++)
+      expect(Math.abs(last[c] - above[c]), `${source}, channel ${c}`).toBeLessThanOrEqual(1);
+  }
+});
+
 test('seeks show the frame within 100 ms', async ({ page }, testInfo) => {
   await open(page);
   const [h264] = await importFiles(page, ['h264-1080p30-aac.mp4']);
@@ -438,8 +488,7 @@ test('a keyframed transform plays smoothly and as drawn when paused', async ({
   const { frame, time } = await call(page, 'playbackState');
   const playing = await pixels(page, 'readComposition');
   const paused = await pixels(page, 'renderPixels', time);
-  // Golden tolerance: paused frames are converted from their planes, whose last
-  // row differs a little, which shows along the clip's turned bottom edge.
+  // The paused frame matches the one playback drew, within the golden tolerance.
   const difference = compare(playing, paused);
   await record(testInfo, 'keyframed-transform', {
     seconds,

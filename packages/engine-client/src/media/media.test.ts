@@ -3,7 +3,7 @@ import { readBarcode } from './barcode';
 import { DecoderPool } from './decoder-pool';
 import { FrameCache } from './frame-cache';
 import { FrameIndex } from './frame-index';
-import { ManagedFrame, openFrameCount, type FrameLike } from './frames';
+import { drawsWhole, ManagedFrame, openFrameCount, type FrameLike, type FrameRect } from './frames';
 import { filmstripTimes } from './thumbnail';
 import { decodePcm, PeakAccumulator } from './waveform';
 
@@ -39,6 +39,23 @@ describe('ManagedFrame', () => {
     expect(copy.timestamp).toBe(1000);
     copy.close();
     expect(openFrameCount()).toBe(before);
+  });
+});
+
+describe('drawsWhole', () => {
+  const frame = (codedWidth: number, codedHeight: number, rect: Partial<DOMRectReadOnly>) =>
+    ({
+      codedWidth,
+      codedHeight,
+      visibleRect: { x: 0, y: 0, width: codedWidth, height: codedHeight, ...rect },
+    }) as FrameRect;
+
+  it('draws frames that show all they code, and sends padded ones to their planes', () => {
+    expect(drawsWhole(frame(1280, 720, {}))).toBe(true);
+    expect(drawsWhole(frame(1920, 1088, { height: 1080 }))).toBe(false);
+    expect(drawsWhole(frame(1376, 768, { width: 1366 }))).toBe(false);
+    expect(drawsWhole(frame(1920, 1080, { x: 2, width: 1918 }))).toBe(false);
+    expect(drawsWhole({ codedWidth: 2, codedHeight: 2, visibleRect: null })).toBe(false);
   });
 });
 
