@@ -1,0 +1,358 @@
+{
+  "comment": "Golden renders of titles (tests/e2e/titles.spec.ts); tests/golden/titles/<name>.png is the reference. Projects are 960×540 at 30 fps; each title lasts 2 s over the synthetic sunset and is shown at frame 12. Positions and sizes are project pixels; `transform` is the clip's own.",
+  "fixtures": [
+    {
+      "name": "english-sizes",
+      "elements": [
+        {
+          "id": 1,
+          "x": 0,
+          "y": -170,
+          "fill": { "r": 1, "g": 1, "b": 1 },
+          "type": "text",
+          "text": "The quick brown fox jumps over the lazy dog 0123456789",
+          "font": { "family": "Inter", "weight": 500 },
+          "size": 20
+        },
+        {
+          "id": 2,
+          "x": 0,
+          "y": -80,
+          "fill": { "r": 1, "g": 1, "b": 1 },
+          "type": "text",
+          "text": "Sphinx of black quartz, judge my vow",
+          "font": { "family": "Inter", "weight": 400 },
+          "size": 44
+        },
+        {
+          "id": 3,
+          "x": 0,
+          "y": 60,
+          "fill": { "r": 1, "g": 0.85, "b": 0.3 },
+          "type": "text",
+          "text": "Judge",
+          "font": { "family": "Playfair Display", "weight": 700 },
+          "size": 150
+        },
+        {
+          "id": 4,
+          "x": 0,
+          "y": 200,
+          "fill": { "r": 1, "g": 1, "b": 1 },
+          "type": "text",
+          "text": "Twelve pixels, still readable",
+          "font": { "family": "Inter" },
+          "size": 12
+        }
+      ]
+    },
+    {
+      "name": "arabic-sizes",
+      "elements": [
+        {
+          "id": 1,
+          "x": 0,
+          "y": -180,
+          "fill": { "r": 1, "g": 1, "b": 1 },
+          "type": "text",
+          "text": "نص صغير للتجربة بالخط العربي ١٢٣٤",
+          "font": { "family": "Cairo", "weight": 500 },
+          "size": 22
+        },
+        {
+          "id": 2,
+          "x": 0,
+          "y": -90,
+          "fill": { "r": 1, "g": 1, "b": 1 },
+          "type": "text",
+          "text": "السلام عليكم ورحمة الله",
+          "font": { "family": "Noto Naskh Arabic" },
+          "size": 48
+        },
+        {
+          "id": 3,
+          "x": 0,
+          "y": 70,
+          "fill": { "r": 1, "g": 0.85, "b": 0.3 },
+          "type": "text",
+          "text": "مُحَمَّد لا إله",
+          "font": { "family": "Amiri", "weight": 700 },
+          "size": 120
+        }
+      ]
+    },
+    {
+      "name": "mixed",
+      "elements": [
+        {
+          "id": 1,
+          "x": 0,
+          "y": -150,
+          "fill": { "r": 1, "g": 1, "b": 1 },
+          "type": "text",
+          "text": "Hi مرحبا 42",
+          "font": { "family": "Cairo", "weight": 700 },
+          "size": 64
+        },
+        {
+          "id": 2,
+          "x": 0,
+          "y": -30,
+          "fill": { "r": 1, "g": 1, "b": 1 },
+          "type": "text",
+          "text": "مرحبا Hello 2026",
+          "font": { "family": "Tajawal", "weight": 700 },
+          "size": 64
+        },
+        {
+          "id": 3,
+          "x": 0,
+          "y": 90,
+          "fill": { "r": 0.6, "g": 0.85, "b": 1 },
+          "type": "text",
+          "text": "Title عنوان (fallback)",
+          "font": { "family": "Inter", "weight": 600 },
+          "size": 48
+        },
+        {
+          "id": 4,
+          "x": 0,
+          "y": 190,
+          "fill": { "r": 1, "g": 1, "b": 1 },
+          "type": "text",
+          "text": "اكتب ‏CashGear Video‏ هنا",
+          "font": { "family": "Noto Kufi Arabic" },
+          "size": 36,
+          "direction": "rtl"
+        }
+      ]
+    },
+    {
+      "name": "rotated",
+      "elements": [
+        {
+          "id": 1,
+          "x": 60,
+          "y": -140,
+          "rotation": 15,
+          "fill": { "r": 1, "g": 1, "b": 1 },
+          "type": "text",
+          "text": "Turned 15°",
+          "font": { "family": "Montserrat", "weight": 800 },
+          "size": 72
+        },
+        {
+          "id": 2,
+          "x": 80,
+          "y": 90,
+          "rotation": -30,
+          "fill": { "r": 1, "g": 0.9, "b": 0.4 },
+          "type": "text",
+          "text": "نص مائل",
+          "font": { "family": "Cairo", "weight": 800 },
+          "size": 80
+        },
+        {
+          "id": 3,
+          "x": -380,
+          "y": 0,
+          "rotation": 90,
+          "fill": { "r": 1, "g": 1, "b": 1 },
+          "type": "text",
+          "text": "NINETY",
+          "font": { "family": "Anton" },
+          "size": 64
+        }
+      ]
+    },
+    {
+      "name": "clip-transform",
+      "transform": { "rotation": 20, "scaleX": 1.4, "scaleY": 1.4, "x": 30, "y": -20 },
+      "elements": [
+        {
+          "id": 1,
+          "x": 0,
+          "y": 0,
+          "fill": { "r": 1, "g": 1, "b": 1 },
+          "stroke": { "color": { "r": 0.1, "g": 0.1, "b": 0.3 }, "width": 4 },
+          "type": "text",
+          "text": "Whole title turned",
+          "font": { "family": "Poppins", "weight": 700 },
+          "size": 56
+        }
+      ]
+    },
+    {
+      "name": "styled",
+      "elements": [
+        {
+          "id": 1,
+          "x": 0,
+          "y": -150,
+          "fill": { "r": 1, "g": 0.82, "b": 0.25 },
+          "stroke": { "color": { "r": 0, "g": 0, "b": 0 }, "width": 8 },
+          "shadow": { "color": { "r": 0, "g": 0, "b": 0, "a": 0.7 }, "x": 6, "y": 8, "blur": 10 },
+          "type": "text",
+          "text": "Outline & shadow",
+          "font": { "family": "Poppins", "weight": 800 },
+          "size": 72
+        },
+        {
+          "id": 2,
+          "x": 0,
+          "y": 20,
+          "fill": { "r": 1, "g": 1, "b": 1 },
+          "type": "text",
+          "text": "Captions sit on boxes of their own, line by line",
+          "font": { "family": "Inter", "weight": 600 },
+          "size": 30,
+          "wrap": 520,
+          "background": {
+            "color": { "r": 0, "g": 0, "b": 0, "a": 0.65 },
+            "padding": 8,
+            "radius": 4,
+            "perLine": true
+          }
+        },
+        {
+          "id": 3,
+          "x": 0,
+          "y": 170,
+          "fill": { "r": 1, "g": 1, "b": 1 },
+          "shadow": {
+            "color": { "r": 0.13, "g": 0.9, "b": 1, "a": 0.9 },
+            "x": 0,
+            "y": 0,
+            "blur": 18
+          },
+          "type": "text",
+          "text": "عرض خاص",
+          "font": { "family": "Lalezar" },
+          "size": 72,
+          "background": { "color": { "r": 0.9, "g": 0.22, "b": 0.27 }, "padding": 14, "radius": 12 }
+        }
+      ]
+    },
+    {
+      "name": "shapes",
+      "elements": [
+        {
+          "id": 1,
+          "x": -300,
+          "y": -120,
+          "fill": { "r": 0.2, "g": 0.6, "b": 1 },
+          "stroke": { "color": { "r": 1, "g": 1, "b": 1 }, "width": 4 },
+          "type": "shape",
+          "kind": "rectangle",
+          "width": 220,
+          "height": 130,
+          "radius": 20
+        },
+        {
+          "id": 2,
+          "x": 0,
+          "y": -120,
+          "fill": { "r": 1, "g": 0.4, "b": 0.5, "a": 0.8 },
+          "type": "shape",
+          "kind": "ellipse",
+          "width": 200,
+          "height": 130
+        },
+        {
+          "id": 3,
+          "x": 300,
+          "y": -120,
+          "fill": { "r": 1, "g": 1, "b": 1 },
+          "rotation": -20,
+          "type": "shape",
+          "kind": "line",
+          "width": 220,
+          "height": 10
+        },
+        {
+          "id": 4,
+          "x": -300,
+          "y": 120,
+          "fill": { "r": 1, "g": 0.85, "b": 0.2 },
+          "shadow": { "color": { "r": 0, "g": 0, "b": 0, "a": 0.6 }, "x": 6, "y": 6, "blur": 6 },
+          "type": "shape",
+          "kind": "arrow",
+          "width": 220,
+          "height": 90
+        },
+        {
+          "id": 5,
+          "x": 0,
+          "y": 120,
+          "fill": { "r": 0.3, "g": 0.9, "b": 0.5 },
+          "type": "shape",
+          "kind": "polygon",
+          "width": 150,
+          "height": 150,
+          "sides": 6
+        },
+        {
+          "id": 6,
+          "x": 300,
+          "y": 120,
+          "fill": { "r": 1, "g": 0.85, "b": 0.3 },
+          "stroke": { "color": { "r": 0.6, "g": 0.3, "b": 0 }, "width": 3 },
+          "type": "shape",
+          "kind": "star",
+          "width": 160,
+          "height": 160,
+          "sides": 5,
+          "inner": 0.45
+        }
+      ]
+    },
+    {
+      "name": "reveals",
+      "elements": [
+        {
+          "id": 1,
+          "x": 0,
+          "y": -100,
+          "fill": { "r": 1, "g": 1, "b": 1 },
+          "type": "text",
+          "text": "بسم الله نبدأ",
+          "font": { "family": "Noto Naskh Arabic", "weight": 700 },
+          "size": 80,
+          "reveal": 0.5
+        },
+        {
+          "id": 2,
+          "x": 0,
+          "y": 90,
+          "fill": { "r": 1, "g": 1, "b": 1 },
+          "type": "text",
+          "text": "One two three four",
+          "font": { "family": "Oswald", "weight": 600 },
+          "size": 80,
+          "reveal": 0.6,
+          "revealBy": "word"
+        }
+      ]
+    },
+    {
+      "name": "emoji",
+      "elements": [
+        {
+          "id": 1,
+          "x": 0,
+          "y": 0,
+          "fill": { "r": 1, "g": 1, "b": 1 },
+          "type": "text",
+          "text": "Hello 🙂🎬⭐",
+          "font": { "family": "Inter", "weight": 700 },
+          "size": 90
+        }
+      ]
+    },
+    {
+      "name": "template-lower-third",
+      "template": "lower-bilingual",
+      "elements": []
+    }
+  ]
+}
