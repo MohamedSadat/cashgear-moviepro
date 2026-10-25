@@ -1,3 +1,4 @@
+import type { FontFamilyEntry } from '../fonts/catalog';
 import type { MediaSourceRef } from '../media/types';
 import type { BackendPreference, MediaPlatformKind } from '../types';
 import type { ExportSettings } from './settings';
@@ -13,6 +14,8 @@ export interface ExportJob {
   backend: BackendPreference;
   /** Diagnostics: force the export's decoders to software or hardware. */
   decode?: 'auto' | 'software' | 'hardware';
+  /** Font families beyond the bundled ones (imported, installed); the page's by default. */
+  fonts?: FontFamilyEntry[];
 }
 
 /** Where the export worker writes the file. */

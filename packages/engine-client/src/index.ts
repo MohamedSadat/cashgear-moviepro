@@ -30,7 +30,8 @@ export {
 } from './project/persistence';
 export { renderPreviews, type PreviewRequest } from './effects/previews';
 export { fontCatalog } from './fonts/loader';
-export type { FontFamilyInfo, FontOrigin, FontScript } from './fonts/catalog';
+export { importFont, importedFonts } from './fonts/imported';
+export type { FontFamilyEntry, FontFamilyInfo, FontOrigin, FontScript } from './fonts/catalog';
 export { probeEncoders, type EncoderSupport } from './export/capabilities';
 export {
   clearOpfsExports,

@@ -1,4 +1,5 @@
 import { proxy, releaseProxy, wrap } from 'comlink';
+import { fontCatalog } from '../fonts/loader';
 import { opfsExportFolder } from './targets';
 import type {
   ExportJob,
@@ -42,7 +43,10 @@ export function startExport(
     write:
       handlers.write && ((position: number, data: Uint8Array) => handlers.write!(position, data)),
   });
-  const result = Promise.race([api.run(job, target, events), crashed]).finally(() => {
+  const result = Promise.race([
+    api.run({ ...job, fonts: job.fonts ?? fontCatalog().extras() }, target, events),
+    crashed,
+  ]).finally(() => {
     api[releaseProxy]();
     worker.terminate();
   });

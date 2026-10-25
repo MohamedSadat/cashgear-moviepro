@@ -22,6 +22,7 @@ const api: ExportWorkerApi = {
   async run(job, target, events) {
     if (started) throw new Error('This export worker has already run');
     started = true;
+    fontCatalog().addEntries(job.fonts ?? []);
     await initWasm({ module_or_path: new URL('../pkg/cgv_wasm_bg.wasm', import.meta.url) });
     // The engine renders off screen: its canvas is never shown.
     const engine = await Engine.create(

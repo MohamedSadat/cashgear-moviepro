@@ -2,6 +2,7 @@
 // off-screen canvas draws each effect and transition on two sample pictures, so
 // the previews show what the shaders really do without touching the monitor.
 import { expose } from 'comlink';
+import type { FontFamilyEntry } from '../fonts/catalog';
 import { FontLoader, fontCatalog } from '../fonts/loader';
 import initWasm, { Engine, ProjectSession } from '../pkg/cgv_wasm';
 import type { FramePlan, LayerPlan, LutPlan, PlanStep } from '../playback/types';
@@ -99,7 +100,9 @@ const api: PreviewWorkerApi = {
     requests: PreviewRequest[],
     size: { width: number; height: number },
     backend: 'auto' | 'webgl2',
+    extraFonts: FontFamilyEntry[],
   ) {
+    fontCatalog().addEntries(extraFonts);
     await initWasm({ module_or_path: new URL('../pkg/cgv_wasm_bg.wasm', import.meta.url) });
     const engine = await Engine.create(new OffscreenCanvas(16, 16), backend, () => {});
     const session = new ProjectSession('previews', 'Previews');

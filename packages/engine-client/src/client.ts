@@ -1,5 +1,6 @@
 import { releaseProxy, transfer, wrap } from 'comlink';
 import { AudioOutput } from './audio/output';
+import { fontCatalog } from './fonts/loader';
 import type { PlaybackState } from './playback/types';
 import type { EngineApi, EngineEvent, FrameStats, InitOptions } from './types';
 
@@ -41,6 +42,13 @@ export function createEngineClient(onError: (message: string) => void): EngineCl
   let noticeListener: ((message: string) => void) | null = null;
   let output: AudioOutput | null = null;
   let audioSetup: Promise<void> = Promise.resolve();
+  // The worker's fonts follow this page's catalogue (imported and installed families).
+  const fonts = fontCatalog();
+  const sendFonts = () => {
+    if (!disposed) void api.addFonts(fonts.extras()).catch(() => {});
+  };
+  if (fonts.extras().length) sendFonts();
+  const stopFonts = fonts.subscribe(sendFonts);
   worker.addEventListener('message', (event: MessageEvent<EngineEvent | undefined>) => {
     if (disposed || !event.data || typeof event.data !== 'object') return;
     const data = event.data;
@@ -111,6 +119,7 @@ export function createEngineClient(onError: (message: string) => void): EngineCl
     dispose() {
       if (disposed) return;
       disposed = true;
+      stopFonts();
       statsListener = null;
       playbackListener = null;
       noticeListener = null;

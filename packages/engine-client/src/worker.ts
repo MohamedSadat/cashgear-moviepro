@@ -220,6 +220,12 @@ const api: EngineApi = {
     return JSON.parse(effects_catalog()) as CatalogEntry[];
   },
   builtinLooks: () => builtinLooks(),
+  addFonts(entries) {
+    fontCatalog().addEntries(entries);
+    // A title drawn with a fallback font may now have its own.
+    playback?.invalidate();
+    return Promise.resolve();
+  },
 
   // Sound may be set up before the renderer starts (the project opens first).
   async attachAudio(buffer, sampleRate, channels) {

@@ -1,3 +1,4 @@
+import type { FontFamilyEntry } from './fonts/catalog';
 import type {
   FrameReadback,
   ImportOutcome,
@@ -115,6 +116,8 @@ export interface EngineApi {
   /** Every effect and transition the engine runs. */
   effectsCatalog(): Promise<CatalogEntry[]>;
   builtinLooks(): Promise<LookInfo[]>;
+  /** Adds font families that are not bundled (imported, installed) for titles to use. */
+  addFonts(entries: FontFamilyEntry[]): Promise<void>;
 
   /** Gives the worker the sound ring the page's audio output plays. */
   attachAudio(buffer: SharedArrayBuffer, sampleRate: number, channels: number): Promise<void>;

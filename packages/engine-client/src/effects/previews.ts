@@ -1,4 +1,6 @@
 import { releaseProxy, wrap } from 'comlink';
+import type { FontFamilyEntry } from '../fonts/catalog';
+import { fontCatalog } from '../fonts/loader';
 import type { Title } from '../project/title';
 import type { Params } from '../project/types';
 import type { EffectKind } from './types';
@@ -25,6 +27,8 @@ export interface PreviewWorkerApi {
     requests: PreviewRequest[],
     size: { width: number; height: number },
     backend: 'auto' | 'webgl2',
+    /** Families beyond the bundled ones (imported, installed). */
+    fonts: FontFamilyEntry[],
   ): Promise<(Blob | null)[]>;
 }
 
@@ -49,7 +53,10 @@ export async function renderPreviews(
     }),
   );
   try {
-    return await Promise.race([api.render(requests, size, backend), crashed]);
+    return await Promise.race([
+      api.render(requests, size, backend, fontCatalog().extras()),
+      crashed,
+    ]);
   } finally {
     api[releaseProxy]();
     worker.terminate();

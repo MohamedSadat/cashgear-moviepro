@@ -35,6 +35,15 @@ export interface FontFile {
   load(): Promise<Uint8Array>;
 }
 
+/**
+ * A family that is not bundled, as threads pass it to each other: its files are
+ * fetched from `url` (an installed font, through the desktop's media protocol)
+ * or read from the origin-private file system at `opfs` (an imported one).
+ */
+export interface FontFamilyEntry extends FontFamilyInfo {
+  files: { source: string; url?: string; opfs?: string }[];
+}
+
 /** The folder `pnpm fetch-fonts` keeps a family in. */
 function folder(family: string) {
   return family.toLowerCase().replaceAll(' ', '-');
@@ -46,8 +55,32 @@ async function fetchBytes(url: string): Promise<Uint8Array> {
   return new Uint8Array(await response.arrayBuffer());
 }
 
+async function opfsBytes(path: string): Promise<Uint8Array> {
+  const parts = path.split('/');
+  const name = parts.pop()!;
+  let directory = await navigator.storage.getDirectory();
+  for (const part of parts) directory = await directory.getDirectoryHandle(part);
+  const file = await (await directory.getFileHandle(name)).getFile();
+  return new Uint8Array(await file.arrayBuffer());
+}
+
+function entryFiles(entry: FontFamilyEntry): FontFile[] {
+  return entry.files.map(({ source, url, opfs }) => ({
+    source,
+    load: () =>
+      url
+        ? fetchBytes(url)
+        : opfs
+          ? opfsBytes(opfs)
+          : Promise.reject(new Error(`${source} has no file`)),
+  }));
+}
+
 export class FontCatalog {
   private families = new Map<string, { info: FontFamilyInfo; files: FontFile[] }>();
+  /** Families added from elsewhere (imported, installed), to pass on to other workers. */
+  private entries = new Map<string, FontFamilyEntry>();
+  private listeners = new Set<() => void>();
 
   /** The bundled families, ready to fetch. */
   static bundled(): FontCatalog {
@@ -75,6 +108,35 @@ export class FontCatalog {
     if (known)
       known.files.push(...files.filter((f) => !known.files.some((k) => k.source === f.source)));
     else this.families.set(key, { info, files: [...files] });
+  }
+
+  /** Adds families that are not bundled (or more files of them). */
+  addEntries(entries: FontFamilyEntry[]) {
+    for (const entry of entries) {
+      const key = entry.family.toLowerCase();
+      if (this.families.get(key)?.info.origin === 'bundled') continue;
+      const known = this.entries.get(key);
+      const files = [
+        ...(known?.files ?? []),
+        ...entry.files.filter((f) => !known?.files.some((k) => k.source === f.source)),
+      ];
+      const merged = { ...(known ?? entry), files };
+      this.entries.set(key, merged);
+      const { family, script, origin } = merged;
+      this.add({ family, script, origin }, entryFiles(merged));
+    }
+    for (const listener of this.listeners) listener();
+  }
+
+  /** The families added from elsewhere, for another worker's catalogue. */
+  extras(): FontFamilyEntry[] {
+    return [...this.entries.values()];
+  }
+
+  /** Calls `listener` whenever families are added; returns the unsubscribe. */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => void this.listeners.delete(listener);
   }
 
   has(family: string): boolean {
