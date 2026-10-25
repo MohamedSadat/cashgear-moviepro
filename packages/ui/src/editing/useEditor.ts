@@ -1,8 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
-import type { Clip, ClipSpec, Command, Project, Track, Transition } from '@cgv/engine-client';
+import {
+  FLICKS_PER_SECOND,
+  type Clip,
+  type ClipSpec,
+  type Command,
+  type Project,
+  type Track,
+  type Transition,
+} from '@cgv/engine-client';
 import type { Catalog, CatalogItem } from '../effects/catalog';
 import type { PlaybackControls } from '../monitor/usePlayback';
 import type { ProjectState } from '../project/useProject';
+import { soundMediaId, soundRequest, type Sound } from '../sounds/catalog';
 import type { ActionId } from '../shortcuts/keymap';
 import { findClip, projectEnd, withPartners } from '../timeline/controller';
 import {
@@ -57,6 +66,11 @@ export interface EditorState {
   addTitle(template: TitleTemplate, time?: number, track?: number): Promise<void>;
   /** Adds `sticker` (importing it the first time) at `time` on `track`, or above the others. */
   addSticker(sticker: Sticker, time?: number, track?: number): Promise<void>;
+  /**
+   * Adds `sound` from the library at `time` (the playhead) on `track`; music goes
+   * on a free Music track (a new one if none is free), effects above the others.
+   */
+  addSound(sound: Sound, time?: number, track?: number): Promise<void>;
   tool: Tool;
   setTool(tool: Tool): void;
   snapping: boolean;
@@ -269,6 +283,50 @@ export function useEditor(
     [addGenerated],
   );
 
+  const addSound = useCallback(async (sound: Sound, time?: number, track?: number) => {
+    const { project, playback, current } = state.current;
+    if (!current) return;
+    const id = soundMediaId(sound);
+    if (!current.media.some((media) => media.id === id))
+      await project.importRequests([soundRequest(sound)]);
+    const frame = frameDuration(current.settings.frameRate);
+    const at = Math.round((time ?? playback.state?.time ?? 0) / frame) * frame;
+    const duration = Math.max(
+      frame,
+      Math.floor((sound.seconds * FLICKS_PER_SECOND) / frame) * frame,
+    );
+    const music = sound.kind === 'music';
+    const free = (t: Track) =>
+      t.id !== current.mainTrack &&
+      !t.locked &&
+      t.clips.every((c) => c.start + c.duration <= at || c.start >= at + duration);
+    const onto =
+      track ??
+      (music
+        ? current.tracks.find((t) => t.role === 'music' && free(t))?.id
+        : [...current.tracks].reverse().find((t) => free(t) && (t.role ?? 'none') !== 'music')
+            ?.id) ??
+      null;
+    const created = await project.transaction(`Add ${sound.name.toLowerCase()}`, async (step) => {
+      let target = onto;
+      if (target === null) {
+        [target] = await step({
+          type: 'addTrack',
+          index: current.tracks.length,
+          name: music ? 'Music' : 'Sounds',
+        });
+        if (music) await step({ type: 'setTrackSound', track: target, sound: { role: 'music' } });
+      }
+      return step({
+        type: 'overwrite',
+        track: target,
+        at,
+        clip: { media: id, duration, video: false, audio: true },
+      });
+    });
+    if (created?.length) setSelection([created[0]]);
+  }, []);
+
   const playhead = useCallback(() => state.current.playback.state?.time ?? 0, []);
 
   const run = useCallback(
@@ -406,6 +464,7 @@ export function useEditor(
     addAdjustmentLayer,
     addTitle,
     addSticker,
+    addSound,
     tool,
     setTool,
     snapping: options.snapping,

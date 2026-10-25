@@ -1,0 +1,375 @@
+{
+  "comment": "The built-in sound library, written by scripts/make-sounds.mjs: synthesised, so no licences are involved.",
+  "sounds": [
+    {
+      "id": "whoosh",
+      "name": "Whoosh",
+      "kind": "effect",
+      "category": "Transitions",
+      "file": "sounds/whoosh.webm",
+      "bytes": 12303,
+      "seconds": 1.2
+    },
+    {
+      "id": "swoosh",
+      "name": "Swoosh",
+      "kind": "effect",
+      "category": "Transitions",
+      "file": "sounds/swoosh.webm",
+      "bytes": 5132,
+      "seconds": 0.45
+    },
+    {
+      "id": "riser",
+      "name": "Riser",
+      "kind": "effect",
+      "category": "Transitions",
+      "file": "sounds/riser.webm",
+      "bytes": 34271,
+      "seconds": 3.2
+    },
+    {
+      "id": "downlifter",
+      "name": "Downlifter",
+      "kind": "effect",
+      "category": "Transitions",
+      "file": "sounds/downlifter.webm",
+      "bytes": 35076,
+      "seconds": 2.5
+    },
+    {
+      "id": "reverse-cymbal",
+      "name": "Reverse cymbal",
+      "kind": "effect",
+      "category": "Transitions",
+      "file": "sounds/reverse-cymbal.webm",
+      "bytes": 19027,
+      "seconds": 2
+    },
+    {
+      "id": "impact",
+      "name": "Impact",
+      "kind": "effect",
+      "category": "Impacts",
+      "file": "sounds/impact.webm",
+      "bytes": 27852,
+      "seconds": 2.5
+    },
+    {
+      "id": "hit",
+      "name": "Hit",
+      "kind": "effect",
+      "category": "Impacts",
+      "file": "sounds/hit.webm",
+      "bytes": 7411,
+      "seconds": 0.45
+    },
+    {
+      "id": "boom",
+      "name": "Deep boom",
+      "kind": "effect",
+      "category": "Impacts",
+      "file": "sounds/boom.webm",
+      "bytes": 43187,
+      "seconds": 3
+    },
+    {
+      "id": "glitch",
+      "name": "Glitch",
+      "kind": "effect",
+      "category": "Impacts",
+      "file": "sounds/glitch.webm",
+      "bytes": 11741,
+      "seconds": 0.6
+    },
+    {
+      "id": "tape-stop",
+      "name": "Tape stop",
+      "kind": "effect",
+      "category": "Impacts",
+      "file": "sounds/tape-stop.webm",
+      "bytes": 11727,
+      "seconds": 1
+    },
+    {
+      "id": "click",
+      "name": "Click",
+      "kind": "effect",
+      "category": "Interface",
+      "file": "sounds/click.webm",
+      "bytes": 1533,
+      "seconds": 0.03
+    },
+    {
+      "id": "pop",
+      "name": "Pop",
+      "kind": "effect",
+      "category": "Interface",
+      "file": "sounds/pop.webm",
+      "bytes": 2757,
+      "seconds": 0.12
+    },
+    {
+      "id": "ding",
+      "name": "Ding",
+      "kind": "effect",
+      "category": "Interface",
+      "file": "sounds/ding.webm",
+      "bytes": 40867,
+      "seconds": 1.8
+    },
+    {
+      "id": "chime",
+      "name": "Chime",
+      "kind": "effect",
+      "category": "Interface",
+      "file": "sounds/chime.webm",
+      "bytes": 39856,
+      "seconds": 2
+    },
+    {
+      "id": "notification",
+      "name": "Notification",
+      "kind": "effect",
+      "category": "Interface",
+      "file": "sounds/notification.webm",
+      "bytes": 16402,
+      "seconds": 0.8
+    },
+    {
+      "id": "success",
+      "name": "Success",
+      "kind": "effect",
+      "category": "Interface",
+      "file": "sounds/success.webm",
+      "bytes": 26573,
+      "seconds": 1.5
+    },
+    {
+      "id": "error",
+      "name": "Error",
+      "kind": "effect",
+      "category": "Interface",
+      "file": "sounds/error.webm",
+      "bytes": 13989,
+      "seconds": 0.6
+    },
+    {
+      "id": "coin",
+      "name": "Coin",
+      "kind": "effect",
+      "category": "Interface",
+      "file": "sounds/coin.webm",
+      "bytes": 13434,
+      "seconds": 0.5
+    },
+    {
+      "id": "typing",
+      "name": "Typing",
+      "kind": "effect",
+      "category": "Interface",
+      "file": "sounds/typing.webm",
+      "bytes": 35353,
+      "seconds": 2
+    },
+    {
+      "id": "shutter",
+      "name": "Camera shutter",
+      "kind": "effect",
+      "category": "Interface",
+      "file": "sounds/shutter.webm",
+      "bytes": 6894,
+      "seconds": 0.35
+    },
+    {
+      "id": "swipe",
+      "name": "Swipe",
+      "kind": "effect",
+      "category": "Interface",
+      "file": "sounds/swipe.webm",
+      "bytes": 3140,
+      "seconds": 0.25
+    },
+    {
+      "id": "boing",
+      "name": "Boing",
+      "kind": "effect",
+      "category": "Comedy",
+      "file": "sounds/boing.webm",
+      "bytes": 12967,
+      "seconds": 0.9
+    },
+    {
+      "id": "slide-whistle",
+      "name": "Slide whistle",
+      "kind": "effect",
+      "category": "Comedy",
+      "file": "sounds/slide-whistle.webm",
+      "bytes": 20887,
+      "seconds": 1.2
+    },
+    {
+      "id": "drum-roll",
+      "name": "Drum roll",
+      "kind": "effect",
+      "category": "Comedy",
+      "file": "sounds/drum-roll.webm",
+      "bytes": 24122,
+      "seconds": 2.6
+    },
+    {
+      "id": "ta-da",
+      "name": "Ta-da",
+      "kind": "effect",
+      "category": "Comedy",
+      "file": "sounds/ta-da.webm",
+      "bytes": 28896,
+      "seconds": 2
+    },
+    {
+      "id": "laser",
+      "name": "Laser",
+      "kind": "effect",
+      "category": "Comedy",
+      "file": "sounds/laser.webm",
+      "bytes": 6879,
+      "seconds": 0.4
+    },
+    {
+      "id": "rain",
+      "name": "Rain",
+      "kind": "effect",
+      "category": "Nature",
+      "file": "sounds/rain.webm",
+      "bytes": 89385,
+      "seconds": 8
+    },
+    {
+      "id": "wind",
+      "name": "Wind",
+      "kind": "effect",
+      "category": "Nature",
+      "file": "sounds/wind.webm",
+      "bytes": 77319,
+      "seconds": 8
+    },
+    {
+      "id": "heartbeat",
+      "name": "Heartbeat",
+      "kind": "effect",
+      "category": "Nature",
+      "file": "sounds/heartbeat.webm",
+      "bytes": 48946,
+      "seconds": 3
+    },
+    {
+      "id": "clock",
+      "name": "Clock ticking",
+      "kind": "effect",
+      "category": "Nature",
+      "file": "sounds/clock.webm",
+      "bytes": 87981,
+      "seconds": 4
+    },
+    {
+      "id": "sunny-steps",
+      "name": "Sunny Steps",
+      "kind": "music",
+      "category": "Upbeat",
+      "bpm": 120,
+      "file": "sounds/sunny-steps.webm",
+      "bytes": 445671,
+      "seconds": 34
+    },
+    {
+      "id": "lofi-evening",
+      "name": "Lo-fi Evening",
+      "kind": "music",
+      "category": "Chill",
+      "bpm": 80,
+      "file": "sounds/lofi-evening.webm",
+      "bytes": 571070,
+      "seconds": 38.5
+    },
+    {
+      "id": "corporate-bright",
+      "name": "Corporate Bright",
+      "kind": "music",
+      "category": "Business",
+      "bpm": 110,
+      "file": "sounds/corporate-bright.webm",
+      "bytes": 553519,
+      "seconds": 36.909
+    },
+    {
+      "id": "ambient-drift",
+      "name": "Ambient Drift",
+      "kind": "music",
+      "category": "Ambient",
+      "bpm": 60,
+      "file": "sounds/ambient-drift.webm",
+      "bytes": 626976,
+      "seconds": 44
+    },
+    {
+      "id": "cinematic-rise",
+      "name": "Cinematic Rise",
+      "kind": "music",
+      "category": "Cinematic",
+      "bpm": 90,
+      "file": "sounds/cinematic-rise.webm",
+      "bytes": 591643,
+      "seconds": 46.667
+    },
+    {
+      "id": "boom-bap",
+      "name": "Boom Bap",
+      "kind": "music",
+      "category": "Hip-hop",
+      "bpm": 90,
+      "file": "sounds/boom-bap.webm",
+      "bytes": 588010,
+      "seconds": 44.667
+    },
+    {
+      "id": "electro-pulse",
+      "name": "Electro Pulse",
+      "kind": "music",
+      "category": "Electronic",
+      "bpm": 124,
+      "file": "sounds/electro-pulse.webm",
+      "bytes": 462476,
+      "seconds": 32.968
+    },
+    {
+      "id": "acoustic-morning",
+      "name": "Acoustic Morning",
+      "kind": "music",
+      "category": "Acoustic",
+      "bpm": 100,
+      "file": "sounds/acoustic-morning.webm",
+      "bytes": 528672,
+      "seconds": 40.9
+    },
+    {
+      "id": "happy-ukulele",
+      "name": "Happy Ukulele",
+      "kind": "music",
+      "category": "Acoustic",
+      "bpm": 128,
+      "file": "sounds/happy-ukulele.webm",
+      "bytes": 535645,
+      "seconds": 32
+    },
+    {
+      "id": "suspense-pulse",
+      "name": "Suspense Pulse",
+      "kind": "music",
+      "category": "Cinematic",
+      "bpm": 100,
+      "file": "sounds/suspense-pulse.webm",
+      "bytes": 467635,
+      "seconds": 31.8
+    }
+  ]
+}

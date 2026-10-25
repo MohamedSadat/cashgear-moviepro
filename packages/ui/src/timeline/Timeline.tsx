@@ -407,6 +407,7 @@ export function Timeline({
         editorRef.current.addTitle(template, time, track ?? undefined),
       addSticker: (sticker, time, track) =>
         editorRef.current.addSticker(sticker, time, track ?? undefined),
+      addSound: (sound, time, track) => editorRef.current.addSound(sound, time, track ?? undefined),
       scrolled: (top) => {
         if (headers.current) headers.current.style.transform = `translateY(${-top}px)`;
       },

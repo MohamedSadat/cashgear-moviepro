@@ -22,6 +22,7 @@ import {
 } from '../editing/transitions';
 import type { CatalogItem } from '../effects/catalog';
 import type { DraggedEffect } from '../effects/dragging';
+import type { Sound } from '../sounds/catalog';
 import { stickerDuration, type Sticker } from '../stickers/catalog';
 import type { TitleTemplate } from '../titles/templates';
 import { effectDragType } from '../effects/dragging';
@@ -99,6 +100,7 @@ export interface TimelineHost {
   addAdjustmentLayer(time: number, track: number | null): Promise<void>;
   addTitle(template: TitleTemplate, time: number, track: number | null): Promise<void>;
   addSticker(sticker: Sticker, time: number, track: number | null): Promise<void>;
+  addSound(sound: Sound, time: number, track: number | null): Promise<void>;
   /** Vertical scroll, for the track headers. */
   scrolled(scrollTop: number): void;
   /** The zoom changed, in pixels per second. */
@@ -959,7 +961,12 @@ export class TimelineController {
     const { x, y } = this.local(event);
     const time = xToTime(this.view, x);
     const row = rowAt(this.rows, this.view, y);
-    if (dragged.kind === 'adjustment' || dragged.kind === 'title' || dragged.kind === 'sticker') {
+    if (
+      dragged.kind === 'adjustment' ||
+      dragged.kind === 'title' ||
+      dragged.kind === 'sticker' ||
+      dragged.kind === 'sound'
+    ) {
       // Clips without media go on a free track, or a new one, never the main track.
       const frame = this.frame(project);
       const above = aboveRows(this.rows, this.view, y);
@@ -971,7 +978,12 @@ export class TimelineController {
           ? Math.round((dragged.template.seconds * FLICKS_PER_SECOND) / frame) * frame
           : dragged.kind === 'sticker'
             ? Math.round(stickerDuration / frame) * frame
-            : adjustmentDuration;
+            : dragged.kind === 'sound'
+              ? Math.max(
+                  frame,
+                  Math.floor((dragged.sound.seconds * FLICKS_PER_SECOND) / frame) * frame,
+                )
+              : adjustmentDuration;
       return { adjustment: { row: main ? null : row, start, duration } };
     }
     if (!row || row.track.locked) return null;
@@ -1025,6 +1037,8 @@ export class TimelineController {
         return this.host.addTitle(dragged.template, at.adjustment.start, track);
       if (dragged.kind === 'sticker')
         return this.host.addSticker(dragged.sticker, at.adjustment.start, track);
+      if (dragged.kind === 'sound')
+        return this.host.addSound(dragged.sound, at.adjustment.start, track);
       return this.host.addAdjustmentLayer(at.adjustment.start, track);
     }
     if (dragged.kind !== 'item') return;

@@ -14,5 +14,9 @@ export default defineConfig({
   server: { host: '127.0.0.1', port: 5173, strictPort: true, headers },
   preview: { host: '127.0.0.1', port: 4173, strictPort: true, headers },
   worker: { format: 'es' },
-  build: { target: 'es2022' },
+  build: {
+    target: 'es2022',
+    // Pack media (sounds, stickers) stay files, however small: projects name them by path.
+    assetsInlineLimit: (file) => (/\/assets\/(sounds|stickers)\//.test(file) ? false : undefined),
+  },
 });

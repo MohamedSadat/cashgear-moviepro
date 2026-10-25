@@ -37,6 +37,11 @@ export interface EngineClient {
   openMicrophone(options?: MicrophoneOptions): Promise<Microphone>;
   /** Plays sound through output device `deviceId` ('' for the system's default). */
   setOutputDevice(deviceId: string): Promise<void>;
+  /**
+   * Plays a sound file (a library preview) once; another call, or null, stops
+   * it. `onEnded` runs when it finishes by itself. Call it from a user gesture.
+   */
+  previewSound(url: string | null, onEnded?: () => void): Promise<void>;
   dispose(): void;
 }
 
@@ -53,6 +58,7 @@ export function createEngineClient(onError: (message: string) => void): EngineCl
   let noticeListener: ((message: string) => void) | null = null;
   let metersListener: ((reading: MeterReading | null) => void) | null = null;
   let output: AudioOutput | null = null;
+  let preview: AudioBufferSourceNode | null = null;
   let audioSetup: Promise<void> = Promise.resolve();
   // The worker's fonts follow this page's catalogue (imported and installed families).
   const fonts = fontCatalog();
@@ -143,6 +149,29 @@ export function createEngineClient(onError: (message: string) => void): EngineCl
       await audioSetup;
       if (!output) throw new Error('Sound is not set up.');
       await output.setDevice(deviceId);
+    },
+    async previewSound(url, onEnded) {
+      const playing = preview;
+      preview = null;
+      playing?.stop();
+      if (!url) return;
+      await audioSetup;
+      if (!output) throw new Error('Sound is not set up.');
+      output.resume();
+      const context = output.audioContext;
+      const buffer = await context.decodeAudioData(await (await fetch(url)).arrayBuffer());
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(context.destination);
+      source.onended = () => {
+        if (preview !== source) return;
+        preview = null;
+        onEnded?.();
+      };
+      // Another preview may have started while this one decoded.
+      (preview as AudioBufferSourceNode | null)?.stop();
+      preview = source;
+      source.start();
     },
     dispose() {
       if (disposed) return;

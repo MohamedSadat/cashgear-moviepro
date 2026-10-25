@@ -1,7 +1,7 @@
 // The built-in stickers: animated WebP files in assets/stickers, listed in its
 // stickers.json (scripts/make-stickers.mjs writes both). A sticker in a project is
 // media of the app's pack, found again by its path wherever the project opens.
-import { FLICKS_PER_SECOND, type ImportRequest, type MediaSourceRef } from '@cgv/engine-client';
+import { FLICKS_PER_SECOND, type ImportRequest } from '@cgv/engine-client';
 
 interface ManifestSticker {
   id: string;
@@ -41,20 +41,16 @@ export const stickerScale = 0.35;
 /** The project media id of a sticker: the same each time it is added. */
 export const stickerMediaId = (sticker: Sticker) => `sticker-${sticker.id}`;
 
-/** Where the engine reads pack file `path` (under assets) in this build, or null. */
-export function packSource(path: string): Extract<MediaSourceRef, { kind: 'pack' }> | null {
-  const sticker = stickers.find((s) => s.file === path);
-  if (!sticker) return null;
-  return {
-    kind: 'pack',
-    path: sticker.file,
-    url: sticker.url,
-    name: `${sticker.id}.webp`,
-    size: sticker.bytes,
-  };
-}
-
 /** The import of `sticker` into the project's media. */
 export function stickerRequest(sticker: Sticker): ImportRequest {
-  return { id: stickerMediaId(sticker), source: packSource(sticker.file)! };
+  return {
+    id: stickerMediaId(sticker),
+    source: {
+      kind: 'pack',
+      path: sticker.file,
+      url: sticker.url,
+      name: `${sticker.id}.webp`,
+      size: sticker.bytes,
+    },
+  };
 }

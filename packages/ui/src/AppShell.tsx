@@ -14,6 +14,7 @@ import { DevOverlay } from './DevOverlay';
 import { useCatalog } from './effects/catalog';
 import { EffectsBrowser } from './effects/EffectsBrowser';
 import { usePreviews } from './effects/usePreviews';
+import { SoundsBrowser } from './sounds/SoundsBrowser';
 import { StickersBrowser } from './stickers/StickersBrowser';
 import { TitlesBrowser } from './titles/TitlesBrowser';
 import { useTitlePreviews } from './titles/useTitlePreviews';
@@ -308,7 +309,9 @@ export function AppShell({ platform }: Props) {
         library={
           <LibraryTabs
             onSelect={(id) =>
-              id === 'titles' ? setTitling(true) : id !== 'media' && setBrowsing(true)
+              id === 'titles'
+                ? setTitling(true)
+                : ['effects', 'transitions'].includes(id) && setBrowsing(true)
             }
             tabs={[
               {
@@ -325,6 +328,16 @@ export function AppShell({ platform }: Props) {
                 id: 'stickers',
                 label: 'Stickers',
                 render: () => <StickersBrowser editor={editor} />,
+              },
+              {
+                id: 'music',
+                label: 'Music',
+                render: () => <SoundsBrowser editor={editor} client={client} kind="music" />,
+              },
+              {
+                id: 'sounds',
+                label: 'Sounds',
+                render: () => <SoundsBrowser editor={editor} client={client} kind="effect" />,
               },
               {
                 id: 'effects',

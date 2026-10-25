@@ -36,7 +36,7 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `cgv-denoise`: noise reduction (`nnnoiseless`) as a WASM module of its own (`src/pkg/denoise/`), run in a worker that starts when a clip first asks for it. It is too big for the engine's budget.
   - `cgv-time`, `cgv-model`, `cgv-media`, `cgv-audio`.
 - `assets/`: the built-in pack, embedded at build time. One folder per effect or transition (`effect.json` and `effect.wgsl`, plus any images) in `effects/` and `transitions/`; looks in `luts/`. `assets/README.md` is the authoring guide; `scripts/make-effect-assets.mjs` makes the looks and gradients.
-  - `fonts/` (OFL families listed in `fonts.json`, from `pnpm fetch-fonts`), `titles/` (30 templates, from `scripts/make-title-templates.mjs`) and `stickers/` (animated WebP and `stickers.json`, from `scripts/make-stickers.mjs`). Templates are bundled into the UI; font and sticker files are build assets, fetched when used, and never inside the WASM.
+  - `fonts/` (OFL families listed in `fonts.json`, from `pnpm fetch-fonts`), `titles/` (30 templates, from `scripts/make-title-templates.mjs`), `stickers/` (animated WebP and `stickers.json`, from `scripts/make-stickers.mjs`) and `sounds/` (music and sound effects as Opus WebM and `sounds.json`, synthesised by `scripts/make-sounds.mjs`). Templates are bundled into the UI; font, sticker and sound files are build assets, fetched when used, and never inside the WASM.
 - `packages/engine-client`: engine worker, comlink client, frame loop and capability probe. Generated bindings go in `src/pkg/` (gitignored).
   - `media/`: Mediabunny demuxing, WebCodecs decoder sessions, the decoder pool, the frame cache, frame-accurate seeks and probes.
   - `jobs/`: the thumbnail and waveform worker.
@@ -56,6 +56,7 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `inspector/`: clip fields with stopwatches (`fields.tsx`), the effect stack, the curve lane and the transition inspector.
   - `effects/`: the catalogue hook, the effects and transitions browser, and keyframe helpers. `editing/transitions.ts` finds cuts and transition windows.
   - `titles/` (the browser, templates, animation presets and fonts), `inspector/TitleInspector.tsx` and `stickers/`.
+  - `mixer/` (the mixer panel, meters and their ballistics), `voiceover/` (recording) and `sounds/` (the Music and Sounds tabs).
   - `shortcuts/` (the key map, presets and settings dialog), `workspace/` (resizable panels and library tabs) and `settings/` (per-user settings in `localStorage`).
   - `export/`: the export dialog, its form rules and `useExport`.
 - `apps/web`: Vite app.

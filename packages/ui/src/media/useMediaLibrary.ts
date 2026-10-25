@@ -1,4 +1,4 @@
-import { packSource } from '../stickers/catalog';
+import { packSource } from './pack';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createJobsClient,
