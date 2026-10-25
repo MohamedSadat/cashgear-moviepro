@@ -23,6 +23,8 @@ import { useExport, type ExportState } from './export/useExport';
 import { icons } from './icons';
 import { Inspector } from './inspector/Inspector';
 import { MediaLibraryPanel } from './media/MediaLibraryPanel';
+import { MixerPanel } from './mixer/MixerPanel';
+import { useMeters, type MeterStore } from './mixer/useMeters';
 import { TransportBar } from './monitor/TransportBar';
 import { usePlayback, type PlaybackControls } from './monitor/usePlayback';
 import type { MediaLibraryState } from './media/useMediaLibrary';
@@ -60,6 +62,7 @@ export interface DiagnosticHooks {
   editor: EditorState;
   exporter: ExportState;
   platform: MediaPlatform;
+  meters: MeterStore;
 }
 
 const defaultAutosaveMs = 30_000;
@@ -100,6 +103,7 @@ export function AppShell({ platform }: Props) {
   const project = useProject(client, platform, { autosaveMs: options.autosaveMs });
   const library = project.library;
   const playback = usePlayback(client, project);
+  const meters = useMeters(client, options.diagnostic);
   const { settings, update, saveLayout } = useAppSettings();
   const catalog = useCatalog(client);
   const editor = useEditor(project, playback, {
@@ -178,9 +182,10 @@ export function AppShell({ platform }: Props) {
       editor,
       exporter,
       platform,
+      meters,
     };
     Reflect.set(window, '__cgv', hooks);
-  }, [options.diagnostic, client, library, project, playback, editor, exporter, platform]);
+  }, [options.diagnostic, client, library, project, playback, editor, exporter, platform, meters]);
 
   const gpu: EngineGpu =
     engine.status === 'ready'
@@ -320,7 +325,20 @@ export function AppShell({ platform }: Props) {
           />
         }
         monitor={monitor}
-        inspector={<Inspector editor={editor} />}
+        inspector={
+          <LibraryTabs
+            label="Inspector and mixer"
+            name="side"
+            tabs={[
+              { id: 'inspector', label: 'Inspector', render: () => <Inspector editor={editor} /> },
+              {
+                id: 'mixer',
+                label: 'Mixer',
+                render: () => <MixerPanel editor={editor} meters={meters} />,
+              },
+            ]}
+          />
+        }
         timeline={<Timeline editor={editor} diagnostic={options.diagnostic} />}
         layout={settings.layout}
         onLayout={saveLayout}

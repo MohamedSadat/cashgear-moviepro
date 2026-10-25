@@ -1456,3 +1456,205 @@ body,
   border: 0;
   cursor: pointer;
 }
+
+/* ---- Mixer and meters ---- */
+
+:root {
+  --cgv-meter-bg: #101216;
+  --cgv-meter-low: #3fbf7f;
+  --cgv-meter-mid: #e5c94b;
+  --cgv-meter-high: #ef5a5a;
+  --cgv-meter-rms: rgb(255 255 255 / 0.28);
+  --cgv-meter-hold: #f4f6fa;
+}
+
+.cgv-mixer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+  background: var(--cgv-panel);
+  font-size: 12px;
+}
+
+.cgv-mixer h3 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cgv-muted);
+}
+
+.cgv-mixer p {
+  margin: 0;
+}
+
+.cgv-mixer-master,
+.cgv-mixer-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--cgv-border);
+  border-radius: 6px;
+}
+
+.cgv-mixer-strip[data-silenced='true'] {
+  opacity: 0.55;
+}
+
+.cgv-mixer-strip-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cgv-mixer-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cgv-mixer-role {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cgv-mixer-role select {
+  flex: 1;
+  min-width: 0;
+}
+
+.cgv-mixer-toggle {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.cgv-mixer-toggle[aria-pressed='true'] {
+  background: var(--cgv-danger);
+  border-color: var(--cgv-danger);
+  color: #fff;
+}
+
+.cgv-mixer-solo[aria-pressed='true'] {
+  background: var(--cgv-warn);
+  border-color: var(--cgv-warn);
+  color: #1b1e24;
+}
+
+.cgv-mixer-fields,
+.cgv-mixer-ducking {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cgv-meter {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 16px;
+  padding-bottom: 12px;
+}
+
+.cgv-meter-channel {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--cgv-meter-bg);
+}
+
+/* The bar is a fixed gradient, revealed up to the level. */
+.cgv-meter-peak {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to right,
+    var(--cgv-meter-low) 0%,
+    var(--cgv-meter-low) 66.7%,
+    var(--cgv-meter-mid) 76.2%,
+    var(--cgv-meter-high) 95.2%
+  );
+  clip-path: inset(0 100% 0 0);
+}
+
+.cgv-meter-rms {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  width: 0;
+  background: var(--cgv-meter-rms);
+}
+
+.cgv-meter-hold {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--cgv-meter-hold);
+}
+
+.cgv-meter-scale {
+  position: absolute;
+  right: 16px;
+  bottom: 0;
+  left: 0;
+  height: 10px;
+  font-size: 8px;
+  color: var(--cgv-muted);
+}
+
+.cgv-meter-scale span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+.cgv-meter-clip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 12px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--cgv-border);
+  border-radius: 2px;
+  background: var(--cgv-meter-bg);
+}
+
+.cgv-meter-clip[data-on='true'] {
+  background: var(--cgv-meter-high);
+}
+
+.cgv-loudness {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cgv-loudness-value {
+  display: flex;
+  flex-direction: column;
+}
+
+.cgv-solo-letter {
+  font-size: 10px;
+  font-weight: 700;
+}

@@ -169,6 +169,19 @@ function TrackHeader({
           {track.muted ? icons.muted : icons.sound}
         </Toggle>
         <Toggle
+          label={`${track.solo ? 'Unsolo' : 'Solo'} ${label}`}
+          pressed={!!track.solo}
+          onClick={() =>
+            void project.execute({
+              type: 'setTrackSound',
+              track: track.id,
+              sound: { solo: !track.solo },
+            })
+          }
+        >
+          <span className="cgv-solo-letter">S</span>
+        </Toggle>
+        <Toggle
           label={`${track.hidden ? 'Show' : 'Hide'} ${label}`}
           pressed={track.hidden}
           onClick={() =>

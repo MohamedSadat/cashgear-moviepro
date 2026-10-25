@@ -45,6 +45,25 @@ describe('meter readings', () => {
     expect(queue.at(5000)).toBeNull();
   });
 
+  it('keep the highest peak of the readings a display skipped', () => {
+    const reading = (sample: number, peak: number): MeterReading => ({
+      sample,
+      momentary: sample,
+      shortTerm: 0,
+      integrated: 0,
+      master: { peak: [peak, peak / 2], rms: [peak / 4, peak / 4] },
+      tracks: [{ id: 3, level: { peak: [peak, peak], rms: [0, 0] } }],
+    });
+    const queue = new MeterQueue();
+    queue.push([reading(480, 0.2), reading(960, 0.9), reading(1440, 0.1)]);
+    const shown = queue.at(1500)!;
+    expect(shown.sample).toBe(1440);
+    expect(shown.momentary).toBe(1440);
+    expect(shown.master.peak).toEqual([0.9, 0.45]);
+    expect(shown.master.rms).toEqual([0.025, 0.025]);
+    expect(shown.tracks[0].level.peak).toEqual([0.9, 0.9]);
+  });
+
   it('show levels in decibels with a floor', () => {
     expect(levelDb(1)).toBe(0);
     expect(levelDb(0.5)).toBeCloseTo(-6.0206, 4);

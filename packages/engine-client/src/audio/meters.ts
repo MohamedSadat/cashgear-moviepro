@@ -50,13 +50,20 @@ export function parseReadings(flat: ArrayLike<number>): MeterReading[] {
   return readings;
 }
 
+const maxPeaks = (a: MeterLevel, b: MeterLevel): MeterLevel => ({
+  peak: [Math.max(a.peak[0], b.peak[0]), Math.max(a.peak[1], b.peak[1])],
+  rms: b.rms,
+});
+
 /**
  * Readings mixed ahead of the speakers, waiting for the moment they are heard.
- * `at(sample)` gives the latest reading at or before the sample heard and drops
- * the older ones.
+ * `at(sample)` gives the latest reading at or before the sample heard, with the
+ * highest peaks of every reading since the last call, so a display that updates
+ * less often than readings come never misses a peak.
  */
 export class MeterQueue {
   private readings: MeterReading[] = [];
+  private last: MeterReading | null = null;
 
   push(readings: MeterReading[]) {
     for (const reading of readings) this.readings.push(reading);
@@ -66,15 +73,26 @@ export class MeterQueue {
 
   clear() {
     this.readings = [];
+    this.last = null;
   }
 
   at(sample: number): MeterReading | null {
-    let index = -1;
-    while (index + 1 < this.readings.length && this.readings[index + 1].sample <= sample) index++;
-    if (index < 0) return null;
-    const reading = this.readings[index];
-    this.readings.splice(0, index);
-    return reading;
+    let count = 0;
+    while (count < this.readings.length && this.readings[count].sample <= sample) count++;
+    if (count === 0) return this.last;
+    const heard = this.readings.splice(0, count);
+    let merged = heard[0];
+    for (const reading of heard.slice(1))
+      merged = {
+        ...reading,
+        master: maxPeaks(merged.master, reading.master),
+        tracks: reading.tracks.map((track) => {
+          const before = merged.tracks.find((t) => t.id === track.id);
+          return before ? { id: track.id, level: maxPeaks(before.level, track.level) } : track;
+        }),
+      };
+    this.last = merged;
+    return merged;
   }
 }
 

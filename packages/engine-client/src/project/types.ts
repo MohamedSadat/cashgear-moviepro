@@ -168,7 +168,14 @@ export interface Clip {
   crop: Crop;
   opacity: number;
   volumeDb: number;
+  /** Sound fades at the start and end, in flicks; missing means none. */
+  fadeIn?: number;
+  fadeOut?: number;
+  /** Noise reduction, 0 (off) to 1. */
+  denoise?: number;
   effects?: Effect[];
+  /** Sound effects, in the order they run, after noise reduction. */
+  audioEffects?: Effect[];
   /**
    * Animated properties by name: `opacity`, `transform.x`, `effects.<id>.<setting>`,
    * `title.<element id>.<setting>`…
@@ -178,6 +185,31 @@ export interface Clip {
   title?: Title;
 }
 
+/** What a track carries, so music can dip under dialogue. */
+export type TrackRole = 'none' | 'dialogue' | 'music' | 'effects';
+
+/** How a music track dips while a dialogue track plays. */
+export interface Ducking {
+  enabled: boolean;
+  /** Decibels down, positive. */
+  amountDb: number;
+  /** Dialogue counts above this level (dBFS RMS). */
+  thresholdDb: number;
+  /** Seconds. */
+  attack: number;
+  hold: number;
+  release: number;
+}
+
+export const defaultDucking: Ducking = {
+  enabled: true,
+  amountDb: 12,
+  thresholdDb: -40,
+  attack: 0.2,
+  hold: 0.3,
+  release: 0.6,
+};
+
 export interface Track {
   id: number;
   /** Empty: shown by position ("Track 2"). */
@@ -185,6 +217,13 @@ export interface Track {
   locked: boolean;
   muted: boolean;
   hidden: boolean;
+  /** Missing values are the defaults: 0 dB, centre, not soloed, no role. */
+  volumeDb?: number;
+  /** -1 (left) to 1 (right). */
+  pan?: number;
+  solo?: boolean;
+  role?: TrackRole;
+  ducking?: Ducking;
   clips: Clip[];
   /** By time. */
   transitions?: Transition[];
@@ -221,6 +260,18 @@ export interface ClipProperties {
   crop?: Partial<Crop>;
   opacity?: number;
   volumeDb?: number;
+  fadeIn?: number;
+  fadeOut?: number;
+  denoise?: number;
+}
+
+/** Track sound settings to change; missing ones stay as they are. */
+export interface TrackSound {
+  volumeDb?: number;
+  pan?: number;
+  solo?: boolean;
+  role?: TrackRole;
+  ducking?: Ducking;
 }
 
 export interface ClipSpec {
@@ -237,6 +288,7 @@ export interface ClipSpec {
   properties?: ClipProperties;
   /** Effects and keyframes, as when pasting a copy. */
   effects?: EffectSpec[];
+  audioEffects?: EffectSpec[];
   keyframes?: Record<string, Keyframe[]>;
   /** What a new title clip draws; its elements get new ids, and keyframes follow them. */
   title?: Title;
@@ -258,6 +310,7 @@ export type Command =
   | { type: 'setTrackLocked'; track: number; locked: boolean }
   | { type: 'setTrackMuted'; track: number; muted: boolean }
   | { type: 'setTrackHidden'; track: number; hidden: boolean }
+  | { type: 'setTrackSound'; track: number; sound: TrackSound }
   | { type: 'insert'; track: number; at: number; clip: ClipSpec }
   | { type: 'overwrite'; track: number; at: number; clip: ClipSpec }
   | { type: 'append'; track: number; clip: ClipSpec }
@@ -274,7 +327,8 @@ export type Command =
   | { type: 'detachAudio'; clip: number; track?: number | null }
   | { type: 'setSpeed'; clip: number; speed: Speed }
   | { type: 'setClipProperties'; clip: number; properties: ClipProperties }
-  | { type: 'addEffect'; clip: number; effect: EffectSpec; index?: number }
+  /** `audio` adds it to the clip's sound effects. */
+  | { type: 'addEffect'; clip: number; effect: EffectSpec; index?: number; audio?: boolean }
   | { type: 'removeEffect'; clip: number; effect: number }
   | { type: 'moveEffect'; clip: number; effect: number; index: number }
   | { type: 'setEffectEnabled'; clip: number; effect: number; enabled: boolean }
