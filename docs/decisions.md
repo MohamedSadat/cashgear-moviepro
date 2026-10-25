@@ -2,6 +2,55 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-25: Phase 7 answers
+
+- **Fonts:** a curated set of about 24 OFL families from `github.com/google/fonts`, roughly 10 MB in the repository.
+  - Arabic: Noto Sans Arabic, Noto Naskh Arabic, Noto Kufi Arabic, Cairo, Tajawal, Almarai, Amiri, Reem Kufi, El Messiri, Lalezar, Changa and Aref Ruqaa.
+  - Latin: Inter, Montserrat, Poppins, Oswald, Bebas Neue, Anton, Playfair Display, Lobster, Pacifico, Caveat, Permanent Marker and Roboto Mono.
+- **Arabic UI:** in Phase 11, before release. The UI stays in English until then; titles support Arabic fully from this phase.
+  - Phase 11 moves the UI's text into a translation file and lays it out right to left in one pass. The timeline still runs left to right.
+- **Stickers:** about 30 built-in stickers as animated WebP with alpha, decoded by `ImageDecoder`, made by our own script.
+  - The art: arrows, callouts, highlights, sparkles, shapes, and emoji animated from Noto Emoji's images (Apache-2.0).
+  - Imports accept GIF, animated WebP, APNG and WebM with alpha. Lottie is evaluated later.
+- **WASM size:** the gzip budget rises from 1.5 MB to 2 MB.
+  - Measured before asking: rustybuzz, `unicode-bidi`, `unicode-linebreak` and a rasteriser add about 284 KB gzipped when built for size.
+  - The text crates are built for size, and the engine is expected at about 1.75 to 1.8 MB.
+
+## 2026-10-25: Phase 7 defaults
+
+These were proposed alongside the questions, and the user raised no objection.
+
+- **First:** fix the Phase 6 gap where paused frames and exports of 4:2:0 video show the bottom row's colour too weak.
+- **Text engine:** Rust, in the engine.
+  - Shaping uses rustybuzz, or HarfRust, its maintained HarfBuzz successor, if that turns out better.
+  - Direction uses `unicode-bidi`, line breaks use `unicode-linebreak`, and fonts are read with `ttf-parser` and `fontdb`.
+- **Drawing text:** each glyph is drawn from its outline at the size it appears, with sizes rounded to sixteenths of an octave as for keyframed layers. No SDF.
+  - SDF rounds corners at 400%. MSDF goes wrong on overlapping contours, which are common in Arabic fonts.
+  - Drawing at the shown size is exact and gives the same picture on every GPU. Effects and the clip's transform then apply as they do to any picture.
+- **Title clips:** a title is a clip without media, like an adjustment layer. The project file moves to format 4, with a migration from format 3.
+  - A title holds one or more text blocks. Each block has one style: font, size, colour, stroke, shadow, background box, alignment, line spacing and letter spacing. Different styles inside a block can come later.
+  - Text is edited in the inspector. A new title lasts 5 s.
+  - Each paragraph takes its direction from its first strong letter, and the direction can be overridden.
+  - Missing glyphs fall back to the bundled Noto fonts. Emoji in titles draw in one colour from Noto Emoji; colour emoji come as stickers.
+- **Animations:** in and out presets (fade, slide, scale) write ordinary keyframes.
+  - Typewriter and word-by-word animate a new "reveal" setting that can be keyframed.
+  - Arabic is revealed by whole shaped clusters, so letters keep their joined forms as they appear.
+- **Templates:** 30 templates, designed by us, as JSON in `assets/titles/`, using bundled fonts only.
+  - A Titles tab shows live previews. A template is used by dragging it or double-clicking it.
+- **Fonts:**
+  - Bundled fonts are committed to `assets/fonts/` with their licence texts. The app downloads each one the first time it is used; none are inside the WASM.
+  - Projects name fonts by family and style.
+  - The desktop app also lists installed fonts. The web app keeps font files the user imports.
+  - A missing font is replaced, with a notice, as missing media is.
+- **Overlays:**
+  - GIF, animated WebP and APNG decode through WebCodecs `ImageDecoder`. They loop over the clip's length, and a new clip lasts one loop.
+  - Shapes: rectangle (with rounded corners), ellipse, line, arrow, polygon and star, styled as titles are.
+- **Tests:**
+  - Arabic, English and mixed text are compared with Chrome's own layout of the same font and text, which uses HarfBuzz and ICU independently of our engine.
+  - Golden renders at several sizes and rotations on both GPU backends.
+  - Sharpness is measured at 4K and at 400%.
+- **Pushing:** one push near the end of the phase, after the user's go-ahead.
+
 ## 2026-10-25: Phase 6 findings and defaults
 
 Choices made while building effects, transitions and keyframes.
