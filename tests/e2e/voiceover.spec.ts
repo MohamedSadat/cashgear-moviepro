@@ -4,10 +4,8 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test';
 
 // Phase 8: voiceovers. Chrome's fake microphone checks the whole flow (open,
 // count down, record while the timeline plays, place the take on a Dialogue
-// track at the playhead). On the reference machine the timeline's own click
-// track is recorded back through the system's sound output (Chrome's
-// system-audio loopback), and the placed take's clicks are measured against
-// the timeline's: the exit criterion of lining up within one frame.
+// track at the playhead). Lining up within one frame through real devices is
+// voiceover-loopback.spec.ts, which needs a loopback from output to input.
 const root = process.cwd();
 const resultsDir = join(root, 'bench/results');
 const FRAME = 23_520_000;
