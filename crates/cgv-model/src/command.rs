@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use crate::animation::{Interpolation, KeyValue, Keyframes};
 use crate::effects::{Alignment, EffectSpec, LutSpec, Params, TransitionSpec};
 use crate::project::{
-    ClipId, ClipKind, Crop, EffectId, LutId, MarkerColor, MarkerId, MediaRef, ProjectSettings,
-    Speed, TrackId, Transform, TransitionId,
+    ClipId, ClipKind, Crop, Ducking, EffectId, LutId, MarkerColor, MarkerId, MediaRef,
+    ProjectSettings, Speed, TrackId, TrackRole, Transform, TransitionId,
 };
 use crate::title::Title;
 
@@ -46,6 +46,9 @@ pub struct ClipSpec {
     /// Effects of the new clip, as when pasting a copy.
     #[serde(default)]
     pub effects: Vec<EffectSpec>,
+    /// Sound effects of the new clip, as when pasting a copy.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audio_effects: Vec<EffectSpec>,
     /// Keyframes of the new clip. Effect settings are named by the ids in `effects`,
     /// and title settings by the element ids in `title`.
     #[serde(default)]
@@ -152,6 +155,30 @@ pub struct ClipProperties {
     pub opacity: Option<f64>,
     #[serde(default)]
     pub volume_db: Option<f64>,
+    /// Sound fades; together at most the clip's length.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fade_in: Option<Flicks>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fade_out: Option<Flicks>,
+    /// Noise reduction, 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub denoise: Option<f64>,
+}
+
+/// Track sound settings to change; missing ones stay as they are.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TrackSound {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume_db: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pan: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub solo: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<TrackRole>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ducking: Option<Ducking>,
 }
 
 /// Every change to a project. Each one either applies completely or fails and
@@ -215,6 +242,11 @@ pub enum Command {
     SetTrackHidden {
         track: TrackId,
         hidden: bool,
+    },
+    /// Volume, pan, solo, role and ducking of a track.
+    SetTrackSound {
+        track: TrackId,
+        sound: TrackSound,
     },
 
     /// Places a clip at `at`, pushing later clips on the track to the right. A clip
@@ -309,12 +341,16 @@ pub enum Command {
         properties: ClipProperties,
     },
 
-    /// Adds an effect to a clip's picture at `index` in its list (the end by default).
+    /// Adds an effect to a clip's picture, or with `audio` to its sound, at
+    /// `index` in that list (the end by default). The other effect commands find
+    /// an effect in either list by its id.
     AddEffect {
         clip: ClipId,
         effect: EffectSpec,
         #[serde(default)]
         index: Option<usize>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        audio: bool,
     },
     /// Removes an effect and its keyframes.
     RemoveEffect {
@@ -480,6 +516,23 @@ impl Command {
             Command::SetTrackMuted { .. } => "Unmute track",
             Command::SetTrackHidden { hidden: true, .. } => "Hide track",
             Command::SetTrackHidden { .. } => "Show track",
+            Command::SetTrackSound {
+                sound: TrackSound {
+                    solo: Some(true), ..
+                },
+                ..
+            } => "Solo track",
+            Command::SetTrackSound {
+                sound: TrackSound {
+                    solo: Some(false), ..
+                },
+                ..
+            } => "Unsolo track",
+            Command::SetTrackSound {
+                sound: TrackSound { role: Some(_), .. },
+                ..
+            } => "Change track role",
+            Command::SetTrackSound { .. } => "Change track sound",
             Command::Insert { .. } => "Insert",
             Command::Overwrite { .. } => "Overwrite",
             Command::Append { .. } => "Add to timeline",
@@ -497,6 +550,7 @@ impl Command {
             Command::DetachAudio { .. } => "Detach audio",
             Command::SetSpeed { .. } => "Change speed",
             Command::SetClipProperties { .. } => "Change clip",
+            Command::AddEffect { audio: true, .. } => "Add sound effect",
             Command::AddEffect { .. } => "Add effect",
             Command::SetTitle { .. } => "Edit title",
             Command::RemoveEffect { .. } => "Remove effect",

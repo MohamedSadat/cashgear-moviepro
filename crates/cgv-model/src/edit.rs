@@ -7,9 +7,10 @@ use cgv_time::Flicks;
 use crate::animation::{
     property_effect, property_element, value_at, Keyframe, Keyframes, Property,
 };
-use crate::command::{ClipProperties, ClipSpec, Command, Edge, Outcome};
+use crate::command::{ClipProperties, ClipSpec, Command, Edge, Outcome, TrackSound};
 use crate::effects::{
-    parse_lut_ref, Alignment, EffectSpec, ParamValue, Transition, TransitionSpec, MAX_EFFECTS,
+    parse_lut_ref, Alignment, Effect, EffectSpec, ParamValue, Transition, TransitionSpec,
+    MAX_EFFECTS,
 };
 use crate::project::{
     Clip, ClipId, ClipKind, Crop, EffectId, ElementId, LinkId, LutId, Marker, MarkerId, Project,
@@ -36,6 +37,7 @@ impl Project {
         };
         edit.run(command)?;
         edit.settle()?;
+        edit.fit_fades();
         edit.normalize_transitions();
         if let Some(id) = edit.required {
             if edit.find_transition(id).is_err() {
@@ -139,6 +141,7 @@ impl Edit {
                 let index = self.track_index(*track)?;
                 self.track_mut(index).hidden = *hidden;
             }
+            Command::SetTrackSound { track, sound } => self.set_track_sound(*track, sound)?,
             Command::Insert { track, at, clip } => self.place(*track, Some(*at), clip, true)?,
             Command::Overwrite { track, at, clip } => self.place(*track, Some(*at), clip, false)?,
             Command::Append { track, clip } => self.place(*track, None, clip, false)?,
@@ -177,11 +180,12 @@ impl Edit {
                 clip,
                 effect,
                 index,
-            } => self.add_effect(*clip, effect, *index)?,
+                audio,
+            } => self.add_effect(*clip, effect, *index, *audio)?,
             Command::RemoveEffect { clip, effect } => {
                 let (index, mut changed) = self.editable(*clip)?;
-                let position = effect_position(&changed, *effect)?;
-                changed.effects.remove(position);
+                let (list, position) = effect_slot(&mut changed, *effect)?;
+                list.remove(position);
                 changed
                     .keyframes
                     .retain(|name, _| property_effect(name) != Some(*effect));
@@ -193,12 +197,12 @@ impl Edit {
                 index: to,
             } => {
                 let (index, mut changed) = self.editable(*clip)?;
-                let position = effect_position(&changed, *effect)?;
-                if *to >= changed.effects.len() {
+                let (list, position) = effect_slot(&mut changed, *effect)?;
+                if *to >= list.len() {
                     return Err(format!("There is no effect position {}", to + 1));
                 }
-                let moved = changed.effects.remove(position);
-                changed.effects.insert(*to, moved);
+                let moved = list.remove(position);
+                list.insert(*to, moved);
                 *self.clip_mut(index, *clip) = changed;
             }
             Command::SetEffectEnabled {
@@ -207,8 +211,8 @@ impl Edit {
                 enabled,
             } => {
                 let (index, mut changed) = self.editable(*clip)?;
-                let position = effect_position(&changed, *effect)?;
-                changed.effects[position].enabled = *enabled;
+                let (list, position) = effect_slot(&mut changed, *effect)?;
+                list[position].enabled = *enabled;
                 *self.clip_mut(index, *clip) = changed;
             }
             Command::SetEffectParams {
@@ -217,8 +221,8 @@ impl Edit {
                 params,
             } => {
                 let (index, mut changed) = self.editable(*clip)?;
-                let position = effect_position(&changed, *effect)?;
-                let target = &mut changed.effects[position];
+                let (list, position) = effect_slot(&mut changed, *effect)?;
+                let target = &mut list[position];
                 for (name, value) in params {
                     target.params.insert(name.clone(), value.clone());
                 }
@@ -231,9 +235,9 @@ impl Edit {
                 params,
             } => {
                 let (index, mut changed) = self.editable(*clip)?;
-                let position = effect_position(&changed, *effect)?;
-                changed.effects[position].params = params.clone();
-                changed.effects[position].check()?;
+                let (list, position) = effect_slot(&mut changed, *effect)?;
+                list[position].params = params.clone();
+                list[position].check()?;
                 changed
                     .keyframes
                     .retain(|name, _| property_effect(name) != Some(*effect));
@@ -774,9 +778,15 @@ impl Edit {
             effect.id = renamed[&effect.id];
         }
         right.keyframes = rename_effects(&right.keyframes, &renamed);
+        for effect in right.audio_effects.iter_mut() {
+            effect.id = EffectId(self.alloc());
+        }
+        // Fades stay at the outer edges; the cut plays straight through.
+        right.fade_in = Flicks::ZERO;
         let track = self.track_mut(index);
         let position = track.position(id).expect("clip on its track");
         track.clips[position].duration = offset;
+        track.clips[position].fade_out = Flicks::ZERO;
         track.clips.insert(position + 1, right);
         // The clip's end is now the right half's.
         for transition in track.transitions.iter_mut() {
@@ -917,12 +927,26 @@ impl Edit {
             crop: Crop::default(),
             opacity: 1.0,
             volume_db: 0.0,
+            fade_in: Flicks::ZERO,
+            fade_out: Flicks::ZERO,
+            denoise: 0.0,
             effects: Vec::new(),
+            audio_effects: Vec::new(),
             keyframes: BTreeMap::new(),
             title: None,
         };
         if let Some(properties) = &spec.properties {
             apply_properties(&mut clip, properties)?;
+        }
+        if !spec.audio_effects.is_empty() && !clip.audio {
+            return Err("A clip without sound has no sound effects".into());
+        }
+        if spec.audio_effects.len() > MAX_EFFECTS {
+            return Err(format!("A clip has at most {MAX_EFFECTS} effects"));
+        }
+        for effect in &spec.audio_effects {
+            let id = EffectId(self.alloc());
+            clip.audio_effects.push(effect.build(id)?);
         }
         // Copied effects get new ids, and their keyframes follow them.
         if spec.effects.len() > MAX_EFFECTS {
@@ -1517,6 +1541,11 @@ impl Edit {
         video.audio = false;
         video.link = Some(link);
         video.keyframes = picture_keys;
+        // Fades, noise reduction and sound effects go with the sound.
+        video.fade_in = Flicks::ZERO;
+        video.fade_out = Flicks::ZERO;
+        video.denoise = 0.0;
+        video.audio_effects = Vec::new();
         self.track_mut(to).insert_sorted(audio);
         self.check_track(to)
     }
@@ -1559,21 +1588,30 @@ impl Edit {
         id: ClipId,
         spec: &EffectSpec,
         index: Option<usize>,
+        audio: bool,
     ) -> Result<(), String> {
         let (track, mut clip) = self.editable(id)?;
-        if !clip.video {
+        if audio && !clip.audio {
+            return Err(format!("Clip {id} has no sound for effects to change"));
+        }
+        if !audio && !clip.video {
             return Err(format!("Clip {id} has no picture for effects to change"));
         }
-        if clip.effects.len() >= MAX_EFFECTS {
+        let effect = spec.build(EffectId(self.alloc()))?;
+        let list = if audio {
+            &mut clip.audio_effects
+        } else {
+            &mut clip.effects
+        };
+        if list.len() >= MAX_EFFECTS {
             return Err(format!("A clip has at most {MAX_EFFECTS} effects"));
         }
-        let index = index.unwrap_or(clip.effects.len());
-        if index > clip.effects.len() {
+        let index = index.unwrap_or(list.len());
+        if index > list.len() {
             return Err(format!("There is no effect position {}", index + 1));
         }
-        let effect = spec.build(EffectId(self.alloc()))?;
         self.created.push(effect.id.0);
-        clip.effects.insert(index, effect);
+        list.insert(index, effect);
         *self.clip_mut(track, id) = clip;
         Ok(())
     }
@@ -1641,6 +1679,50 @@ impl Edit {
         transitions.retain(|t| !(from.is_some() && t.from == from || to.is_some() && t.to == to));
         transitions.push(transition);
         Ok(())
+    }
+
+    fn set_track_sound(&mut self, track: TrackId, sound: &TrackSound) -> Result<(), String> {
+        let index = self.track_index(track)?;
+        if let Some(volume) = sound.volume_db {
+            check_volume(volume)?;
+        }
+        if let Some(pan) = sound.pan {
+            check_pan(pan)?;
+        }
+        if let Some(ducking) = &sound.ducking {
+            ducking.check()?;
+        }
+        let target = self.track_mut(index);
+        if let Some(volume) = sound.volume_db {
+            target.volume_db = volume;
+        }
+        if let Some(pan) = sound.pan {
+            target.pan = pan;
+        }
+        if let Some(solo) = sound.solo {
+            target.solo = solo;
+        }
+        if let Some(role) = sound.role {
+            target.role = role;
+        }
+        if let Some(ducking) = sound.ducking {
+            target.ducking = ducking;
+        }
+        Ok(())
+    }
+
+    /// Shortens fades that no longer fit their clip after a trim or a speed change.
+    fn fit_fades(&mut self) {
+        for index in 0..self.project.tracks.len() {
+            let fits = |clip: &Clip| clip.fade_in + clip.fade_out <= clip.duration;
+            if self.project.tracks[index].clips.iter().all(fits) {
+                continue;
+            }
+            for clip in &mut self.track_mut(index).clips {
+                clip.fade_in = clip.fade_in.min(clip.duration);
+                clip.fade_out = clip.fade_out.min(clip.duration - clip.fade_in);
+            }
+        }
     }
 
     fn set_properties(&mut self, id: ClipId, properties: &ClipProperties) -> Result<(), String> {
@@ -1913,6 +1995,18 @@ fn rename_elements(keyframes: &Keyframes, renamed: &BTreeMap<ElementId, ElementI
         .collect()
 }
 
+/// The list holding effect `id`, the picture's or the sound's, and its place there.
+fn effect_slot(clip: &mut Clip, id: EffectId) -> Result<(&mut Vec<Effect>, usize), String> {
+    if let Some(position) = clip.effects.iter().position(|effect| effect.id == id) {
+        return Ok((&mut clip.effects, position));
+    }
+    let clip_id = clip.id;
+    match clip.audio_effects.iter().position(|effect| effect.id == id) {
+        Some(position) => Ok((&mut clip.audio_effects, position)),
+        None => Err(format!("Clip {clip_id} has no effect {id}")),
+    }
+}
+
 fn effect_position(clip: &Clip, id: EffectId) -> Result<usize, String> {
     clip.effects
         .iter()
@@ -2035,6 +2129,19 @@ fn apply_properties(clip: &mut Clip, properties: &ClipProperties) -> Result<(), 
     if let Some(volume) = properties.volume_db {
         check_volume(volume)?;
     }
+    let fade_in = properties.fade_in.unwrap_or(clip.fade_in);
+    let fade_out = properties.fade_out.unwrap_or(clip.fade_out);
+    let denoise = properties.denoise.unwrap_or(clip.denoise);
+    if fade_in < Flicks::ZERO || fade_out < Flicks::ZERO || fade_in + fade_out > clip.duration {
+        return Err("Fades fit inside the clip".into());
+    }
+    if !(0.0..=1.0).contains(&denoise) {
+        return Err("Noise reduction is from 0 to 1".into());
+    }
+    if !clip.audio && (fade_in != Flicks::ZERO || fade_out != Flicks::ZERO || denoise != 0.0) {
+        return Err(format!("Clip {} has no sound", clip.id));
+    }
+    (clip.fade_in, clip.fade_out, clip.denoise) = (fade_in, fade_out, denoise);
     if let Some(transform) = transform {
         clip.transform = transform;
     }
@@ -2088,6 +2195,13 @@ pub(crate) fn check_crop(c: &Crop) -> Result<(), String> {
 pub(crate) fn check_opacity(opacity: f64) -> Result<(), String> {
     if !(0.0..=1.0).contains(&opacity) {
         return Err("Opacity is from 0 to 1".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn check_pan(pan: f64) -> Result<(), String> {
+    if !(-1.0..=1.0).contains(&pan) {
+        return Err("Pan is from -1 (left) to 1 (right)".into());
     }
     Ok(())
 }

@@ -1234,6 +1234,7 @@ fn clip_properties_are_checked_and_set() {
                 crop: Some(crop.into()),
                 opacity: Some(0.25),
                 volume_db: Some(-6.0),
+                ..ClipProperties::default()
             },
         },
     );
@@ -2046,6 +2047,7 @@ fn save_then_load_gives_an_identical_project() {
                 opacity: Some(0.7),
                 volume_db: Some(-3.0103),
                 crop: None,
+                ..ClipProperties::default()
             },
         },
     );

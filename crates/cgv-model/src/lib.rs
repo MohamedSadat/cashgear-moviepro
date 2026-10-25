@@ -22,7 +22,9 @@ pub use animation::{
     effect_property, property_effect, property_element, value_at, Interpolation, KeyValue,
     Keyframe, Keyframes, Property,
 };
-pub use command::{ClipProperties, ClipSpec, Command, CropPatch, Edge, Outcome, TransformPatch};
+pub use command::{
+    ClipProperties, ClipSpec, Command, CropPatch, Edge, Outcome, TrackSound, TransformPatch,
+};
 pub use edit::SOURCE_SLACK;
 pub use effects::{
     lut_ref, parse_lut_ref, Alignment, Color, Effect, EffectSpec, Lut, LutInfo, LutShape, LutSpec,

@@ -43,6 +43,7 @@ fn add_effect(s: &mut Session, clip: ClipId, kind: &str) -> EffectId {
                 clip,
                 effect: effect(kind),
                 index: None,
+                audio: false,
             },
         )
         .created[0],
@@ -130,6 +131,7 @@ fn effects_are_added_reordered_switched_changed_and_removed() {
                 clip,
                 effect: effect("exposure"),
                 index: Some(0),
+                audio: false,
             },
         )
         .created[0],
@@ -222,6 +224,7 @@ fn effects_need_a_picture_valid_names_and_an_unlocked_track() {
             clip: sound,
             effect: effect("vignette"),
             index: None,
+            audio: false,
         },
         "no picture",
     );
@@ -231,6 +234,7 @@ fn effects_need_a_picture_valid_names_and_an_unlocked_track() {
             clip: video,
             effect: effect("Not A Slug"),
             index: None,
+            audio: false,
         },
         "not an effect name",
     );
@@ -240,6 +244,7 @@ fn effects_need_a_picture_valid_names_and_an_unlocked_track() {
             clip: video,
             effect: effect("vignette"),
             index: Some(3),
+            audio: false,
         },
         "no effect position",
     );

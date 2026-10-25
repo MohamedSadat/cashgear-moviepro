@@ -345,7 +345,12 @@ fn random_spec(project: &Project, rng: &mut Rng) -> ClipSpec {
 fn effects(project: &Project) -> Vec<(ClipId, EffectId)> {
     project
         .clips()
-        .flat_map(|c| c.effects.iter().map(move |e| (c.id, e.id)))
+        .flat_map(|c| {
+            c.effects
+                .iter()
+                .chain(&c.audio_effects)
+                .map(move |e| (c.id, e.id))
+        })
         .collect()
 }
 
@@ -559,7 +564,27 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
         .flat_map(|t| t.transitions.iter().map(|t| t.id))
         .collect();
     let transition = rng.pick(&transitions).unwrap_or(TransitionId(0));
-    match rng.below(124) {
+    match rng.below(127) {
+        124..=126 => Command::SetTrackSound {
+            track,
+            sound: TrackSound {
+                volume_db: rng.percent(40).then(|| rng.range(-40, 12) as f64 * 0.5),
+                pan: rng.percent(30).then(|| rng.range(-12, 12) as f64 / 10.0),
+                solo: rng.percent(30).then(|| rng.percent(50)),
+                role: rng.percent(30).then(|| {
+                    [
+                        TrackRole::None,
+                        TrackRole::Dialogue,
+                        TrackRole::Music,
+                        TrackRole::Effects,
+                    ][rng.below(4) as usize]
+                }),
+                ducking: rng.percent(20).then(|| Ducking {
+                    amount_db: rng.range(0, 70) as f64,
+                    ..Ducking::default()
+                }),
+            },
+        },
         122..=123 => {
             let titles: Vec<&Clip> = project.clips().filter(|c| c.is_title()).collect();
             let target = rng.pick(&titles);
@@ -586,6 +611,7 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
             clip: any_clip,
             effect: effect_spec(rng),
             index: rng.percent(20).then(|| rng.below(3) as usize),
+            audio: rng.percent(40),
         },
         103 => Command::RemoveEffect {
             clip: effect_clip,
@@ -781,6 +807,14 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
                     left: Some(rng.range(0, 40) as f64 / 100.0),
                     ..CropPatch::default()
                 }),
+                // Fades sometimes longer than the clip, which must fail.
+                fade_in: rng
+                    .percent(30)
+                    .then(|| Flicks(rng.range(0, 90) * project.settings.frame_duration().0)),
+                fade_out: rng
+                    .percent(30)
+                    .then(|| Flicks(rng.range(0, 90) * project.settings.frame_duration().0)),
+                denoise: rng.percent(15).then(|| rng.range(0, 12) as f64 / 10.0),
             },
         },
         83..=85 => match rng.below(3) {

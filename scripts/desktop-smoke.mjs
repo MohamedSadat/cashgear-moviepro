@@ -279,7 +279,7 @@ try {
     return (await hooks.client.api.projectSnapshot()).project;
   }, projectPath);
   const file = JSON.parse(await readFile(projectPath, 'utf8'));
-  if (file.format !== 'cashgear-video-project' || file.version !== 4)
+  if (file.format !== 'cashgear-video-project' || file.version !== 5)
     throw new Error('Unexpected project file: ' + JSON.stringify(file).slice(0, 200));
   // The file leaves out an empty LUT list; the snapshot lists LUTs without their data.
   expect({ ...file.project, luts: file.project.luts ?? [] }).toEqual(saved);

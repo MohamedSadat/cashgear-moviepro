@@ -5,7 +5,7 @@ use cgv_time::Flicks;
 
 use crate::animation::{KeyValue, Property};
 use crate::command::Edge;
-use crate::edit::{check_crop, check_opacity, check_transform, check_volume};
+use crate::edit::{check_crop, check_opacity, check_pan, check_transform, check_volume};
 use crate::effects::MAX_EFFECTS;
 use crate::project::{Clip, ClipKind, Project, Speed, Track, MAX_TIME};
 use crate::title::{element_value_ok, Content};
@@ -16,6 +16,24 @@ const MAX_KEYS: usize = 10_000;
 
 /// Effects are for clips with a picture; their settings are well formed.
 pub(crate) fn check_effects(clip: &Clip) -> Result<(), String> {
+    if !clip.audio && clip.has_sound_settings() {
+        return Err(format!("Clip {} has sound settings but no sound", clip.id));
+    }
+    if clip.fade_in < Flicks::ZERO
+        || clip.fade_out < Flicks::ZERO
+        || clip.fade_in + clip.fade_out > clip.duration
+    {
+        return Err(format!("Clip {} has fades that do not fit", clip.id));
+    }
+    if !(0.0..=1.0).contains(&clip.denoise) {
+        return Err(format!("Clip {} has invalid noise reduction", clip.id));
+    }
+    if clip.audio_effects.len() > MAX_EFFECTS {
+        return Err(format!("A clip has at most {MAX_EFFECTS} effects"));
+    }
+    for effect in &clip.audio_effects {
+        effect.check()?;
+    }
     if clip.effects.is_empty() {
         return Ok(());
     }
@@ -232,6 +250,9 @@ pub fn validate(project: &Project) -> Result<(), String> {
     let mut links: BTreeMap<u64, usize> = BTreeMap::new();
     for (index, track) in project.tracks.iter().enumerate() {
         unique(track.id.0, "Track")?;
+        check_volume(track.volume_db)?;
+        check_pan(track.pan)?;
+        track.ducking.check()?;
         for (position, clip) in track.clips.iter().enumerate() {
             unique(clip.id.0, "Clip")?;
             if clip.duration <= Flicks::ZERO || clip.start < Flicks::ZERO || clip.end() > MAX_TIME {
@@ -291,7 +312,7 @@ pub fn validate(project: &Project) -> Result<(), String> {
                 return Err(format!("Clip {} has an invalid speed", clip.id));
             }
             check_effects(clip)?;
-            for effect in &clip.effects {
+            for effect in clip.effects.iter().chain(&clip.audio_effects) {
                 unique(effect.id.0, "Effect")?;
             }
             check_keyframes(clip)?;

@@ -389,6 +389,78 @@ impl MediaRef {
     }
 }
 
+pub(crate) fn is_zero(value: &f64) -> bool {
+    *value == 0.0
+}
+
+fn is_no_time(value: &Flicks) -> bool {
+    *value == Flicks::ZERO
+}
+
+/// What a track carries, so the mixer can lower music under dialogue.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TrackRole {
+    #[default]
+    None,
+    Dialogue,
+    Music,
+    Effects,
+}
+
+impl TrackRole {
+    fn is_none(&self) -> bool {
+        *self == TrackRole::None
+    }
+}
+
+/// How a music track dips while a dialogue track plays.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Ducking {
+    pub enabled: bool,
+    /// How far the music goes down, in decibels (positive).
+    pub amount_db: f64,
+    /// Dialogue counts as speaking above this level (dBFS RMS over 10 ms).
+    pub threshold_db: f64,
+    /// Seconds of the fall, which ends as speech starts.
+    pub attack: f64,
+    /// Seconds speech counts as going on after it stops.
+    pub hold: f64,
+    /// Seconds of the rise after that.
+    pub release: f64,
+}
+
+impl Default for Ducking {
+    fn default() -> Self {
+        Ducking {
+            enabled: true,
+            amount_db: 12.0,
+            threshold_db: -40.0,
+            attack: 0.2,
+            hold: 0.3,
+            release: 0.6,
+        }
+    }
+}
+
+impl Ducking {
+    fn is_default(&self) -> bool {
+        *self == Ducking::default()
+    }
+
+    pub fn check(&self) -> Result<(), String> {
+        let times = [self.attack, self.hold, self.release];
+        if !(0.0..=60.0).contains(&self.amount_db)
+            || !(-80.0..=0.0).contains(&self.threshold_db)
+            || !times.iter().all(|t| (0.0..=10.0).contains(t))
+        {
+            return Err("Ducking settings are out of range".into());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Track {
@@ -398,6 +470,20 @@ pub struct Track {
     pub locked: bool,
     pub muted: bool,
     pub hidden: bool,
+    /// Gain in decibels, after the clips' own.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub volume_db: f64,
+    /// -1 (left) to 1 (right).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub pan: f64,
+    /// While any track is soloed, only soloed tracks are heard.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub solo: bool,
+    #[serde(default, skip_serializing_if = "TrackRole::is_none")]
+    pub role: TrackRole,
+    /// Applies while the track's role is music.
+    #[serde(default, skip_serializing_if = "Ducking::is_default")]
+    pub ducking: Ducking,
     /// By start time; never overlapping.
     pub clips: Vec<Clip>,
     /// Transitions between and at the edges of this track's clips, by time.
@@ -413,6 +499,11 @@ impl Track {
             locked: false,
             muted: false,
             hidden: false,
+            volume_db: 0.0,
+            pan: 0.0,
+            solo: false,
+            role: TrackRole::None,
+            ducking: Ducking::default(),
             clips: Vec::new(),
             transitions: Vec::new(),
         }
@@ -602,9 +693,21 @@ pub struct Clip {
     pub opacity: f64,
     /// Gain in decibels; 0 leaves the sound as recorded.
     pub volume_db: f64,
+    /// Sound fades at the start and end. Without them a clip's edges still get
+    /// a 5 ms ramp, so they never click.
+    #[serde(default, skip_serializing_if = "is_no_time")]
+    pub fade_in: Flicks,
+    #[serde(default, skip_serializing_if = "is_no_time")]
+    pub fade_out: Flicks,
+    /// Noise reduction, 0 (off) to 1 (only the cleaned sound).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub denoise: f64,
     /// Video effects, applied in order to the picture.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<Effect>,
+    /// Sound effects, applied in order to the sound after noise reduction.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audio_effects: Vec<Effect>,
     /// Animated properties by name ([`crate::Property`]).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub keyframes: Keyframes,
@@ -629,6 +732,14 @@ impl Clip {
 
     pub fn end(&self) -> Flicks {
         self.start + self.duration
+    }
+
+    /// Whether the clip has sound settings beyond its volume.
+    pub fn has_sound_settings(&self) -> bool {
+        self.fade_in != Flicks::ZERO
+            || self.fade_out != Flicks::ZERO
+            || self.denoise != 0.0
+            || !self.audio_effects.is_empty()
     }
 
     /// Source time just after the last frame.

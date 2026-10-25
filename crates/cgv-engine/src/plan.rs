@@ -683,6 +683,7 @@ mod tests {
                     params,
                 },
                 index: None,
+                audio: false,
             })
             .unwrap()
             .created[0]
