@@ -136,6 +136,11 @@ export interface EngineApi {
   playbackState(): PlaybackState;
   playbackStats(): PlaybackStatsReport;
   resetPlaybackStats(): void;
+  /**
+   * The timeline sample the sound ring rendered (or will render) at context
+   * frame `frame`, while sound plays; null otherwise. Voiceovers line up by it.
+   */
+  sampleAtContextFrame(frame: number): number | null;
   /** Diagnostics: seeks and resolves once the frame is on the monitor, with the time it took. */
   seekAndWait(time: number): Promise<{ ms: number }>;
   /** Diagnostics: the frame at `time`, composed at full quality, as sRGB RGBA bytes. */

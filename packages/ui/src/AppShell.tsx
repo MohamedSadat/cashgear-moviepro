@@ -25,6 +25,8 @@ import { Inspector } from './inspector/Inspector';
 import { MediaLibraryPanel } from './media/MediaLibraryPanel';
 import { MixerPanel } from './mixer/MixerPanel';
 import { useMeters, type MeterStore } from './mixer/useMeters';
+import { useVoiceover, type VoiceoverState } from './voiceover/useVoiceover';
+import { VoiceoverPanel } from './voiceover/VoiceoverPanel';
 import { TransportBar } from './monitor/TransportBar';
 import { usePlayback, type PlaybackControls } from './monitor/usePlayback';
 import type { MediaLibraryState } from './media/useMediaLibrary';
@@ -63,6 +65,7 @@ export interface DiagnosticHooks {
   exporter: ExportState;
   platform: MediaPlatform;
   meters: MeterStore;
+  voiceover: VoiceoverState;
 }
 
 const defaultAutosaveMs = 30_000;
@@ -104,6 +107,7 @@ export function AppShell({ platform }: Props) {
   const library = project.library;
   const playback = usePlayback(client, project);
   const meters = useMeters(client, options.diagnostic);
+  const voiceover = useVoiceover(client, project, playback, platform);
   const { settings, update, saveLayout } = useAppSettings();
   const catalog = useCatalog(client);
   const editor = useEditor(project, playback, {
@@ -183,9 +187,21 @@ export function AppShell({ platform }: Props) {
       exporter,
       platform,
       meters,
+      voiceover,
     };
     Reflect.set(window, '__cgv', hooks);
-  }, [options.diagnostic, client, library, project, playback, editor, exporter, platform, meters]);
+  }, [
+    options.diagnostic,
+    client,
+    library,
+    project,
+    playback,
+    editor,
+    exporter,
+    platform,
+    meters,
+    voiceover,
+  ]);
 
   const gpu: EngineGpu =
     engine.status === 'ready'
@@ -239,6 +255,7 @@ export function AppShell({ platform }: Props) {
           onState={onState}
           onClient={setClient}
         />
+        <VoiceoverPanel voiceover={voiceover} />
       </div>
       <TransportBar playback={playback} />
     </main>
@@ -339,7 +356,13 @@ export function AppShell({ platform }: Props) {
             ]}
           />
         }
-        timeline={<Timeline editor={editor} diagnostic={options.diagnostic} />}
+        timeline={
+          <Timeline
+            editor={editor}
+            diagnostic={options.diagnostic}
+            onRecord={() => void voiceover.open()}
+          />
+        }
         layout={settings.layout}
         onLayout={saveLayout}
       />

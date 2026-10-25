@@ -10,6 +10,7 @@ pub mod probe;
 pub mod project;
 pub mod proxy;
 pub mod range;
+pub mod recording;
 pub mod registry;
 
 use serde::Serialize;

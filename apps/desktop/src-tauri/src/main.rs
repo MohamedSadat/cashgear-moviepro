@@ -52,6 +52,7 @@ fn main() {
             media::cache_read,
             media::cache_write,
             media::cache_remove,
+            media::recording_save,
             project::project_save,
             project::project_open,
             project::project_read,

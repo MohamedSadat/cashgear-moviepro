@@ -1,6 +1,7 @@
 import { releaseProxy, transfer, wrap } from 'comlink';
 import type { MeterReading } from './audio/meters';
 import { AudioOutput } from './audio/output';
+import { Microphone, type MicrophoneOptions } from './audio/recorder';
 import { fontCatalog } from './fonts/loader';
 import type { PlaybackState } from './playback/types';
 import type { EngineApi, EngineEvent, FrameStats, InitOptions } from './types';
@@ -29,6 +30,13 @@ export interface EngineClient {
   togglePlay(): Promise<void>;
   /** J, K or L; starts the sound device first. */
   shuttle(key: 'j' | 'k' | 'l'): Promise<void>;
+  /**
+   * Opens the microphone in the playback context (asking the user first), for
+   * voiceovers. Call it from a user gesture. Fails without sound set up.
+   */
+  openMicrophone(options?: MicrophoneOptions): Promise<Microphone>;
+  /** Plays sound through output device `deviceId` ('' for the system's default). */
+  setOutputDevice(deviceId: string): Promise<void>;
   dispose(): void;
 }
 
@@ -124,6 +132,17 @@ export function createEngineClient(onError: (message: string) => void): EngineCl
     shuttle(key) {
       output?.resume();
       return api.shuttle(key);
+    },
+    async openMicrophone(options) {
+      await audioSetup;
+      if (!output) throw new Error('Sound is not set up, so nothing can be recorded.');
+      output.resume();
+      return Microphone.open(output.audioContext, options);
+    },
+    async setOutputDevice(deviceId) {
+      await audioSetup;
+      if (!output) throw new Error('Sound is not set up.');
+      await output.setDevice(deviceId);
     },
     dispose() {
       if (disposed) return;

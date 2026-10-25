@@ -94,6 +94,11 @@ export const icons = {
       <path d="M5.5 7V5a2.5 2.5 0 014.8-1" />
     </Icon>
   ),
+  microphone: (
+    <Icon>
+      <path d="M8 2a2 2 0 012 2v4a2 2 0 01-4 0V4a2 2 0 012-2zM4.5 7.5a3.5 3.5 0 007 0M8 11v3M6 14h4" />
+    </Icon>
+  ),
   sound: (
     <Icon>
       <path d="M2.5 6h2.5L8.5 3v10L5 10H2.5zM11 5.5a3.5 3.5 0 010 5M12.5 3.5a6 6 0 010 9" />

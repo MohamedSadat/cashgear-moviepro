@@ -131,6 +131,16 @@ export interface MediaPlatform {
   registerPaths?(paths: string[]): Promise<ImportRequest[]>;
   /** Asks where to save an export. Null when the user cancels. */
   chooseExport(choice: ExportChoice): Promise<ExportDestination | null>;
+  /**
+   * Desktop: keeps a voiceover as a WAV file in a `Voiceovers` folder beside the
+   * project (or in the app's data folder before its first save). The web imports
+   * recordings as files instead.
+   */
+  saveRecording?(
+    name: string,
+    bytes: Uint8Array,
+    projectPath: string | null,
+  ): Promise<ImportRequest>;
   cache: CacheStore;
   nativeInfo(): Promise<NativeInfo | undefined>;
   /** Desktop: the fonts installed on this computer, for titles. */

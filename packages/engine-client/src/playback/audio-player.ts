@@ -1,6 +1,7 @@
 import {
   buffered,
   C,
+  consistent,
   flush,
   H,
   heardFrame,
@@ -146,6 +147,23 @@ export class AudioPlayer {
     const whole = Math.floor(heard);
     const since = ((whole - session.startFrame) | 0) + (heard - whole);
     return since / this.sampleRate;
+  }
+
+  /**
+   * The timeline sample rendered at context frame `frame` (the worklet plays one
+   * ring frame per context frame), while a session plays; null otherwise.
+   */
+  sampleAtContextFrame(frame: number): number | null {
+    const session = this.session;
+    if (!session) return null;
+    const { header, clock } = this.ring;
+    const pair = consistent(header, H.workletSeq, () => ({
+      contextTime: clock[C.contextTime],
+      readFrame: clock[C.readFrame],
+    }));
+    if (!pair || pair.contextTime <= 0) return null;
+    const ringFrame = pair.readFrame + frame - Math.round(pair.contextTime * this.sampleRate);
+    return session.startSample + ((ringFrame - session.startFrame) | 0);
   }
 
   /** The meters for the sound heard at absolute time `nowMs`, while playing. */

@@ -11,7 +11,7 @@ use cgv_native::ffmpeg::Tools;
 use cgv_native::probe::{self, NativeProbe};
 use cgv_native::range::{self, RangeError};
 use cgv_native::registry::{valid_id, RegisteredMedia, Registry};
-use cgv_native::{cache, proxy};
+use cgv_native::{cache, proxy, recording};
 use serde::{Deserialize, Serialize};
 use tauri::http::{header, Request, Response, StatusCode};
 use tauri::ipc::{Channel, InvokeBody};
@@ -281,6 +281,26 @@ pub fn cache_write(
 #[tauri::command]
 pub fn cache_remove(state: State<'_, MediaState>, prefix: String) -> Result<(), String> {
     cache::remove(&state.cache_root, &prefix)
+}
+
+/// Keeps a voiceover the page wrote to cache entry `key`: moves it to the
+/// project's `Voiceovers` folder as `name` and registers it as media.
+#[tauri::command]
+pub fn recording_save(
+    app: AppHandle,
+    state: State<'_, MediaState>,
+    key: String,
+    name: String,
+    project: Option<String>,
+) -> Result<MediaFile, String> {
+    let from = cache::key_path(&state.cache_root, &key)?;
+    let data = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("No app data folder: {error}"))?;
+    let folder = recording::folder(project.as_deref().map(Path::new), &data);
+    let path = recording::keep(&from, &folder, &name)?;
+    register(&state, new_id(), &path)
 }
 
 fn content_type(path: &Path) -> &'static str {

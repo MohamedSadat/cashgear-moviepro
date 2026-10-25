@@ -49,6 +49,11 @@ export class AudioOutput {
     return this.context.sampleRate;
   }
 
+  /** The playback context, for the microphone, so recordings share its clock. */
+  get audioContext() {
+    return this.context;
+  }
+
   /** Starts the device. Call it from a user gesture, as autoplay rules require. */
   resume() {
     if (this.context.state === 'suspended') void this.context.resume().then(() => this.report());
@@ -65,6 +70,14 @@ export class AudioOutput {
     });
     ring.clock[C.running] = this.context.state === 'running' ? 1 : 0;
     ring.clock[C.outputLatency] = this.context.outputLatency ?? this.context.baseLatency ?? 0;
+  }
+
+  /** Plays through output device `deviceId` ('' is the system's default). */
+  async setDevice(deviceId: string) {
+    const context = this.context as AudioContext & { setSinkId?(id: string): Promise<void> };
+    if (!context.setSinkId) throw new Error('This browser cannot choose the sound output.');
+    await context.setSinkId(deviceId);
+    this.report();
   }
 
   close() {

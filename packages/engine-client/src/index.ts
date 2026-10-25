@@ -1,6 +1,13 @@
 export { createEngineClient, type EngineClient } from './client';
 export { levelDb, type MeterLevel, type MeterReading } from './audio/meters';
 export {
+  encodeWav,
+  recordingOffset,
+  type Microphone,
+  type MicrophoneOptions,
+  type Recording,
+} from './audio/recorder';
+export {
   evaluateCapabilities,
   probeCapabilities,
   type CapabilityIssue,

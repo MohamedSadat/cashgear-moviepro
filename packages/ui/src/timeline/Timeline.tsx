@@ -294,7 +294,16 @@ const ClipList = memo(function ClipList({
  * playhead; React draws the toolbar, track headers, menus and an accessible
  * list of the clips. Every change is an engine command.
  */
-export function Timeline({ editor, diagnostic }: { editor: EditorState; diagnostic?: boolean }) {
+export function Timeline({
+  editor,
+  diagnostic,
+  onRecord,
+}: {
+  editor: EditorState;
+  diagnostic?: boolean;
+  /** Opens the voiceover panel. */
+  onRecord?(): void;
+}) {
   const { project, playback } = editor;
   const snapshot = project.snapshot;
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -539,6 +548,16 @@ export function Timeline({ editor, diagnostic }: { editor: EditorState; diagnost
         >
           {icons.marker}
         </ToolButton>
+        {onRecord && (
+          <ToolButton
+            label="Record a voiceover"
+            onClick={onRecord}
+            disabled={disabled}
+            testId="record-voiceover"
+          >
+            {icons.microphone}
+          </ToolButton>
+        )}
         <span className="cgv-toolbar-separator" />
         <ToolButton
           label="Magnetic main track"

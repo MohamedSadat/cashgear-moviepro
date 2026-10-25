@@ -279,6 +279,17 @@ export const desktopPlatform: MediaPlatform = {
     await invoke('media_drop_proxy', { id });
   },
 
+  async saveRecording(name, bytes, projectPath) {
+    const key = `recordings/${crypto.randomUUID()}.wav`;
+    await invoke('cache_write', bytes, { headers: { 'x-cache-key': key } });
+    const media = await invoke<RegisteredMedia>('recording_save', {
+      key,
+      name,
+      project: projectPath,
+    });
+    return toRequest(media);
+  },
+
   async registerPaths(paths) {
     const media = await invoke<RegisteredMedia[]>('media_register', {
       files: paths.map((path) => ({ path })),

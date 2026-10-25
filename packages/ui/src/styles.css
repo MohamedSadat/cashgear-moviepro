@@ -363,6 +363,7 @@ body,
 
 /* Letterboxes a 16:9 program monitor inside whatever space the stage leaves. */
 .cgv-monitor-area {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: grid;
@@ -1658,4 +1659,109 @@ body,
 .cgv-solo-letter {
   font-size: 10px;
   font-weight: 700;
+}
+
+/* ---- Voiceover ---- */
+
+.cgv-voiceover {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(280px, calc(100% - 24px));
+  padding: 10px 12px;
+  border: 1px solid var(--cgv-border);
+  border-radius: 8px;
+  background: var(--cgv-panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+  font-size: 12px;
+}
+
+.cgv-voiceover p {
+  margin: 0;
+}
+
+.cgv-voiceover-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cgv-voiceover-head h3 {
+  flex: 1;
+  margin: 0;
+  font-size: 13px;
+}
+
+.cgv-mic-dot,
+.cgv-recording-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--cgv-muted);
+}
+
+.cgv-recording-dot {
+  background: var(--cgv-danger);
+  animation: cgv-blink 1s steps(2, start) infinite;
+}
+
+@keyframes cgv-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+.cgv-voiceover-device {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cgv-input-meter {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--cgv-meter-bg);
+}
+
+.cgv-input-meter div {
+  height: 100%;
+  background: linear-gradient(
+    to right,
+    var(--cgv-meter-low) 0%,
+    var(--cgv-meter-low) 66.7%,
+    var(--cgv-meter-mid) 76.2%,
+    var(--cgv-meter-high) 95.2%
+  );
+  background-size: 280px 100%;
+}
+
+.cgv-voiceover-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cgv-record-button {
+  min-width: 90px;
+  border-color: var(--cgv-danger);
+  background: var(--cgv-danger);
+  color: #fff;
+  font-weight: 600;
+}
+
+.cgv-countdown {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  font-size: min(30cqh, 160px);
+  font-weight: 700;
+  color: rgb(255 255 255 / 0.9);
+  text-shadow: 0 4px 24px rgb(0 0 0 / 0.8);
+  pointer-events: none;
 }
