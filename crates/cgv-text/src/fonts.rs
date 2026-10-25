@@ -6,6 +6,7 @@ use rustybuzz::ttf_parser::{self, name_id, Language, Style, Tag};
 use rustybuzz::{Face, Variation};
 
 const WGHT: Tag = Tag::from_bytes(b"wght");
+const OPSZ: Tag = Tag::from_bytes(b"opsz");
 
 /// Where letters a font lacks come from: Arabic, then Latin, Greek and
 /// Cyrillic, then emoji (in one colour). All are bundled.
@@ -27,13 +28,17 @@ struct Loaded {
     /// Font files stay loaded for the engine's life, so faces can borrow them.
     data: &'static [u8],
     index: u32,
+    /// The optical size axis's range, when the font has one.
+    optical: Option<(f32, f32)>,
 }
 
-/// A loaded face at one weight: what shaping and drawing use.
+/// A loaded face at one weight (and optical size): what shaping and drawing use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FaceKey {
     face: u32,
     weight: u16,
+    /// The optical size set, or 0 for the font's default.
+    opsz: u16,
 }
 
 /// A face found for a request, and whether it must be slanted to look italic.
@@ -111,6 +116,11 @@ impl Fonts {
                     (weight, weight)
                 }
             };
+            let optical = face
+                .variation_axes()
+                .into_iter()
+                .find(|axis| axis.tag == OPSZ)
+                .map(|axis| (axis.min_value, axis.max_value));
             parsed.push((
                 index,
                 FaceInfo {
@@ -118,12 +128,18 @@ impl Fonts {
                     weights,
                     italic: face.style() != Style::Normal,
                 },
+                optical,
             ));
         }
         let data: &'static [u8] = Box::leak(data.into_boxed_slice());
-        let infos = parsed.iter().map(|(_, info)| info.clone()).collect();
-        for (index, info) in parsed {
-            self.faces.push(Loaded { info, data, index });
+        let infos = parsed.iter().map(|(_, info, _)| info.clone()).collect();
+        for (index, info, optical) in parsed {
+            self.faces.push(Loaded {
+                info,
+                data,
+                index,
+                optical,
+            });
         }
         self.sources.insert(source.to_string());
         self.generation += 1;
@@ -181,9 +197,22 @@ impl Fonts {
             key: FaceKey {
                 face: index as u32,
                 weight: weight.clamp(lo, hi.max(lo)),
+                opsz: 0,
             },
             synthetic_italic,
         })
+    }
+
+    /// `key` with its optical size set for text `size` pixels tall, as browsers
+    /// do by default (`font-optical-sizing: auto`), when the font has the axis.
+    pub fn at_size(&self, key: FaceKey, size: f32) -> FaceKey {
+        match self.faces[key.face as usize].optical {
+            Some((lo, hi)) => FaceKey {
+                opsz: size.clamp(lo, hi).round().max(1.0) as u16,
+                ..key
+            },
+            None => key,
+        }
     }
 
     /// The face for shaping and outlines, set to its weight.
@@ -191,12 +220,20 @@ impl Fonts {
         let loaded = &self.faces[key.face as usize];
         self.instances.entry(key).or_insert_with(|| {
             let mut face = Face::from_slice(loaded.data, loaded.index).expect("parsed when added");
+            let mut variations = Vec::new();
             if loaded.info.weights.0 != loaded.info.weights.1 {
-                face.set_variations(&[Variation {
+                variations.push(Variation {
                     tag: WGHT,
                     value: key.weight as f32,
-                }]);
+                });
             }
+            if key.opsz > 0 {
+                variations.push(Variation {
+                    tag: OPSZ,
+                    value: key.opsz as f32,
+                });
+            }
+            face.set_variations(&variations);
             face
         })
     }

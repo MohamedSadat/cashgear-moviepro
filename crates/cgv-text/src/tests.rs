@@ -164,10 +164,13 @@ fn missing_letters_come_from_the_fallbacks() {
     let mut fonts = fonts();
     // Inter has no Arabic: Noto Sans Arabic draws it.
     let laid = layout(&mut fonts, &text("Title عنوان", "Inter"));
-    let inter = fonts.find("Inter", 400, false).unwrap().key;
-    let arabic = fonts.find("Noto Sans Arabic", 400, false).unwrap().key;
-    assert!(laid.glyphs.iter().any(|g| g.face == inter));
-    assert!(laid.glyphs.iter().any(|g| g.face == arabic));
+    let families: Vec<&str> = laid
+        .glyphs
+        .iter()
+        .map(|g| fonts.family_of(g.face))
+        .collect();
+    assert!(families.contains(&"Inter"), "{families:?}");
+    assert!(families.contains(&"Noto Sans Arabic"), "{families:?}");
     assert!(laid.missing.is_empty());
     // An unloaded family and fallback are reported, for the engine to load.
     let mut bare = Fonts::new();

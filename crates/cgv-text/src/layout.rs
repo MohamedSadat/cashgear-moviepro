@@ -128,6 +128,7 @@ fn choose(
     primary: Option<Found>,
     previous: Option<Found>,
     weight: u16,
+    size: f32,
     missing: &mut BTreeSet<String>,
 ) -> Option<Found> {
     if joins_previous(c) && previous.is_some() {
@@ -150,7 +151,12 @@ fn choose(
     };
     for family in [first, LATIN_FALLBACK, ARABIC_FALLBACK, EMOJI_FALLBACK] {
         match fonts.find(family, weight, false) {
-            Some(found) if fonts.covers(found.key, c) => return Some(found),
+            Some(found) if fonts.covers(found.key, c) => {
+                return Some(Found {
+                    key: fonts.at_size(found.key, size),
+                    ..found
+                })
+            }
             None if family == first => {
                 missing.insert(family.to_string());
             }
@@ -233,7 +239,13 @@ pub fn layout(fonts: &mut Fonts, text: &Text) -> TextLayout {
     let size = text.size as f32;
     let weight = text.font.weight;
     let mut missing = BTreeSet::new();
-    let primary = fonts.find(&text.font.family, weight, text.font.italic);
+    // Faces at this size: optical sizes follow it, as in browsers.
+    let primary = fonts
+        .find(&text.font.family, weight, text.font.italic)
+        .map(|found| Found {
+            key: fonts.at_size(found.key, size),
+            ..found
+        });
     if primary.is_none() {
         missing.insert(text.font.family.clone());
     }
@@ -249,7 +261,7 @@ pub fn layout(fonts: &mut Fonts, text: &Text) -> TextLayout {
         let face = if breaks_paragraph(c) {
             None
         } else {
-            choose(fonts, c, primary, previous, weight, &mut missing)
+            choose(fonts, c, primary, previous, weight, size, &mut missing)
         };
         faces.insert(at, face);
         previous = face.or(previous);
