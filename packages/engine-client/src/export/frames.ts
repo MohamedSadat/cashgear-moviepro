@@ -79,19 +79,20 @@ export class ExportFrames {
     return stream;
   }
 
-  private still(id: string) {
-    let load = this.stills.get(id);
+  /** Uploads still `key` (an image, or a frame of an animated one) once; its size. */
+  private still(key: string) {
+    let load = this.stills.get(key);
     if (!load) {
       load = (async () => {
-        const bitmap = await this.media.stillBitmap(id, this.engine.max_texture_size());
+        const bitmap = await this.media.stillBitmap(key, this.engine.max_texture_size());
         try {
-          this.engine.upload_still(id, bitmap);
+          this.engine.upload_still(key, bitmap);
           return { width: bitmap.width, height: bitmap.height };
         } finally {
           bitmap.close();
         }
       })();
-      this.stills.set(id, load);
+      this.stills.set(key, load);
     }
     return load;
   }
@@ -99,7 +100,10 @@ export class ExportFrames {
   private async source(layer: LayerPlan): Promise<LayerSource | null> {
     const media = this.media;
     if (!media.hasPicture(layer.media)) return null;
-    if (layer.still) return { kind: 'still', key: layer.media, ...(await this.still(layer.media)) };
+    if (layer.still) {
+      const key = media.stillKey(layer.media, layer.sourceTime);
+      return { kind: 'still', key, ...(await this.still(key)) };
+    }
     const number = media.frameNumber(layer.media, layer.sourceTime);
     if (number < 0) return null;
     const rotation = media.rotation(layer.media);

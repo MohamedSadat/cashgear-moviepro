@@ -12,7 +12,10 @@ export interface ColorInfo {
   fullRange: boolean | null;
 }
 export type MediaSourceKind =
-  { kind: 'handle' } | { kind: 'opfs'; path: string } | { kind: 'path'; path: string };
+  | { kind: 'handle' }
+  | { kind: 'opfs'; path: string }
+  | { kind: 'path'; path: string }
+  | { kind: 'pack'; path: string };
 
 export interface VideoProbe {
   codec: string;
@@ -111,7 +114,9 @@ export type MediaSourceRef =
       /** Last-modified time in milliseconds, from the native side. */
       modified?: number | null;
       probe?: NativeProbe;
-    };
+    }
+  /** A file of the app's own pack (a sticker): `path` under assets, served at `url`. */
+  | { kind: 'pack'; path: string; url: string; name: string; size: number };
 
 /** ffprobe's description of a file, in MediaProbe terms (everything marked undecodable). */
 export type NativeProbe = Pick<MediaProbe, 'container' | 'durationSeconds' | 'video' | 'audio'>;

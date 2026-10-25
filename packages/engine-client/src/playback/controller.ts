@@ -198,8 +198,13 @@ export class PlaybackController {
     this.decoders.clear(id);
     this.decoders.clear(id + ':proxy');
     this.deps.audio()?.mixer.forget(id);
+    // A still, or every frame of an animated image.
+    for (const key of [...this.stillSizes.keys()])
+      if (key === id || key.startsWith(id + '#')) {
+        this.deps.engine.drop_still(key);
+        this.stillSizes.delete(key);
+      }
     this.deps.engine.drop_still(id);
-    this.stillSizes.delete(id);
     this.stillLoads.delete(id);
     this.invalidate();
   }
@@ -583,7 +588,7 @@ export class PlaybackController {
     const media = this.deps.media();
     return plan.layers.every((layer) => {
       if (!media?.hasPicture(layer.media)) return true;
-      if (layer.still) return this.stillSizes.has(layer.media);
+      if (layer.still) return this.stillSizes.has(media.stillKey(layer.media, layer.sourceTime));
       const entry = this.streams.get(layer.clip);
       entry?.stream.hurry();
       return !entry || entry.stream.primed(media.frameNumber(layer.media, layer.sourceTime));
@@ -600,12 +605,13 @@ export class PlaybackController {
         continue;
       }
       if (layer.still) {
-        const size = this.stillSizes.get(layer.media);
+        const key = media.stillKey(layer.media, layer.sourceTime);
+        const size = this.stillSizes.get(key);
         if (!size) {
           void this.ensureStill(layer.media);
           return null;
         }
-        sources.push({ kind: 'still', key: layer.media, ...size });
+        sources.push({ kind: 'still', key, ...size });
         continue;
       }
       const stream = this.stream(layer);
@@ -641,8 +647,9 @@ export class PlaybackController {
         try {
           if (layer.still) {
             await this.ensureStill(layer.media);
-            const size = this.stillSizes.get(layer.media);
-            return size ? { kind: 'still', key: layer.media, ...size } : null;
+            const key = media.stillKey(layer.media, layer.sourceTime);
+            const size = this.stillSizes.get(key);
+            return size ? { kind: 'still', key, ...size } : null;
           }
           const number = media.frameNumber(layer.media, layer.sourceTime);
           if (number < 0) return null;
@@ -665,6 +672,7 @@ export class PlaybackController {
     );
   }
 
+  /** Uploads the still `id` shows: the image, or every frame of an animated one. */
   private ensureStill(id: string): Promise<void> {
     let load = this.stillLoads.get(id);
     if (!load) {
@@ -672,12 +680,14 @@ export class PlaybackController {
       const engine = this.deps.engine;
       load = (async () => {
         if (!media) throw new Error('The media library is not configured');
-        const bitmap = await media.stillBitmap(id, engine.max_texture_size());
-        try {
-          engine.upload_still(id, bitmap);
-          this.stillSizes.set(id, { width: bitmap.width, height: bitmap.height });
-        } finally {
-          bitmap.close();
+        for (const key of media.stillKeys(id)) {
+          const bitmap = await media.stillBitmap(key, engine.max_texture_size());
+          try {
+            engine.upload_still(key, bitmap);
+            this.stillSizes.set(key, { width: bitmap.width, height: bitmap.height });
+          } finally {
+            bitmap.close();
+          }
         }
       })();
       load.catch(() => this.stillLoads.delete(id));

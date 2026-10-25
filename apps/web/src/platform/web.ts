@@ -223,7 +223,8 @@ export const webPlatform: MediaPlatform = {
     waitingHandles = [];
     for (const ref of media) {
       const entry = await mediaStore.get(ref.id);
-      if (!entry || entry.source.kind === 'url') missing.push(ref.id);
+      if (!entry || entry.source.kind === 'url' || entry.source.kind === 'pack')
+        missing.push(ref.id);
       else if (entry.source.kind === 'opfs') ready.push({ id: ref.id, source: entry.source });
       else {
         const handle = entry.source.handle as PermissionedHandle;

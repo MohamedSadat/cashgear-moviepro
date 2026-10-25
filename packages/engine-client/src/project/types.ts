@@ -20,7 +20,11 @@ export interface Preset {
   height: number;
 }
 
-export type MediaLocation = { kind: 'path'; path: string } | { kind: 'browser' };
+export type MediaLocation =
+  | { kind: 'path'; path: string }
+  | { kind: 'browser' }
+  /** A file of the app's own pack (a sticker), by its path under assets. */
+  | { kind: 'pack'; path: string };
 
 /** A media file a project uses. */
 export interface MediaRef {

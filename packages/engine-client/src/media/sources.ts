@@ -18,6 +18,7 @@ export function sourceName(ref: MediaSourceRef): string {
     case 'opfs':
       return ref.path.split('/').pop() ?? ref.path;
     case 'url':
+    case 'pack':
       return ref.name;
   }
 }
@@ -37,6 +38,8 @@ export function sourceKind(ref: MediaSourceRef): MediaSourceKind {
       return { kind: 'opfs', path: ref.path };
     case 'url':
       return { kind: 'path', path: ref.path };
+    case 'pack':
+      return { kind: 'pack', path: ref.path };
     case 'file':
       throw new Error('Plain files are copied into OPFS before they are opened');
   }
@@ -90,7 +93,7 @@ export async function copyToOpfs(id: string, file: File): Promise<string> {
   return `media/${id}/${name}`;
 }
 
-/** The bytes of a local source as a Blob; desktop URLs have none. */
+/** The bytes of a local source as a Blob; desktop and pack URLs have none. */
 export async function sourceBlob(ref: MediaSourceRef): Promise<Blob | null> {
   switch (ref.kind) {
     case 'handle':
@@ -100,6 +103,7 @@ export async function sourceBlob(ref: MediaSourceRef): Promise<Blob | null> {
     case 'opfs':
       return opfsFile(ref.path);
     case 'url':
+    case 'pack':
       return null;
   }
 }
@@ -107,22 +111,26 @@ export async function sourceBlob(ref: MediaSourceRef): Promise<Blob | null> {
 /** Last-modified time in milliseconds, when the source has one. */
 export async function sourceModified(ref: MediaSourceRef): Promise<number | null> {
   if (ref.kind === 'url') return ref.modified ?? null;
+  if (ref.kind === 'pack') return null;
   const blob = await sourceBlob(ref);
   return blob instanceof File ? blob.lastModified : null;
 }
 
 export async function sourceSize(ref: MediaSourceRef): Promise<number> {
-  if (ref.kind === 'url') return ref.size;
+  if (ref.kind === 'url' || ref.kind === 'pack') return ref.size;
   return (await sourceBlob(ref))!.size;
+}
+
+/** The URL of a source the engine fetches (desktop files, pack files). */
+function sourceUrl(ref: MediaSourceRef): string {
+  if (ref.kind === 'url' || ref.kind === 'pack') return ref.url;
+  throw new Error(`${sourceName(ref)} has no URL`);
 }
 
 /** A Mediabunny input reading the source in place (no copy into memory). */
 export async function openInput(ref: MediaSourceRef): Promise<Input> {
   const blob = await sourceBlob(ref);
-  const source =
-    blob !== null
-      ? new BlobSource(blob)
-      : new UrlSource((ref as Extract<MediaSourceRef, { kind: 'url' }>).url);
+  const source = blob !== null ? new BlobSource(blob) : new UrlSource(sourceUrl(ref));
   return new Input({ source, formats: ALL_FORMATS });
 }
 
@@ -130,7 +138,7 @@ export async function openInput(ref: MediaSourceRef): Promise<Input> {
 export async function readAll(ref: MediaSourceRef): Promise<ArrayBuffer> {
   const blob = await sourceBlob(ref);
   if (blob) return blob.arrayBuffer();
-  const response = await fetch((ref as Extract<MediaSourceRef, { kind: 'url' }>).url);
+  const response = await fetch(sourceUrl(ref));
   if (!response.ok) throw new Error(`Could not read ${sourceName(ref)}: ${response.status}`);
   return response.arrayBuffer();
 }

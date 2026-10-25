@@ -117,22 +117,44 @@ export async function probeAudio(track: InputAudioTrack): Promise<ProbedAudio> {
   };
 }
 
-export async function probeImage(ref: MediaSourceRef, type: string): Promise<ImageProbe> {
+/** Browsers show GIF frames shorter than this for 100 ms, as old GIFs expect. */
+const shortestFrameUs = 10_000;
+
+/**
+ * Measures an image. An animated one (GIF, WebP, APNG) is decoded once to learn
+ * when each frame starts; `frames` is then their index, and `durationUs` a loop.
+ */
+export async function probeImage(
+  ref: MediaSourceRef,
+  type: string,
+): Promise<{ probe: ImageProbe; frames: FrameIndex | null; durationUs: number }> {
   if (!(await ImageDecoder.isTypeSupported(type)))
     throw new Error(`${type} images can't be decoded here`);
   const decoder = new ImageDecoder({ data: await readAll(ref), type });
   try {
     await decoder.tracks.ready;
+    await decoder.completed;
     const track = decoder.tracks.selectedTrack;
     const { image } = await decoder.decode({ frameIndex: 0 });
+    const frameCount = track?.frameCount ?? 1;
     const probe = {
       codec: type.split('/')[1],
       width: image.displayWidth,
       height: image.displayHeight,
-      frameCount: track?.frameCount ?? 1,
+      frameCount,
     };
     image.close();
-    return probe;
+    if (!track?.animated || frameCount < 2) return { probe, frames: null, durationUs: 0 };
+    const starts: number[] = [];
+    let at = 0;
+    for (let frameIndex = 0; frameIndex < frameCount; frameIndex++) {
+      const { image } = await decoder.decode({ frameIndex });
+      const duration = image.duration ?? 0;
+      image.close();
+      starts.push(at);
+      at += duration > shortestFrameUs ? duration : 100_000;
+    }
+    return { probe, frames: FrameIndex.fromTimestamps(starts), durationUs: at };
   } finally {
     decoder.close();
   }
@@ -143,6 +165,8 @@ export interface ProbeResult {
   input: Input | null;
   video: ProbedVideo | null;
   audio: ProbedAudio | null;
+  /** An animated image's frames, by when each starts in its loop. */
+  frames?: FrameIndex | null;
 }
 
 /** Measures a file for the media library. `input` stays open for decoding. */
@@ -156,12 +180,12 @@ export async function probeMedia(
   const base = { id, name, size, source: sourceKind(ref) };
   const type = imageType(name);
   if (type) {
-    const image = await probeImage(ref, type);
+    const { probe: image, frames, durationUs } = await probeImage(ref, type);
     return {
       probe: {
         ...base,
         container: image.codec,
-        durationSeconds: 0,
+        durationSeconds: durationUs / 1e6,
         video: null,
         audio: null,
         image,
@@ -169,6 +193,7 @@ export async function probeMedia(
       input: null,
       video: null,
       audio: null,
+      frames,
     };
   }
   const native = ref.kind === 'url' ? ref.probe : undefined;

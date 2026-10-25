@@ -3,11 +3,12 @@ import type { MediaLibrary } from '../pkg/cgv_wasm';
 import { readBarcode } from './barcode';
 import { DecoderPool } from './decoder-pool';
 import { FrameCache } from './frame-cache';
+import type { FrameIndex } from './frame-index';
 import { openFrameCount, readPlanes, type ManagedFrame } from './frames';
 import { paddingShows } from './padding';
 import { probeAudio, probeMedia, probeVideo } from './probe';
 import { ProjectService } from '../project/service';
-import { copyToOpfs, openInput, readAll, sourceModified } from './sources';
+import { copyToOpfs, imageType, openInput, readAll, sourceModified, sourceName } from './sources';
 import type {
   FrameReadback,
   ImportOutcome,
@@ -56,7 +57,20 @@ interface OpenMedia {
   decoders: { hardware: boolean; software: boolean; pixels: number; padded: boolean };
   /** The decodable sound track, from the original or else the proxy. */
   audio: InputAudioTrack | null;
+  /** An animated image's frames, by when each starts in its loop. */
+  frames: FrameIndex | null;
+  /** Decodes an animated image's frames, opened when they are first wanted. */
+  frameDecoder: Promise<ImageDecoder> | null;
 }
+
+/**
+ * Pixels an animated image's frames may take in all (as GPU stills, with mip
+ * levels): bigger animations are scaled down to fit.
+ */
+const animationPixels = 32 * 1024 * 1024;
+
+/** The key of frame `index` of an animated image, as a still. */
+const frameKey = (id: string, index: number) => `${id}#${index}`;
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -162,6 +176,8 @@ export class MediaService {
       rotation: video?.probe.rotation ?? 0,
       decoders,
       audio: probed.audio?.probe.decodable ? probed.audio.track : null,
+      frames: probed.frames ?? null,
+      frameDecoder: null,
     });
     // Clips of this file may already be on the timeline (a project opened first).
     this.onChange(id);
@@ -221,6 +237,7 @@ export class MediaService {
     media.reader?.release();
     media.input?.dispose();
     media.proxy?.input.dispose();
+    void media.frameDecoder?.then((decoder) => decoder.close()).catch(() => {});
     this.media.delete(id);
     this.onChange(id);
     return this.library.remove(id);
@@ -272,6 +289,19 @@ export class MediaService {
     };
   }
 
+  /** The still a layer of `id` shows at source time `flicks`: the image, or a frame of it. */
+  stillKey(id: string, flicks: number): string {
+    const frames = this.media.get(id)?.frames;
+    // A microsecond of slack covers rounding to whole microseconds.
+    return frames ? frameKey(id, frames.frameAt(Math.round(flicks / 705.6) + 1)) : id;
+  }
+
+  /** Every still of `id`: the image, or each frame of an animated one. */
+  stillKeys(id: string): string[] {
+    const frames = this.media.get(id)?.frames;
+    return frames ? Array.from({ length: frames.frameCount }, (_, i) => frameKey(id, i)) : [id];
+  }
+
   /** The frame showing at source time `flicks` (705.6 per microsecond), or -1. */
   frameNumber(id: string, flicks: number): number {
     const reader = this.media.get(id)?.reader;
@@ -298,8 +328,16 @@ export class MediaService {
     return this.media.get(id)?.kind === 'image';
   }
 
-  /** Decodes a still image, scaled down to fit `maxSize`. The caller closes it. */
-  async stillBitmap(id: string, maxSize: number): Promise<ImageBitmap> {
+  /**
+   * Decodes still `key` (from `stillKey`), scaled down to fit `maxSize`: an
+   * image, or a frame of an animated one within its budget. The caller closes it.
+   */
+  async stillBitmap(key: string, maxSize: number): Promise<ImageBitmap> {
+    const split = key.lastIndexOf('#');
+    const animated = split > 0 ? this.media.get(key.slice(0, split)) : undefined;
+    if (animated?.frames)
+      return this.frameBitmap(key.slice(0, split), Number(key.slice(split + 1)), maxSize);
+    const id = key;
     const media = this.require(id);
     if (media.kind !== 'image') throw new Error(`${id} is not a still image`);
     const blob = new Blob([await readAll(media.source)]);
@@ -318,6 +356,40 @@ export class MediaService {
       resizeHeight: Math.max(1, Math.floor(size.height * scale)),
       resizeQuality: 'high',
     });
+  }
+
+  private async frameBitmap(id: string, index: number, maxSize: number): Promise<ImageBitmap> {
+    const media = this.require(id);
+    const frames = media.frames!;
+    media.frameDecoder ??= (async () => {
+      const name = sourceName(media.source);
+      const decoder = new ImageDecoder({
+        data: await readAll(media.source),
+        type: imageType(name)!,
+      });
+      await decoder.tracks.ready;
+      return decoder;
+    })();
+    const decoder = await media.frameDecoder;
+    const { image } = await decoder.decode({ frameIndex: index });
+    try {
+      const { displayWidth: width, displayHeight: height } = image;
+      const budget = Math.sqrt(animationPixels / (width * height * frames.frameCount));
+      const scale = Math.min(1, maxSize / Math.max(width, height), budget);
+      return await createImageBitmap(image, {
+        premultiplyAlpha: 'none',
+        colorSpaceConversion: 'default',
+        ...(scale < 1
+          ? {
+              resizeWidth: Math.max(1, Math.floor(width * scale)),
+              resizeHeight: Math.max(1, Math.floor(height * scale)),
+              resizeQuality: 'high' as const,
+            }
+          : {}),
+      });
+    } finally {
+      image.close();
+    }
   }
 
   /** Closes every item (switching projects). */
