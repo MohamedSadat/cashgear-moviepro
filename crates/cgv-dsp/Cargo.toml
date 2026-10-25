@@ -1,0 +1,12 @@
+[package]
+name = "cgv-dsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+# Sound processing with no knowledge of projects, so it can move to a crate
+# shared with CashGear Audio.
+[dependencies]
+ebur128 = { version = "=0.1.10", default-features = false }

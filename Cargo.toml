@@ -9,6 +9,7 @@ default-members = [
   "crates/cgv-text",
   "crates/cgv-media",
   "crates/cgv-render",
+  "crates/cgv-dsp",
   "crates/cgv-audio",
   "crates/cgv-engine",
   "crates/cgv-wasm",
@@ -41,6 +42,7 @@ cgv-effects = { path = "crates/cgv-effects" }
 cgv-text = { path = "crates/cgv-text" }
 cgv-media = { path = "crates/cgv-media" }
 cgv-render = { path = "crates/cgv-render" }
+cgv-dsp = { path = "crates/cgv-dsp" }
 cgv-audio = { path = "crates/cgv-audio" }
 cgv-engine = { path = "crates/cgv-engine" }
 cgv-native = { path = "crates/cgv-native" }

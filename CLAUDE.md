@@ -32,6 +32,7 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `cgv-native`: desktop-only native side.
   - `cgv-effects`: the effect and transition catalogue: JSON schema, registry, shader assembly (`prelude.wgsl`) and settings packing.
   - `cgv-text`: fonts, shaping (rustybuzz), bidi and line breaks, and drawing titles on the CPU (`paint.rs`). No GPU code.
+  - `cgv-dsp`: sound effects (filters, dynamics, echo, reverb), level meters, loudness (`ebur128`) and ducking curves. It knows nothing of projects, so it can be shared with CashGear Audio.
   - `cgv-time`, `cgv-model`, `cgv-media`, `cgv-audio`.
 - `assets/`: the built-in pack, embedded at build time. One folder per effect or transition (`effect.json` and `effect.wgsl`, plus any images) in `effects/` and `transitions/`; looks in `luts/`. `assets/README.md` is the authoring guide; `scripts/make-effect-assets.mjs` makes the looks and gradients.
   - `fonts/` (OFL families listed in `fonts.json`, from `pnpm fetch-fonts`), `titles/` (30 templates, from `scripts/make-title-templates.mjs`) and `stickers/` (animated WebP and `stickers.json`, from `scripts/make-stickers.mjs`). Templates are bundled into the UI; font and sticker files are build assets, fetched when used, and never inside the WASM.
