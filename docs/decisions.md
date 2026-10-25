@@ -57,7 +57,8 @@ Choices made while building the audio features.
 - **Measuring voiceover alignment:**
   - Chrome's system-audio loopback cannot be driven by tests. With the auto-accept flag, `getDisplayMedia` returns a fake audio track; without it, the picker waits for a person.
   - So the alignment test plays the timeline into a real output device (`setSinkId`) and records a real microphone input that hears it back. It skips where no such loopback exists.
-  - On the reference machine the loopback is the Zoom H5's own Loop Back switch, which sends the PC's playback back into the H5's USB input (the user's choice over installing a virtual cable). The test takes its devices from `CGV_LOOPBACK_OUTPUT` and `CGV_LOOPBACK_INPUT`; a virtual cable's names are the defaults.
+  - The test takes its devices from `CGV_LOOPBACK_OUTPUT` and `CGV_LOOPBACK_INPUT`; a virtual cable's names are the defaults.
+  - On the reference machine the user chose the Zoom H5's own Loop Back switch over installing a virtual cable. Two runs played into the H5's headphones and recorded its microphone, the second with Loop Back switched on, but both takes held only room sound (about −60 dBFS, no clicks found even by a 2 kHz matched filter). The user then chose to skip the measurement: the criterion stands on the fake-microphone flow and the placement unit test, and is marked partial.
   - The flow itself is tested with Chrome's fake microphone.
 - **Sound library:** 30 effects in five groups and 10 music beds (16-bar loops, 60 to 128 BPM), synthesised by `scripts/make-sounds.mjs` and encoded as 96 kbit/s Opus: 6.2 MB.
   - Music measures −13.7 to −17.1 LUFS.
