@@ -7,5 +7,7 @@ publish.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+# Installed fonts, for titles. Without memory maps or fontconfig: files are read once.
+fontdb = { version = "0.24", default-features = false, features = ["std", "fs"] }
 serde.workspace = true
 serde_json.workspace = true

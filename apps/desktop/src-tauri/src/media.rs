@@ -59,6 +59,11 @@ impl MediaState {
     pub(crate) fn cache_root(&self) -> &Path {
         &self.cache_root
     }
+
+    /// Makes `path` readable through the protocol as `id`.
+    pub(crate) fn register_file(&self, id: &str, path: &Path) -> Result<RegisteredMedia, String> {
+        self.registry.register(id, path)
+    }
 }
 
 /// A registered file as the UI receives it: where to stream it from, and what ffprobe saw.

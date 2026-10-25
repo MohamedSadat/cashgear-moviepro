@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod export;
+mod fonts;
 mod media;
 mod project;
 
@@ -42,6 +43,7 @@ fn main() {
             export::export_write,
             export::export_finish,
             export::export_cancel,
+            fonts::fonts_installed,
             media::media_pick,
             media::media_register,
             media::media_forget,
