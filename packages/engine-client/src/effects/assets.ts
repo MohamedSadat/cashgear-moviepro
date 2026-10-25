@@ -28,11 +28,17 @@ export async function loadPackImages(engine: Engine): Promise<void> {
         colorSpaceConversion: 'none',
         premultiplyAlpha: 'none',
       });
+      const { width, height } = bitmap;
+      let pixels: Uint8ClampedArray;
       try {
-        engine.upload_image(key, bitmap);
+        // As bytes: SwiftShader's WebGPU sometimes fails to copy grey bitmaps.
+        const context = new OffscreenCanvas(width, height).getContext('2d')!;
+        context.drawImage(bitmap, 0, 0);
+        pixels = context.getImageData(0, 0, width, height).data;
       } finally {
         bitmap.close();
       }
+      engine.upload_image(key, width, height, new Uint8Array(pixels.buffer));
     }),
   );
 }

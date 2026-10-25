@@ -436,9 +436,14 @@ impl Renderer {
     pub fn has_still(&self, key: &str) -> bool {
         self.compositor.has_still(key)
     }
-    pub fn upload_image(&mut self, key: &str, image: ExternalImageSource) -> Result<(), String> {
+    pub fn upload_image(
+        &mut self,
+        key: &str,
+        size: (u32, u32),
+        pixels: &[u8],
+    ) -> Result<(), String> {
         self.compositor
-            .upload_image(&self.device, &self.queue, key, image)
+            .upload_image(&self.device, &self.queue, key, size, pixels)
     }
     pub fn has_image(&self, key: &str) -> bool {
         self.compositor.has_image(key)

@@ -1824,19 +1824,25 @@ impl Compositor {
         Ok(())
     }
 
-    /// Uploads an image a pack's definitions read (such as a luma-wipe gradient),
-    /// as data: no colour conversion.
+    /// Uploads an image a pack's definitions read (such as a luma-wipe gradient):
+    /// RGBA8 rows, top first, as data with no colour conversion. Bytes, not a
+    /// bitmap: SwiftShader's WebGPU sometimes fails to copy grey bitmaps.
     pub fn upload_image(
         &mut self,
         device: &Device,
         queue: &Queue,
         key: &str,
-        image: ExternalImageSource,
+        (width, height): (u32, u32),
+        pixels: &[u8],
     ) -> Result<(), String> {
-        let (width, height) = (image.width(), image.height());
         let limit = device.limits().max_texture_dimension_2d;
         if width == 0 || height == 0 || width > limit || height > limit {
             return Err(format!("A {width}×{height} image does not fit on the GPU"));
+        }
+        if pixels.len() as u64 != width as u64 * height as u64 * 4 {
+            return Err(format!(
+                "The {width}×{height} image's pixels do not match its size"
+            ));
         }
         let texture = device.create_texture(&TextureDescriptor {
             label: Some("Pack image"),
@@ -1849,24 +1855,21 @@ impl Compositor {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: DATA_FORMAT,
-            usage: TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_DST
-                | TextureUsages::RENDER_ATTACHMENT,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        queue.copy_external_image_to_texture(
-            &CopyExternalImageSourceInfo {
-                source: image,
-                origin: Origin2d::ZERO,
-                flip_y: false,
-            },
-            CopyExternalImageDestInfo {
+        queue.write_texture(
+            TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: 0,
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
-                color_space: PredefinedColorSpace::Srgb,
-                premultiplied_alpha: false,
+            },
+            pixels,
+            TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: None,
             },
             Extent3d {
                 width,
@@ -1874,8 +1877,6 @@ impl Compositor {
                 depth_or_array_layers: 1,
             },
         );
-        // WebGL2 copies at the next submission: do it now, while the bitmap is open.
-        queue.submit([]);
         let view = texture.create_view(&TextureViewDescriptor::default());
         if let Some((old, _)) = self.images.insert(key.to_string(), (texture, view)) {
             old.destroy();

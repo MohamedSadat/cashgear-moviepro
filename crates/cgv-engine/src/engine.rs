@@ -206,12 +206,14 @@ impl Engine {
         serde_json::to_string(&self.registry.images()).map_err(|error| error.to_string())
     }
 
+    /// Uploads pack image `key` from RGBA8 `pixels`, `size` texels.
     pub fn upload_image(
         &mut self,
         key: &str,
-        image: wgpu::ExternalImageSource,
+        size: (u32, u32),
+        pixels: &[u8],
     ) -> Result<(), String> {
-        self.renderer.upload_image(key, image)
+        self.renderer.upload_image(key, size, pixels)
     }
     pub fn has_image(&self, key: &str) -> bool {
         self.renderer.has_image(key)

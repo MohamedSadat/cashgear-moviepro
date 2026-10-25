@@ -235,13 +235,17 @@ mod bridge {
         pub fn pack_images(&self) -> Result<String, JsValue> {
             self.inner.pack_images().map_err(js_error)
         }
+        /// Uploads pack image `key`: `pixels` are RGBA8 rows, top first.
         pub fn upload_image(
             &mut self,
             key: &str,
-            bitmap: web_sys::ImageBitmap,
+            width: u32,
+            height: u32,
+            pixels: &[u8],
         ) -> Result<(), JsValue> {
-            let image = wgpu::ExternalImageSource::ImageBitmap(bitmap);
-            self.inner.upload_image(key, image).map_err(js_error)
+            self.inner
+                .upload_image(key, (width, height), pixels)
+                .map_err(js_error)
         }
         pub fn has_image(&self, key: &str) -> bool {
             self.inner.has_image(key)
