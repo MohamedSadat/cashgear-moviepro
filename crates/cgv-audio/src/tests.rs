@@ -619,6 +619,48 @@ fn meters_read_each_track_and_the_master() {
 }
 
 #[test]
+fn track_meters_read_every_hop_with_the_master() {
+    let mut mixer = Mixer::new(RATE, 1, DEFAULT_BUDGET_BYTES);
+    let click = |at: i64| move |i: i64| if i == at { 0.8 } else { 0.0 };
+    fill(&mut mixer, "early", 0..1, click(100));
+    fill(&mut mixer, "late", 0..1, click(1100));
+    mixer.set_metering(true);
+    let peaks = |readings: &[Reading]| {
+        readings
+            .iter()
+            .map(|r| {
+                (
+                    r.sample,
+                    r.master.peak[0],
+                    r.tracks.iter().map(|t| t.1.peak[0]).collect(),
+                )
+            })
+            .collect::<Vec<(i64, f32, Vec<f32>)>>()
+    };
+    // A block of two hops: the click in the first one shows on its track too.
+    let one = AudioPlan {
+        tracks: vec![AudioTrack::new(1, vec![clip("early", 0, 48_000, 0)])],
+    };
+    mixer.mix(&one, 0, 1024);
+    assert_eq!(
+        peaks(&mixer.take_readings()),
+        vec![(480, 0.8, vec![0.8]), (960, 0.0, vec![0.0])]
+    );
+    // A track that joins mid-hop reads in step with the master.
+    let two = AudioPlan {
+        tracks: vec![
+            AudioTrack::new(1, vec![clip("early", 0, 48_000, 0)]),
+            AudioTrack::new(7, vec![clip("late", 0, 48_000, 0)]),
+        ],
+    };
+    mixer.mix(&two, 1024, 1024);
+    assert_eq!(
+        peaks(&mixer.take_readings()),
+        vec![(1440, 0.8, vec![0.0, 0.8]), (1920, 0.0, vec![0.0, 0.0])]
+    );
+}
+
+#[test]
 fn mastering_applies_its_gain_on_time_and_limits_true_peaks() {
     let mut mixer = Mixer::new(RATE, 1, DEFAULT_BUDGET_BYTES);
     fill(&mut mixer, "t", 0..2, tone(440.0, 0.25));

@@ -60,6 +60,13 @@ impl LevelMeter {
         self.hop
     }
 
+    /// Starts this meter's hops where `other`'s are, the samples it missed counted
+    /// as silence, so meters given the same blocks read at the same samples.
+    pub fn align_with(&mut self, other: &LevelMeter) {
+        self.reset();
+        self.filled = other.filled % self.hop;
+    }
+
     pub fn reset(&mut self) {
         self.filled = 0;
         self.peak = [0.0; 2];

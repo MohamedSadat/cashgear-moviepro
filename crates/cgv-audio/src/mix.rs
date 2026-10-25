@@ -37,7 +37,7 @@ struct ChainState {
 }
 
 pub(crate) struct Metering {
-    tracks: HashMap<u64, (LevelMeter, Level)>,
+    tracks: HashMap<u64, LevelMeter>,
     master: LevelMeter,
     loudness: Loudness,
     hops: usize,
@@ -309,7 +309,8 @@ impl Mixer {
         let channels = self.channels;
         let mut master: Planar = vec![vec![0.0; frames]; channels];
         let ducks = self.duck_gains(plan, start, frames);
-        let mut track_levels: Vec<(u64, Level)> = Vec::new();
+        // Each track's readings in this block, one for each of the master's below.
+        let mut track_hops: Vec<(u64, Vec<Level>)> = Vec::new();
         for track in &plan.tracks {
             let mut bus: Planar = vec![vec![0.0; frames]; channels];
             self.render_track(track, start, frames, &mut bus);
@@ -330,12 +331,16 @@ impl Mixer {
                 }
             }
             if let Some(metering) = self.state.metering.as_mut() {
-                let (meter, latest) = metering
-                    .tracks
-                    .entry(track.id)
-                    .or_insert_with(|| (LevelMeter::new(self.rate, channels), Level::default()));
-                meter.add(&views(&bus), |_, level| *latest = level);
-                track_levels.push((track.id, *latest));
+                let master = &metering.master;
+                let meter = metering.tracks.entry(track.id).or_insert_with(|| {
+                    // In step with the master's, so every reading has each track's hop.
+                    let mut meter = LevelMeter::new(self.rate, channels);
+                    meter.align_with(master);
+                    meter
+                });
+                let mut levels = Vec::new();
+                meter.add(&views(&bus), |_, level| levels.push(level));
+                track_hops.push((track.id, levels));
             }
             for (sum, samples) in master.iter_mut().zip(&bus) {
                 for (s, x) in sum.iter_mut().zip(samples) {
@@ -349,7 +354,7 @@ impl Mixer {
             metering
                 .master
                 .add(&views(&master), |at, level| hops.push((at, level)));
-            for (at, level) in hops {
+            for (index, (at, level)) in hops.into_iter().enumerate() {
                 if metering.hops % 10 == 0 {
                     metering.values = [
                         metering.loudness.momentary(),
@@ -364,7 +369,10 @@ impl Mixer {
                     momentary: metering.values[0],
                     short_term: metering.values[1],
                     integrated: metering.values[2],
-                    tracks: track_levels.clone(),
+                    tracks: track_hops
+                        .iter()
+                        .map(|(id, levels)| (*id, levels.get(index).copied().unwrap_or_default()))
+                        .collect(),
                 });
             }
             // Meters of tracks no longer in the plan go.
