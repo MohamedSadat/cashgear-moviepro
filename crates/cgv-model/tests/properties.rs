@@ -98,9 +98,16 @@ fn main_driven(project: &Project, id: ClipId) -> bool {
 }
 
 /// Where source time zero would play: trims and settling keep it, moves shift it.
+/// A reversed clip plays it after its out point.
 fn anchor(project: &Project, clip: &Clip) -> Option<Flicks> {
     let media = project.media(&clip.media)?;
-    (!media.is_still()).then(|| clip.start - clip.speed.timeline_span(clip.source_in))
+    if media.is_still() {
+        None
+    } else if clip.reverse {
+        Some(clip.start + clip.speed.timeline_span(clip.source_out()))
+    } else {
+        Some(clip.start - clip.speed.timeline_span(clip.source_in))
+    }
 }
 
 /// Clips linked to a clip on the magnetic main track stay in step with it.
@@ -114,7 +121,8 @@ fn check_sync(before: &Project, after: &Project, command: &Command) {
         Command::Link { .. }
         | Command::Unlink { .. }
         | Command::DetachAudio { .. }
-        | Command::SetSpeed { .. } => true,
+        | Command::SetSpeed { .. }
+        | Command::SetRamp { .. } => true,
         // Edits that push later clips along another track may push a partner.
         Command::Insert { track, .. } => before.track_index(*track) != Some(main),
         Command::RippleDelete { clips } => !named(clips),
@@ -144,12 +152,13 @@ fn check_sync(before: &Project, after: &Project, command: &Command) {
             let Some((partner_index, partner_now)) = after.clip(partner.id) else {
                 continue;
             };
-            // Clips at different speeds drift apart under a slip by design.
-            let speeds = [leader.speed, partner.speed, now.speed, partner_now.speed];
-            if partner_index == main_now
-                || partner_now.link != now.link
-                || speeds.iter().any(|&speed| speed != leader.speed)
-            {
+            // Clips at different speeds or directions drift apart under a slip by
+            // design; a ramp is not a straight line to measure along.
+            let clips = [leader, partner, now, partner_now];
+            let differ = clips.iter().any(|c| {
+                c.speed != leader.speed || c.reverse != leader.reverse || !c.ramp.is_empty()
+            });
+            if partner_index == main_now || partner_now.link != now.link || differ {
                 continue;
             }
             let offset = |project: &Project, a: &Clip, b: &Clip| {

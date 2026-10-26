@@ -327,6 +327,26 @@ fn random_spec(project: &Project, rng: &mut Rng) -> ClipSpec {
         volume_db: Some(-6.0),
         ..ClipProperties::default()
     });
+    // Pasted copies bring their timing and masks too.
+    let ramp = if rng.percent(4) {
+        vec![
+            RampPoint {
+                time: Flicks::ZERO,
+                speed: 1.0,
+            },
+            RampPoint {
+                time: Flicks(frames * frame),
+                speed: [2.0, 0.5, 0.01][rng.below(3) as usize],
+            },
+        ]
+    } else {
+        Vec::new()
+    };
+    let masks = if rng.percent(4) && video != Some(false) {
+        vec![random_mask(rng)]
+    } else {
+        Vec::new()
+    };
     ClipSpec {
         media: id.to_string(),
         source_in,
@@ -337,7 +357,75 @@ fn random_spec(project: &Project, rng: &mut Rng) -> ClipSpec {
         properties,
         effects,
         keyframes,
+        ramp,
+        reverse: rng.percent(4),
+        masks,
         ..Default::default()
+    }
+}
+
+/// A mask of any shape, sometimes out of range.
+pub fn random_mask(rng: &mut Rng) -> Mask {
+    let shape = [MaskShape::Rectangle, MaskShape::Ellipse, MaskShape::Path][rng.below(3) as usize];
+    let points = if shape == MaskShape::Path {
+        (0..rng.range(2, 6))
+            .map(|i| {
+                let angle = i as f64 * 1.3;
+                MaskPoint {
+                    x: angle.cos() * 0.5,
+                    y: angle.sin() * 0.5,
+                    out_x: if rng.percent(50) { 0.1 } else { 0.0 },
+                    ..MaskPoint::default()
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    Mask {
+        id: MaskId(rng.range(1, 3) as u64),
+        shape,
+        mode: [MaskMode::Add, MaskMode::Subtract, MaskMode::Intersect][rng.below(3) as usize],
+        invert: rng.percent(30),
+        x: rng.range(0, 10) as f64 / 10.0,
+        y: rng.range(0, 10) as f64 / 10.0,
+        width: rng.range(1, 10) as f64 / 10.0,
+        height: rng.range(1, 10) as f64 / 10.0,
+        rotation: rng.range(-90, 90) as f64,
+        roundness: 0.0,
+        feather: if rng.percent(5) {
+            0.9
+        } else {
+            rng.below(20) as f64 / 100.0
+        },
+        expansion: 0.0,
+        opacity: 1.0,
+        points,
+    }
+}
+
+/// Every mask in the project, with its clip.
+fn masks(project: &Project) -> Vec<(ClipId, MaskId)> {
+    project
+        .clips()
+        .flat_map(|c| c.masks.iter().map(move |m| (c.id, m.id)))
+        .collect()
+}
+
+/// A speed curve by fractions, as presets give them, or none.
+fn random_shape(rng: &mut Rng) -> Vec<RampShape> {
+    let point = |at: f64, speed: f64| RampShape { at, speed };
+    match rng.below(5) {
+        0 => Vec::new(),
+        1 => vec![point(0.0, 1.0), point(0.5, 3.0), point(1.0, 1.0)],
+        2 => vec![
+            point(0.0, 2.0),
+            point(0.4, 0.3),
+            point(0.6, 0.3),
+            point(1.0, 2.0),
+        ],
+        3 => vec![point(0.0, 1.0), point(1.0, 0.01)], // too slow: refused
+        _ => vec![point(0.2, 0.5), point(0.8, 4.0)],
     }
 }
 
@@ -377,6 +465,11 @@ fn property(project: &Project, clip: ClipId, rng: &mut Rng) -> String {
             names.push(element_property(element.id, "reveal"));
             names.push(element_property(element.id, "fill"));
         }
+        for mask in &c.masks {
+            names.push(mask_property(mask.id, "feather"));
+            names.push(mask_property(mask.id, "x"));
+            names.push(mask_property(mask.id, "point1.y"));
+        }
     }
     if rng.percent(3) {
         return "transform.bogus".into();
@@ -400,6 +493,8 @@ fn key_value(name: &str, rng: &mut Rng) -> KeyValue {
         "crop.left" => rng.range(0, 60) as f64 / 100.0,
         "volumeDb" => rng.range(-40, 10) as f64,
         name if name.ends_with(".reveal") => rng.below(11) as f64 / 10.0,
+        name if name.ends_with(".feather") => rng.below(30) as f64 / 100.0,
+        name if name.starts_with("masks.") => rng.range(-5, 9) as f64 / 10.0,
         _ => rng.range(-400, 400) as f64 / 4.0,
     };
     // Sometimes out of range: refused.
@@ -564,7 +659,50 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
         .flat_map(|t| t.transitions.iter().map(|t| t.id))
         .collect();
     let transition = rng.pick(&transitions).unwrap_or(TransitionId(0));
-    match rng.below(127) {
+    let mask = rng.pick(&masks(project));
+    let (mask_clip, mask_id) = mask.unwrap_or((any_clip, MaskId(0)));
+    match rng.below(140) {
+        127..=129 => Command::SetRamp {
+            clip: any_clip,
+            points: random_shape(rng),
+        },
+        130..=131 => Command::SetReverse {
+            clip: any_clip,
+            reverse: rng.percent(60),
+        },
+        132..=133 => Command::FreezeFrame {
+            clip: any_clip,
+            at: time(project, rng),
+            duration: Flicks(rng.range(0, 90) * frame(project)),
+        },
+        134..=135 => Command::AddMask {
+            clip: any_clip,
+            mask: random_mask(rng),
+            index: rng.percent(20).then(|| rng.below(3) as usize),
+        },
+        136 => {
+            let mut changed = project
+                .clip(mask_clip)
+                .and_then(|(_, c)| c.masks.iter().find(|m| m.id == mask_id).cloned())
+                .unwrap_or_else(|| random_mask(rng));
+            changed.feather = rng.below(40) as f64 / 100.0;
+            if rng.percent(40) {
+                changed.points.pop();
+            }
+            Command::SetMask {
+                clip: mask_clip,
+                mask: changed,
+            }
+        }
+        137 => Command::RemoveMask {
+            clip: mask_clip,
+            mask: mask_id,
+        },
+        138 => Command::MoveMask {
+            clip: mask_clip,
+            mask: mask_id,
+            index: rng.below(3) as usize,
+        },
         124..=126 => Command::SetTrackSound {
             track,
             sound: TrackSound {
@@ -815,8 +953,15 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
                     .percent(30)
                     .then(|| Flicks(rng.range(0, 90) * project.settings.frame_duration().0)),
                 denoise: rng.percent(15).then(|| rng.range(0, 12) as f64 / 10.0),
+                blend_mode: rng.percent(15).then(|| {
+                    [BlendMode::Normal, BlendMode::Screen, BlendMode::Multiply]
+                        [rng.below(3) as usize]
+                }),
+                keep_pitch: rng.percent(10).then(|| rng.percent(50)),
+                frame_blending: rng.percent(10).then(|| rng.percent(50)),
             },
         },
+
         83..=85 => match rng.below(3) {
             0 => Command::AddMarker {
                 at: time(project, rng),

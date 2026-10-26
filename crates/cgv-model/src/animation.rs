@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::effects::{Color, ParamValue, Params};
 use crate::project::{Clip, Crop, Transform};
-use crate::project::{EffectId, ElementId};
+use crate::project::{EffectId, ElementId, MaskId};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -222,6 +222,8 @@ pub enum Property {
     Effect(EffectId),
     /// A setting of one of a title's elements ([`crate::title::ELEMENT_SETTINGS`]).
     Element(ElementId),
+    /// A setting or point of one of the clip's masks ([`crate::masks::MASK_SETTINGS`]).
+    Mask(MaskId),
 }
 
 const NAMED: [(&str, Property); 13] = [
@@ -242,10 +244,17 @@ const NAMED: [(&str, Property); 13] = [
 
 impl Property {
     /// Reads a keyframe property name: one of the names above,
-    /// `effects.<effect id>.<setting>` or `title.<element id>.<setting>`.
+    /// `effects.<effect id>.<setting>`, `title.<element id>.<setting>` or
+    /// `masks.<mask id>.<setting>`.
     pub fn parse(name: &str) -> Option<(Property, Option<&str>)> {
         if let Some((_, property)) = NAMED.iter().find(|(n, _)| *n == name) {
             return Some((*property, None));
+        }
+        if let Some(rest) = name.strip_prefix("masks.") {
+            let (id, setting) = rest.split_once('.')?;
+            let id = id.parse().ok()?;
+            return crate::masks::valid_mask_setting(setting)
+                .then_some((Property::Mask(MaskId(id)), Some(setting)));
         }
         if let Some(rest) = name.strip_prefix("title.") {
             let (id, setting) = rest.split_once('.')?;
@@ -276,6 +285,14 @@ pub fn effect_property(id: EffectId, param: &str) -> String {
 pub fn property_effect(name: &str) -> Option<EffectId> {
     match Property::parse(name) {
         Some((Property::Effect(id), _)) => Some(id),
+        _ => None,
+    }
+}
+
+/// The mask a keyframe property name belongs to, if any.
+pub fn property_mask(name: &str) -> Option<MaskId> {
+    match Property::parse(name) {
+        Some((Property::Mask(id), _)) => Some(id),
         _ => None,
     }
 }
@@ -522,5 +539,11 @@ mod tests {
         );
         assert_eq!(Property::parse("title.5.text"), None);
         assert_eq!(property_element("title.5.fill"), Some(ElementId(5)));
+        assert_eq!(
+            Property::parse("masks.8.point2.y"),
+            Some((Property::Mask(MaskId(8)), Some("point2.y")))
+        );
+        assert_eq!(property_mask("masks.8.feather"), Some(MaskId(8)));
+        assert_eq!(Property::parse("masks.8.colour"), None);
     }
 }

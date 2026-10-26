@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::animation::Keyframes;
 use crate::effects::{Effect, Lut, LutInfo, Transition};
+use crate::masks::{BlendMode, Mask};
+use crate::timing::RampPoint;
 use crate::title::Title;
 
 /// The latest time the model accepts: 2^53 − 1 flicks (about 147 days), so every
@@ -42,6 +44,7 @@ id_type!(
     /// A text block or shape of a title; unique within its clip.
     ElementId
 );
+id_type!(MaskId);
 
 /// A project: settings, the media it uses, its tracks and markers.
 ///
@@ -393,6 +396,14 @@ pub(crate) fn is_zero(value: &f64) -> bool {
     *value == 0.0
 }
 
+fn yes() -> bool {
+    true
+}
+
+fn is_yes(value: &bool) -> bool {
+    *value
+}
+
 fn is_no_time(value: &Flicks) -> bool {
     *value == Flicks::ZERO
 }
@@ -682,6 +693,22 @@ pub struct Clip {
     /// Source time shown at `start`.
     pub source_in: Flicks,
     pub speed: Speed,
+    /// A speed ramp: the speed over the clip's timeline, times `speed`
+    /// ([`crate::timing`]). Empty plays at `speed` throughout.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ramp: Vec<RampPoint>,
+    /// Plays the source range backwards, from its out point to `source_in`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reverse: bool,
+    /// A freeze frame: shows the frame at `source_in` throughout, without sound.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub freeze: bool,
+    /// Sound at other speeds keeps its pitch; otherwise the pitch follows the speed.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub keep_pitch: bool,
+    /// Slow motion blends neighbouring source frames instead of repeating them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub frame_blending: bool,
     /// Whether the clip shows the media's picture.
     pub video: bool,
     /// Whether the clip plays the media's sound. "Detach audio" moves it to a linked clip.
@@ -691,6 +718,12 @@ pub struct Clip {
     pub crop: Crop,
     /// 0 to 1.
     pub opacity: f64,
+    /// How the picture mixes with what is below it.
+    #[serde(default, skip_serializing_if = "BlendMode::is_normal")]
+    pub blend_mode: BlendMode,
+    /// Shapes that cut the picture, applied in order after its effects.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub masks: Vec<Mask>,
     /// Gain in decibels; 0 leaves the sound as recorded.
     pub volume_db: f64,
     /// Sound fades at the start and end. Without them a clip's edges still get
@@ -760,11 +793,6 @@ impl Clip {
             || self.fade_out != Flicks::ZERO
             || self.denoise != 0.0
             || !self.audio_effects.is_empty()
-    }
-
-    /// Source time just after the last frame.
-    pub fn source_out(&self) -> Flicks {
-        self.source_in + self.speed.source_span(self.duration)
     }
 
     /// True when `time` falls inside the clip.

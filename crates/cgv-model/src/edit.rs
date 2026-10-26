@@ -5,19 +5,23 @@ use std::sync::Arc;
 use cgv_time::Flicks;
 
 use crate::animation::{
-    property_effect, property_element, value_at, Keyframe, Keyframes, Property,
+    property_effect, property_element, property_mask, value_at, Keyframe, Keyframes, Property,
 };
 use crate::command::{ClipProperties, ClipSpec, Command, Edge, Outcome, TrackSound};
 use crate::effects::{
     parse_lut_ref, Alignment, Effect, EffectSpec, ParamValue, Transition, TransitionSpec,
     MAX_EFFECTS,
 };
+use crate::masks::{Mask, MAX_MASKS};
 use crate::project::{
-    Clip, ClipId, ClipKind, Crop, EffectId, ElementId, LinkId, LutId, Marker, MarkerId, Project,
-    Speed, Track, TrackId, Transform, TransitionId, MAX_TIME,
+    Clip, ClipId, ClipKind, Crop, EffectId, ElementId, LinkId, LutId, Marker, MarkerId, MaskId,
+    Project, Speed, Track, TrackId, Transform, TransitionId, MAX_TIME,
 };
+use crate::timing::{check_shape, shape_mean, RampPoint, RampShape};
 use crate::title::Content;
-use crate::validate::{check_effects, check_keyframes, check_name, validate};
+use crate::validate::{
+    check_effects, check_keyframes, check_masks, check_name, check_timing, validate,
+};
 
 /// Source ranges may end this many flicks past the media's end, to absorb the
 /// rounding of fractional speeds. About 1.4 µs.
@@ -175,6 +179,36 @@ impl Edit {
             Command::SetSpeed { clip, speed } => self.set_speed(*clip, *speed)?,
             Command::SetClipProperties { clip, properties } => {
                 self.set_properties(*clip, properties)?
+            }
+            Command::SetRamp { clip, points } => self.set_ramp(*clip, points)?,
+            Command::SetReverse { clip, reverse } => self.set_reverse(*clip, *reverse)?,
+            Command::FreezeFrame { clip, at, duration } => {
+                self.freeze_frame(*clip, *at, *duration)?
+            }
+            Command::AddMask { clip, mask, index } => self.add_mask(*clip, mask, *index)?,
+            Command::SetMask { clip, mask } => self.set_mask(*clip, mask)?,
+            Command::RemoveMask { clip, mask } => {
+                let (index, mut changed) = self.editable(*clip)?;
+                let position = mask_position(&changed, *mask)?;
+                changed.masks.remove(position);
+                changed
+                    .keyframes
+                    .retain(|name, _| property_mask(name) != Some(*mask));
+                *self.clip_mut(index, *clip) = changed;
+            }
+            Command::MoveMask {
+                clip,
+                mask,
+                index: to,
+            } => {
+                let (index, mut changed) = self.editable(*clip)?;
+                let position = mask_position(&changed, *mask)?;
+                if *to >= changed.masks.len() {
+                    return Err(format!("There is no mask position {}", to + 1));
+                }
+                let moved = changed.masks.remove(position);
+                changed.masks.insert(*to, moved);
+                *self.clip_mut(index, *clip) = changed;
             }
             Command::AddEffect {
                 clip,
@@ -471,6 +505,7 @@ impl Edit {
                             | Command::ClearKeyframes { .. }
                             | Command::SetTransition { .. }
                             | Command::SetTitle { .. }
+                            | Command::SetMask { .. }
                     );
                     if !batchable {
                         return Err(format!("{} can't run in a batch", command.label()));
@@ -682,12 +717,13 @@ impl Edit {
             return Err(format!("Clip {} would end too late", clip.id));
         }
         if clip.is_generated() {
-            return Ok(());
+            return check_timing(clip, true);
         }
         let media = self
             .project
             .media(&clip.media)
             .ok_or_else(|| format!("Clip {} has no media", clip.id))?;
+        check_timing(clip, media.is_still())?;
         if media.is_still() {
             if clip.source_in != Flicks::ZERO {
                 return Err("Stills have no source position".into());
@@ -757,10 +793,7 @@ impl Edit {
         let mut right = clip.clone();
         right.id = right_id;
         right.start = at;
-        right.duration = clip.duration - offset;
-        if !still {
-            right.source_in = clip.source_in + clip.speed.source_span(offset);
-        }
+        right.cut_start(offset, still);
         right.link = right_link;
         // Keyframes are relative to the clip's start: keep the animation where it was.
         for keys in right.keyframes.values_mut() {
@@ -781,11 +814,21 @@ impl Edit {
         for effect in right.audio_effects.iter_mut() {
             effect.id = EffectId(self.alloc());
         }
+        // So are its masks.
+        let masks: BTreeMap<MaskId, MaskId> = right
+            .masks
+            .iter()
+            .map(|mask| (mask.id, MaskId(self.alloc())))
+            .collect();
+        for mask in right.masks.iter_mut() {
+            mask.id = masks[&mask.id];
+        }
+        right.keyframes = rename_masks(&right.keyframes, &masks);
         // Fades stay at the outer edges; the cut plays straight through.
         right.fade_in = Flicks::ZERO;
         let track = self.track_mut(index);
         let position = track.position(id).expect("clip on its track");
-        track.clips[position].duration = offset;
+        track.clips[position].set_end(offset, still);
         track.clips[position].fade_out = Flicks::ZERO;
         track.clips.insert(position + 1, right);
         // The clip's end is now the right half's.
@@ -803,10 +846,7 @@ impl Edit {
         let clip = self.clip_mut(index, id);
         let delta = start - clip.start;
         clip.start = start;
-        clip.duration -= delta;
-        if !still {
-            clip.source_in += clip.speed.source_span(delta);
-        }
+        clip.cut_start(delta, still);
         shift_keys(clip, -delta);
     }
 
@@ -824,13 +864,16 @@ impl Edit {
                 self.track_mut(index).clips.retain(|c| c.id != clip.id);
                 continue;
             }
+            let still = self.is_still(&clip.media);
             if clip.start < start && clip.end() > end {
                 let right = self.split_clip(index, clip.id, end, None)?;
                 self.created.push(right.0);
-                self.clip_mut(index, clip.id).duration = start - clip.start;
+                self.clip_mut(index, clip.id)
+                    .set_end(start - clip.start, still);
                 changed.push(right);
             } else if clip.start < start {
-                self.clip_mut(index, clip.id).duration = start - clip.start;
+                self.clip_mut(index, clip.id)
+                    .set_end(start - clip.start, still);
             } else {
                 self.set_start(index, clip.id, end);
             }
@@ -920,12 +963,19 @@ impl Edit {
             duration: self.snap(spec.duration)?,
             source_in: spec.source_in,
             speed,
+            ramp: spec.ramp.clone(),
+            reverse: spec.reverse,
+            freeze: spec.freeze,
+            keep_pitch: true,
+            frame_blending: false,
             video,
             audio,
             link: None,
             transform: Transform::default(),
             crop: Crop::default(),
             opacity: 1.0,
+            blend_mode: Default::default(),
+            masks: Vec::new(),
             volume_db: 0.0,
             fade_in: Flicks::ZERO,
             fade_out: Flicks::ZERO,
@@ -968,6 +1018,27 @@ impl Edit {
             return Err(format!("{name} animates an effect the clip lacks"));
         }
         clip.keyframes = rename_effects(&spec.keyframes, &renamed);
+        // So do masks.
+        if spec.masks.len() > MAX_MASKS {
+            return Err(format!("A clip has at most {MAX_MASKS} masks"));
+        }
+        let mut masks: BTreeMap<MaskId, MaskId> = BTreeMap::new();
+        for mask in &spec.masks {
+            let id = MaskId(self.alloc());
+            if masks.insert(mask.id, id).is_some() {
+                return Err(format!("Two masks share the id {}", mask.id));
+            }
+            clip.masks.push(Mask { id, ..mask.clone() });
+        }
+        if let Some(name) = clip
+            .keyframes
+            .keys()
+            .find(|name| property_mask(name).is_some_and(|old| !masks.contains_key(&old)))
+        {
+            return Err(format!("{name} animates a mask the clip lacks"));
+        }
+        clip.keyframes = rename_masks(&clip.keyframes, &masks);
+        check_masks(&clip)?;
         // Title elements get new ids too, and their keyframes follow them.
         if let Some(title) = &spec.title {
             let mut title = title.clone();
@@ -1142,10 +1213,7 @@ impl Edit {
                     // longer first clip never starts before 0.
                     let still = self.is_still(&clip.media);
                     let changed = self.clip_mut(index, target);
-                    changed.duration -= delta;
-                    if !still {
-                        changed.source_in += changed.speed.source_span(delta);
-                    }
+                    changed.cut_start(delta, still);
                     shift_keys(changed, -delta);
                 }
                 (Edge::Start, false) => {
@@ -1155,20 +1223,17 @@ impl Edit {
                     }
                     self.set_start(index, target, start);
                 }
-                (Edge::End, false) => self.clip_mut(index, target).duration += delta,
+                (Edge::End, false) => self.lengthen(index, target, delta),
                 (Edge::Start, true) => {
                     // The clip keeps its place; its content and everything after move.
                     let still = self.is_still(&clip.media);
                     let changed = self.clip_mut(index, target);
-                    changed.duration -= delta;
-                    if !still {
-                        changed.source_in += changed.speed.source_span(delta);
-                    }
+                    changed.cut_start(delta, still);
                     shift_keys(changed, -delta);
                     self.shift_after(index, target, clip.end(), -delta)?;
                 }
                 (Edge::End, true) => {
-                    self.clip_mut(index, target).duration += delta;
+                    self.lengthen(index, target, delta);
                     self.shift_after(index, target, clip.end(), delta)?;
                 }
             }
@@ -1176,6 +1241,14 @@ impl Edit {
             self.check_track(index)?;
         }
         Ok(())
+    }
+
+    /// Moves the end of clip `id` by `delta`, keeping its content where it plays.
+    fn lengthen(&mut self, index: usize, id: ClipId, delta: Flicks) {
+        let still = self.is_still(&self.find(id).expect("clip").1.media);
+        let clip = self.clip_mut(index, id);
+        let duration = clip.duration + delta;
+        clip.set_end(duration, still);
     }
 
     /// [`Edit::shift`], leaving clip `except` where it is.
@@ -1221,7 +1294,7 @@ impl Edit {
                 // A linked partner without a neighbour there is simply trimmed.
                 match edge {
                     Edge::Start => self.set_start(index, target, clip.start + delta),
-                    Edge::End => self.clip_mut(index, target).duration += delta,
+                    Edge::End => self.lengthen(index, target, delta),
                 }
                 self.check_clip_id(target)?;
                 self.check_track(index)?;
@@ -1231,7 +1304,7 @@ impl Edit {
                 Edge::End => (target, neighbour),
                 Edge::Start => (neighbour, target),
             };
-            self.clip_mut(index, left).duration += delta;
+            self.lengthen(index, left, delta);
             let cut = self.find(right)?.1.start + delta;
             if cut >= self.find(right)?.1.end() {
                 return Err(format!("Clip {right} would be shorter than one frame"));
@@ -1442,7 +1515,7 @@ impl Edit {
                 .collect();
             for (block, previous, next) in plan {
                 if let Some(previous) = previous {
-                    self.clip_mut(index, previous).duration += delta;
+                    self.lengthen(index, previous, delta);
                     self.check_clip_id(previous)?;
                 }
                 if let Some(next) = next {
@@ -1531,6 +1604,9 @@ impl Edit {
             transform: Transform::default(),
             crop: Crop::default(),
             opacity: 1.0,
+            blend_mode: Default::default(),
+            masks: Vec::new(),
+            frame_blending: false,
             effects: Vec::new(),
             keyframes: sound_keys,
             ..clip.clone()
@@ -1564,22 +1640,240 @@ impl Edit {
         if self.is_still(&target.media) {
             return Err("Stills have no speed".into());
         }
+        if target.freeze {
+            return Err("Freeze frames have no speed".into());
+        }
         for target in self.with_partners(&[id])? {
             let (index, clip) = self.find(target)?;
             if self.is_still(&clip.media) {
                 continue;
             }
             self.unlocked(index)?;
-            // Keep the same source span, rounded down to whole frames.
-            let source = clip.speed.source_span(clip.duration);
-            let frames = speed.timeline_span(source).0 / self.frame.0;
+            if clip.freeze {
+                continue;
+            }
+            // Keep the same source span, rounded down to whole frames. A ramp keeps
+            // its shape, so the length scales by the change of speed.
+            let length = if clip.ramp.is_empty() {
+                speed.timeline_span(clip.source_span()).0 as f64
+            } else {
+                clip.duration.0 as f64 * clip.speed.as_f64() / speed.as_f64()
+            };
+            let frames = (length / self.frame.0 as f64).floor() as i64;
             let duration = Flicks(frames.max(1) * self.frame.0);
-            let changed = self.clip_mut(index, target);
-            changed.speed = speed;
-            changed.duration = duration;
+            self.clip_mut(index, target).retime(speed, duration);
             self.check_clip_id(target)?;
             self.check_track(index)?;
         }
+        Ok(())
+    }
+
+    fn set_ramp(&mut self, id: ClipId, shape: &[RampShape]) -> Result<(), String> {
+        let (_, target) = self.find(id)?;
+        if target.is_generated() || self.is_still(&target.media) {
+            return Err("Only video and sound have a speed to ramp".into());
+        }
+        if target.freeze {
+            return Err("Freeze frames have no speed".into());
+        }
+        for target in self.with_partners(&[id])? {
+            let (index, clip) = self.find(target)?;
+            if clip.is_generated() || clip.freeze || self.is_still(&clip.media) {
+                continue;
+            }
+            self.unlocked(index)?;
+            check_shape(shape, clip.speed)?;
+            // The clip keeps the media it plays; its length follows the curve,
+            // rounded down to whole frames.
+            let at_base = clip.source_span().0 as f64 / clip.speed.as_f64();
+            let mean = if shape.is_empty() {
+                1.0
+            } else {
+                shape_mean(shape)
+            };
+            let frames = (at_base / mean / self.frame.0 as f64).floor() as i64;
+            let duration = Flicks(frames.max(1) * self.frame.0);
+            let out = clip.source_out();
+            let changed = self.clip_mut(index, target);
+            changed.ramp = shape
+                .iter()
+                .map(|point| RampPoint {
+                    time: Flicks((point.at * duration.0 as f64).round() as i64),
+                    speed: point.speed,
+                })
+                .collect();
+            changed.ramp.dedup_by_key(|point| point.time);
+            changed.duration = duration;
+            if changed.reverse {
+                changed.source_in = out - changed.source_span();
+            }
+            self.check_clip_id(target)?;
+            self.check_track(index)?;
+        }
+        Ok(())
+    }
+
+    fn set_reverse(&mut self, id: ClipId, reverse: bool) -> Result<(), String> {
+        let (_, target) = self.find(id)?;
+        if target.is_generated() || self.is_still(&target.media) {
+            return Err("Only video and sound play backwards".into());
+        }
+        if target.freeze {
+            return Err("A freeze frame has no direction".into());
+        }
+        for target in self.with_partners(&[id])? {
+            let (index, clip) = self.find(target)?;
+            if clip.is_generated() || clip.freeze || self.is_still(&clip.media) {
+                continue;
+            }
+            self.unlocked(index)?;
+            // The same media, the other way round.
+            self.clip_mut(index, target).reverse = reverse;
+            self.check_clip_id(target)?;
+        }
+        Ok(())
+    }
+
+    /// Splits clip `id` at `at` and holds the frame there for `duration`.
+    fn freeze_frame(&mut self, id: ClipId, at: Flicks, duration: Flicks) -> Result<(), String> {
+        let at = self.position(at)?;
+        let duration = self.snap(duration)?;
+        if duration < self.frame {
+            return Err("A freeze frame lasts at least one frame".into());
+        }
+        let (index, clip) = self.editable(id)?;
+        let media = self.project.media(&clip.media).cloned();
+        let Some(media) = media.filter(|m| m.has_video && !m.is_still() && clip.video) else {
+            return Err("Only a video clip's frame can be frozen".into());
+        };
+        if clip.freeze {
+            return Err("This is already a freeze frame".into());
+        }
+        if !clip.contains(at) {
+            return Err(format!("Clip {id} is not under that point"));
+        }
+        let offset = at - clip.start;
+        let shown = clip.source_at(offset, self.frame);
+        let source = if media.loops() {
+            Flicks(shown.0.rem_euclid(media.duration.0))
+        } else {
+            Flicks(shown.0.clamp(0, (media.duration.0 - 1).max(0)))
+        };
+        let main = self.main_index();
+        let partners = self.with_partners(&[id])?;
+        let mut tracks = BTreeSet::new();
+        for &partner in &partners {
+            let (track, _) = self.find(partner)?;
+            self.unlocked(track)?;
+            tracks.insert(track);
+        }
+        let on_main = main == Some(index);
+        if !on_main && main.is_some_and(|main| tracks.contains(&main)) {
+            return Err("Freeze the clip on the magnetic main track instead".into());
+        }
+        // The frozen picture looks as the clip does at that frame.
+        let frozen_id = ClipId(self.alloc());
+        let mut effects = Vec::new();
+        for (position, effect) in clip.effects.iter().enumerate() {
+            effects.push(Effect {
+                id: EffectId(self.alloc()),
+                params: clip.effect_params_at(position, offset),
+                ..effect.clone()
+            });
+        }
+        let mut masks = Vec::new();
+        for mask in clip.masks_at(offset) {
+            masks.push(Mask {
+                id: MaskId(self.alloc()),
+                ..mask
+            });
+        }
+        let frozen = Clip {
+            id: frozen_id,
+            kind: ClipKind::Media,
+            media: clip.media.clone(),
+            start: at,
+            duration,
+            source_in: source,
+            speed: Speed::NORMAL,
+            ramp: Vec::new(),
+            reverse: false,
+            freeze: true,
+            keep_pitch: true,
+            frame_blending: false,
+            video: true,
+            audio: false,
+            link: None,
+            transform: clip.transform_at(offset),
+            crop: clip.crop_at(offset),
+            opacity: clip.opacity_at(offset),
+            blend_mode: clip.blend_mode,
+            masks,
+            volume_db: 0.0,
+            fade_in: Flicks::ZERO,
+            fade_out: Flicks::ZERO,
+            denoise: 0.0,
+            effects,
+            audio_effects: Vec::new(),
+            keyframes: Keyframes::new(),
+            title: None,
+        };
+        if clip.spans(at) {
+            self.split(at, &[id])?;
+        }
+        // Make room: the main track settles around the new clip; elsewhere the
+        // later clips of every track the clip and its partners are on move along.
+        if !on_main {
+            for &track in &tracks {
+                self.shift(track, at, duration)?;
+            }
+        }
+        self.created.insert(0, frozen_id.0);
+        self.check_clip(&frozen)?;
+        let track = self.track_mut(index);
+        track.insert_sorted(frozen);
+        self.check_track(index)
+    }
+
+    fn add_mask(&mut self, id: ClipId, spec: &Mask, index: Option<usize>) -> Result<(), String> {
+        let (track, mut clip) = self.editable(id)?;
+        if !clip.video || clip.is_adjustment() {
+            return Err(format!("Clip {id} has no picture of its own to mask"));
+        }
+        if clip.masks.len() >= MAX_MASKS {
+            return Err(format!("A clip has at most {MAX_MASKS} masks"));
+        }
+        let index = index.unwrap_or(clip.masks.len());
+        if index > clip.masks.len() {
+            return Err(format!("There is no mask position {}", index + 1));
+        }
+        let mask = Mask {
+            id: MaskId(self.alloc()),
+            ..spec.clone()
+        };
+        mask.check()?;
+        self.created.push(mask.id.0);
+        clip.masks.insert(index, mask);
+        check_masks(&clip)?;
+        *self.clip_mut(track, id) = clip;
+        Ok(())
+    }
+
+    fn set_mask(&mut self, id: ClipId, mask: &Mask) -> Result<(), String> {
+        let (track, mut clip) = self.editable(id)?;
+        let position = mask_position(&clip, mask.id)?;
+        mask.check()?;
+        clip.masks[position] = mask.clone();
+        // Keyframes of points the mask no longer has go.
+        clip.keyframes
+            .retain(|name, _| match Property::parse(name) {
+                Some((Property::Mask(owner), Some(setting))) if owner == mask.id => {
+                    mask.has_setting(setting)
+                }
+                _ => true,
+            });
+        check_keyframes(&clip)?;
+        *self.clip_mut(track, id) = clip;
         Ok(())
     }
 
@@ -1983,6 +2277,29 @@ fn rename_elements(keyframes: &Keyframes, renamed: &BTreeMap<ElementId, ElementI
         .collect()
 }
 
+/// `keyframes` with mask settings renamed from each old mask id to its new one.
+fn rename_masks(keyframes: &Keyframes, renamed: &BTreeMap<MaskId, MaskId>) -> Keyframes {
+    keyframes
+        .iter()
+        .map(|(name, keys)| {
+            let name = match property_mask(name).and_then(|old| Some((old, renamed.get(&old)?))) {
+                Some((old, new)) => {
+                    name.replacen(&format!("masks.{old}."), &format!("masks.{new}."), 1)
+                }
+                None => name.clone(),
+            };
+            (name, keys.clone())
+        })
+        .collect()
+}
+
+fn mask_position(clip: &Clip, id: MaskId) -> Result<usize, String> {
+    clip.masks
+        .iter()
+        .position(|mask| mask.id == id)
+        .ok_or_else(|| format!("Clip {} has no mask {id}", clip.id))
+}
+
 /// The list holding effect `id`, the picture's or the sound's, and its place there.
 fn effect_slot(clip: &mut Clip, id: EffectId) -> Result<(&mut Vec<Effect>, usize), String> {
     if let Some(position) = clip.effects.iter().position(|effect| effect.id == id) {
@@ -2045,6 +2362,17 @@ fn freeze(clip: &mut Clip, property: &str, at: Flicks) -> Result<(), String> {
                 clip.effects[position]
                     .params
                     .insert(param.to_string(), value.param());
+            }
+        }
+        Property::Mask(id) => {
+            let value = clip
+                .keyframes
+                .get(property)
+                .and_then(|keys| value_at(keys, at))
+                .and_then(|value| value.as_number());
+            let position = mask_position(clip, id)?;
+            if let (Some(value), Some(setting)) = (value, param) {
+                clip.masks[position].set(setting, value);
             }
         }
         Property::Element(id) => {
@@ -2117,6 +2445,9 @@ fn apply_properties(clip: &mut Clip, properties: &ClipProperties) -> Result<(), 
     if let Some(volume) = properties.volume_db {
         check_volume(volume)?;
     }
+    if properties.blend_mode.is_some_and(|mode| !mode.is_normal()) && clip.is_adjustment() {
+        return Err("Adjustment layers have no blend modes".into());
+    }
     let fade_in = properties.fade_in.unwrap_or(clip.fade_in);
     let fade_out = properties.fade_out.unwrap_or(clip.fade_out);
     let denoise = properties.denoise.unwrap_or(clip.denoise);
@@ -2141,6 +2472,15 @@ fn apply_properties(clip: &mut Clip, properties: &ClipProperties) -> Result<(), 
     }
     if let Some(volume) = properties.volume_db {
         clip.volume_db = volume;
+    }
+    if let Some(mode) = properties.blend_mode {
+        clip.blend_mode = mode;
+    }
+    if let Some(keep) = properties.keep_pitch {
+        clip.keep_pitch = keep;
+    }
+    if let Some(blending) = properties.frame_blending {
+        clip.frame_blending = blending;
     }
     Ok(())
 }

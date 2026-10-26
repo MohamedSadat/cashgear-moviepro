@@ -3,10 +3,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::animation::{Interpolation, KeyValue, Keyframes};
 use crate::effects::{Alignment, EffectSpec, LutSpec, Params, TransitionSpec};
+use crate::masks::{BlendMode, Mask};
 use crate::project::{
-    ClipId, ClipKind, Crop, Ducking, EffectId, LutId, MarkerColor, MarkerId, MediaRef,
+    ClipId, ClipKind, Crop, Ducking, EffectId, LutId, MarkerColor, MarkerId, MaskId, MediaRef,
     ProjectSettings, Speed, TrackId, TrackRole, Transform, TransitionId,
 };
+use crate::timing::{RampPoint, RampShape};
 use crate::title::Title;
 
 /// Which edge of a clip an edit acts on.
@@ -56,6 +58,19 @@ pub struct ClipSpec {
     /// What a new title clip draws (`kind` is title). Its elements get new ids.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<Title>,
+    /// The speed ramp of a pasted copy, by time from its start.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ramp: Vec<RampPoint>,
+    /// A pasted copy plays backwards.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reverse: bool,
+    /// A pasted freeze frame.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub freeze: bool,
+    /// Masks of the new clip, as when pasting a copy. They get new ids, and their
+    /// keyframes follow them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub masks: Vec<Mask>,
 }
 
 /// Transform values to change; missing ones stay as they are, so edits of
@@ -163,6 +178,14 @@ pub struct ClipProperties {
     /// Noise reduction, 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub denoise: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blend_mode: Option<BlendMode>,
+    /// Sound at other speeds keeps its pitch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_pitch: Option<bool>,
+    /// Slow motion blends neighbouring frames.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_blending: Option<bool>,
 }
 
 /// Track sound settings to change; missing ones stay as they are.
@@ -339,6 +362,51 @@ pub enum Command {
     SetClipProperties {
         clip: ClipId,
         properties: ClipProperties,
+    },
+    /// Gives a clip a speed ramp from points by fraction of its length; an empty
+    /// list removes it. The clip keeps its start and the media it plays; its
+    /// length follows the curve.
+    SetRamp {
+        clip: ClipId,
+        points: Vec<RampShape>,
+    },
+    /// Plays a clip backwards, or forwards again, over the same media.
+    SetReverse {
+        clip: ClipId,
+        reverse: bool,
+    },
+    /// Holds the frame showing at `at` for `duration`: the clip splits there and a
+    /// freeze frame goes in between, pushing the later clips of its track, and of
+    /// its linked partners' tracks, along.
+    FreezeFrame {
+        clip: ClipId,
+        at: Flicks,
+        duration: Flicks,
+    },
+
+    /// Adds a mask to a clip at `index` in its list (the end by default). It gets
+    /// a new id.
+    AddMask {
+        clip: ClipId,
+        mask: Mask,
+        #[serde(default)]
+        index: Option<usize>,
+    },
+    /// Replaces the shape and settings of the clip's mask with `mask`'s id.
+    /// Keyframes of points it no longer has go.
+    SetMask {
+        clip: ClipId,
+        mask: Mask,
+    },
+    /// Removes a mask and its keyframes.
+    RemoveMask {
+        clip: ClipId,
+        mask: MaskId,
+    },
+    MoveMask {
+        clip: ClipId,
+        mask: MaskId,
+        index: usize,
     },
 
     /// Adds an effect to a clip's picture, or with `audio` to its sound, at
@@ -550,6 +618,15 @@ impl Command {
             Command::DetachAudio { .. } => "Detach audio",
             Command::SetSpeed { .. } => "Change speed",
             Command::SetClipProperties { .. } => "Change clip",
+            Command::SetRamp { points, .. } if points.is_empty() => "Remove speed ramp",
+            Command::SetRamp { .. } => "Change speed ramp",
+            Command::SetReverse { reverse: true, .. } => "Reverse",
+            Command::SetReverse { .. } => "Play forwards",
+            Command::FreezeFrame { .. } => "Freeze frame",
+            Command::AddMask { .. } => "Add mask",
+            Command::SetMask { .. } => "Change mask",
+            Command::RemoveMask { .. } => "Delete mask",
+            Command::MoveMask { .. } => "Reorder masks",
             Command::AddEffect { audio: true, .. } => "Add sound effect",
             Command::AddEffect { .. } => "Add effect",
             Command::SetTitle { .. } => "Edit title",

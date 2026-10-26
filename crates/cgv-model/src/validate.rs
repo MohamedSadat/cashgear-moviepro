@@ -7,11 +7,13 @@ use crate::animation::{KeyValue, Property};
 use crate::command::Edge;
 use crate::edit::{check_crop, check_opacity, check_pan, check_transform, check_volume};
 use crate::effects::MAX_EFFECTS;
+use crate::masks::{mask_value_ok, MAX_MASKS};
 use crate::project::{Clip, ClipKind, Project, Speed, Track, MAX_TIME};
+use crate::timing::check_ramp;
 use crate::title::{element_value_ok, Content};
 
 /// Animated properties one clip can have, and keyframes per property.
-const MAX_ANIMATED: usize = 256;
+const MAX_ANIMATED: usize = 1024;
 const MAX_KEYS: usize = 10_000;
 
 /// Effects are for clips with a picture; their settings are well formed.
@@ -62,7 +64,56 @@ fn check_property_value(property: Property, setting: Option<&str>, value: f64) -
         Property::VolumeDb => (-96.0..=24.0).contains(&value),
         Property::Effect(_) => value.is_finite() && value.abs() <= 1e9,
         Property::Element(_) => element_value_ok(setting.unwrap_or_default(), value),
+        Property::Mask(_) => mask_value_ok(setting.unwrap_or_default(), value),
     }
+}
+
+/// A clip's speed ramp, direction and freeze fit together and fit the clip:
+/// only moving pictures and sound have timing, and a freeze frame has no other.
+pub(crate) fn check_timing(clip: &Clip, still: bool) -> Result<(), String> {
+    let timed = clip.freeze || clip.reverse || !clip.ramp.is_empty();
+    if timed && (still || clip.is_generated()) {
+        return Err(format!("Clip {} has no media timing to change", clip.id));
+    }
+    if clip.freeze {
+        if clip.reverse || !clip.ramp.is_empty() || clip.speed != Speed::NORMAL {
+            return Err(format!("Freeze frame {} has no speed", clip.id));
+        }
+        if clip.audio || !clip.video {
+            return Err(format!(
+                "Freeze frame {} is a picture without sound",
+                clip.id
+            ));
+        }
+    }
+    check_ramp(&clip.ramp, clip.duration, clip.speed)
+}
+
+/// A clip's masks and blend mode are well formed, on a clip with a picture of its own.
+pub(crate) fn check_masks(clip: &Clip) -> Result<(), String> {
+    if clip.is_adjustment() && (!clip.masks.is_empty() || !clip.blend_mode.is_normal()) {
+        return Err("Adjustment layers have no masks or blend modes".into());
+    }
+    if clip.masks.is_empty() {
+        return Ok(());
+    }
+    if !clip.video {
+        return Err(format!("Clip {} has masks but no picture", clip.id));
+    }
+    if clip.masks.len() > MAX_MASKS {
+        return Err(format!("A clip has at most {MAX_MASKS} masks"));
+    }
+    let mut ids = BTreeSet::new();
+    for mask in &clip.masks {
+        if !ids.insert(mask.id) {
+            return Err(format!(
+                "Clip {} has two masks with id {}",
+                clip.id, mask.id
+            ));
+        }
+        mask.check()?;
+    }
+    Ok(())
 }
 
 /// Keyframes name properties the clip has, in time order, with values in range.
@@ -82,6 +133,16 @@ pub(crate) fn check_keyframes(clip: &Clip) -> Result<(), String> {
             }
             Property::Effect(id) if !clip.effects.iter().any(|e| e.id == id) => {
                 return Err(format!("Clip {} has no effect {id} to animate", clip.id))
+            }
+            Property::Mask(id) => {
+                let mask = clip
+                    .masks
+                    .iter()
+                    .find(|mask| mask.id == id)
+                    .ok_or_else(|| format!("Clip {} has no mask {id} to animate", clip.id))?;
+                if !mask.has_setting(setting.unwrap_or_default()) {
+                    return Err(format!("Mask {id} has no {}", setting.unwrap_or_default()));
+                }
             }
             Property::Element(id) => {
                 let element = clip
@@ -272,13 +333,15 @@ pub fn validate(project: &Project) -> Result<(), String> {
                     if media.is_still() && clip.source_in != Flicks::ZERO {
                         return Err(format!("Still clip {} has a source position", clip.id));
                     }
+                    check_timing(clip, media.is_still())?;
                 }
                 ClipKind::Adjustment | ClipKind::Title => {
                     let plain = clip.media.is_empty()
                         && clip.video
                         && !clip.audio
                         && clip.source_in == Flicks::ZERO
-                        && clip.speed == Speed::NORMAL;
+                        && clip.speed == Speed::NORMAL
+                        && !clip.retimed();
                     if !plain {
                         return Err(format!(
                             "Adjustment layer or title {} has media, sound or timing",
@@ -308,6 +371,10 @@ pub fn validate(project: &Project) -> Result<(), String> {
             check_effects(clip)?;
             for effect in clip.effects.iter().chain(&clip.audio_effects) {
                 unique(effect.id.0, "Effect")?;
+            }
+            check_masks(clip)?;
+            for mask in &clip.masks {
+                unique(mask.id.0, "Mask")?;
             }
             check_keyframes(clip)?;
             check_transform(&clip.transform)?;
