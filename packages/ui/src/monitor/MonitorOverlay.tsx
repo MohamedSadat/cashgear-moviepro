@@ -5,15 +5,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import type {
-  Clip,
-  Command,
-  EngineClient,
-  Mask,
-  MaskPoint,
-  Project,
-  Transform,
-} from '@cgv/engine-client';
+import type { Clip, Command, EngineClient, Mask, MaskPoint, Transform } from '@cgv/engine-client';
 import type { Gesture } from '../editing/gesture';
 import type { EditorState } from '../editing/useEditor';
 import { isAnimated, numberAt } from '../effects/animation';
@@ -27,6 +19,7 @@ import {
   framingTransform,
   invert,
   letterbox,
+  pictureOf,
   pictureToProject,
   type Affine,
   type Point,
@@ -107,18 +100,6 @@ function setValues(
   const rest = Object.keys(statics).length ? stat(statics) : null;
   if (rest) commands.unshift(rest);
   return commands.length === 1 ? commands[0] : { type: 'batch', commands };
-}
-
-/** The picture a clip shows, upright: its media's, or the frame for a title. */
-function pictureOf(project: Project, clip: Clip, rotations: Map<string, number>): Size {
-  const frame = { width: project.settings.width, height: project.settings.height };
-  if (clip.kind === 'title' || clip.kind === 'adjustment') return frame;
-  const media = project.media.find((item) => item.id === clip.media);
-  if (!media?.width || !media.height) return frame;
-  const turned = (rotations.get(media.id) ?? 0) % 180 === 90;
-  return turned
-    ? { width: media.height, height: media.width }
-    : { width: media.width, height: media.height };
 }
 
 /** The ellipse or rounded box of a mask as an SVG path in screen pixels. */

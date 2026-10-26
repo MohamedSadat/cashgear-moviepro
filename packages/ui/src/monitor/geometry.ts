@@ -1,4 +1,4 @@
-import type { Transform } from '@cgv/engine-client';
+import type { Clip, Project, Transform } from '@cgv/engine-client';
 
 // Where a clip's picture lands on the monitor, as crates/cgv-render/src/geometry.rs
 // places it: the picture fits the frame, then the clip's transform moves, scales
@@ -131,4 +131,16 @@ export function centredRect(project: Size, picture: Size, fraction: number): Rec
     w: w * fraction,
     h: h * fraction,
   };
+}
+
+/** The picture a clip shows, upright: its media's, or the frame for a title. */
+export function pictureOf(project: Project, clip: Clip, rotations: Map<string, number>): Size {
+  const frame = { width: project.settings.width, height: project.settings.height };
+  if (clip.kind === 'title' || clip.kind === 'adjustment') return frame;
+  const media = project.media.find((item) => item.id === clip.media);
+  if (!media?.width || !media.height) return frame;
+  const turned = (rotations.get(media.id) ?? 0) % 180 === 90;
+  return turned
+    ? { width: media.height, height: media.width }
+    : { width: media.width, height: media.height };
 }

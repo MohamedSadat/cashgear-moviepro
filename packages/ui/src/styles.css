@@ -1333,6 +1333,41 @@ body,
   fill: var(--cgv-volume-line);
 }
 
+.cgv-layout-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+
+.cgv-layout {
+  padding: 3px;
+  border: 1px solid var(--cgv-border);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.cgv-layout:hover:not(:disabled) {
+  border-color: var(--cgv-accent);
+}
+
+.cgv-layout:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.cgv-layout-icon {
+  display: block;
+  width: 100%;
+}
+
+.cgv-layout-icon rect,
+.cgv-layout-icon polygon {
+  fill: #4f5566;
+  stroke: var(--cgv-panel);
+  stroke-width: 1;
+}
+
 .cgv-mask-name {
   flex: 1;
   font-size: 12px;

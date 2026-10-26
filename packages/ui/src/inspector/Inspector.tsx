@@ -11,6 +11,7 @@ import { frameDuration } from '../timeline/geometry';
 import { AnimatedField, Section, type PropertyField } from './AnimatedField';
 import { EffectStack } from './EffectStack';
 import { ScrubField, keyContext, usePausedTime } from './fields';
+import { LayoutSection } from './LayoutSection';
 import { MaskSection } from './MaskSection';
 import { SpeedSection } from './SpeedSection';
 import { TitleInspector } from './TitleInspector';
@@ -228,6 +229,7 @@ export function Inspector({ editor }: { editor: EditorState }) {
           </CgButton>
         </Section>
       )}
+      {clip.video && !adjustment && <LayoutSection editor={editor} clip={clip} disabled={locked} />}
       {clip.video && !adjustment && (
         <Section title="Crop">
           {(['left', 'top', 'right', 'bottom'] as const).map((side) =>
