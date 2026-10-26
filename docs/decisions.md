@@ -2,6 +2,61 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-26: Phase 9 answers
+
+- **Scope:** the plan's seven tools: speed (ramps, reverse, freeze frame, time-stretch), chroma key, masks, blend modes, picture-in-picture and split screen, Ken Burns, and templates.
+  - Stabilization and motion tracking get a later phase of their own.
+- **Who designs templates:** we do, with our own script, as with the titles, stickers and sounds.
+  - The 20 project, intro and outro templates use the built-in titles, transitions, effects, stickers and music beds over generated backgrounds. No licences are involved.
+- **Delivery:** bundled in the app, in a format ready for a server.
+  - Each template carries a pack id and version, as effects do, so a server can offer more later. No server in this phase.
+- **WASM size:** the gzip budget rises from 2 MB to 2.25 MB.
+  - At the start of the phase the engine was 1,955,197 bytes gzipped, 45 KB under the old budget.
+  - New code still builds for size.
+
+## 2026-10-26: Phase 9 defaults
+
+These were proposed alongside the questions, and the user raised no objection.
+
+- **Model:** `.cgvproj` format 6, with a migration from format 5.
+- **Speed:** constant speed from 0.1× to 100× stays as it is (Phase 2).
+  - **Ramps:** a speed curve over the clip, with points and easing, and six presets: Montage, Hero, Bullet, Jumper, Flash in and Flash out. The clip's length follows the curve. Each change is one undo step.
+  - **Freeze frame:** splits the clip at the playhead and holds that frame for 2 s.
+  - **Slow motion:** repeats frames by default, with frame blending as an option. Optical flow comes later.
+  - **Reverse:** backwards playback reads each frame from its key frame, so it is smooth only on short-GOP files (Phase 3). A reversed clip therefore gets a short-GOP copy of the range it uses, made in the background: FFmpeg on the desktop, WebCodecs on the web. Until the copy is ready, the seek path plays it. Exports read the original file.
+- **Sound at other speeds:**
+  - Pitch-preserving time-stretch, written by us in `cgv-dsp`. Rubber Band (GPL) and SoundTouch (LGPL) are excluded.
+  - Sound plays from 0.1× to 4× and is muted above 4×.
+  - "Keep pitch" is on by default; off, the pitch follows the speed.
+  - Reversed clips play their sound backwards.
+- **Chroma key:** a pack effect in `assets/effects/`.
+  - Settings: key colour (green by default), tolerance, softness, spill suppression, edge feather and choke.
+  - The key colour is picked with an eyedropper on the monitor. A matte view shows the result.
+- **Masks:** a stack on each clip, in the clip's own picture space, so masks move with the clip.
+  - Shapes: rectangle (with rounded corners), ellipse, polygon and a Bézier pen.
+  - Each mask has feather, expansion, opacity and invert, and combines with the masks before it by add, subtract or intersect.
+  - Every mask setting and shape point can be keyframed.
+- **Monitor handles:** a new overlay on the program monitor for transform, crop, masks and Ken Burns framing.
+  - It sends commands as the inspector does, and never touches media or GPU state.
+- **Blend modes:** normal, the plan's seven (multiply, screen, overlay, soft light, add, darken, lighten), plus difference, exclusion, hard light, colour dodge and colour burn.
+  - They are computed on sRGB-encoded values, as Photoshop and Premiere compute them. Normal stays in linear light.
+- **Picture-in-picture and split screen:** presets that write ordinary transform, crop and mask values, so everything they set stays editable.
+  - Picture-in-picture: four corners at three sizes.
+  - Split screen: about 10 layouts, filled from the selected clips on stacked tracks.
+- **Ken Burns:** start and end frames drawn on the monitor, written as transform keyframes with ease in-out.
+- **Templates:**
+  - JSON bundled into the UI, never inside the WASM, previewed by the preview worker.
+  - Kinds: intros and outros, slideshows, vlog and promo templates, 9:16 and 1:1 social formats, and Arabic and bilingual ones.
+  - A project template opens as a new project at its own size. An intro or outro goes in at the playhead.
+  - Slots are placeholder clips. "Fill" puts the selected media into the slots in order, and dropping media on a slot replaces it. Media shorter than its slot holds its last frame. Titles, transitions, effects and music stay in place.
+- **Tests:**
+  - Golden renders of every tool on WebGPU and WebGL2.
+  - **Green screen:** a synthetic set made by `scripts/make-test-media.mjs`, with a known matte, soft edges, motion blur, uneven green, spill, camera noise and H.264 compression. Keys are scored against the true alpha, and spill is measured.
+  - **Pitch:** test tones keep their pitch within 10 cents from 0.25× to 4×.
+  - **Exports:** ramp and mask exports are compared with the preview by PSNR, as in Phase 5.
+  - **Templates:** each of the 20 is filled from test clips, timed from "Fill" to a playable timeline.
+- **Pushing:** one push near the end of the phase, after the user's go-ahead. It includes the desktop filmstrip fix (`cc7b6c1`).
+
 ## 2026-10-25: Desktop filmstrips
 
 - The timeline reads each filmstrip thumbnail by fetching its object URL and decoding the blob off the main thread. The desktop's CSP allowed `blob:` for images and workers but not for `connect-src`, so every fetch failed and desktop timelines drew no filmstrips (since Phase 4).
