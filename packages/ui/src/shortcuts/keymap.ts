@@ -28,6 +28,7 @@ export type ActionId =
   | 'trimStartToPlayhead'
   | 'trimEndToPlayhead'
   | 'addTransition'
+  | 'freezeFrame'
   | 'addMarker'
   | 'toggleSnapping'
   | 'toggleMagnetic'
@@ -70,6 +71,7 @@ export const actions: readonly ActionInfo[] = [
   { id: 'trimStartToPlayhead', label: 'Trim start to the playhead', group: 'Editing' },
   { id: 'trimEndToPlayhead', label: 'Trim end to the playhead', group: 'Editing' },
   { id: 'addTransition', label: 'Add the default transition at the playhead', group: 'Editing' },
+  { id: 'freezeFrame', label: 'Freeze the frame at the playhead', group: 'Editing' },
   { id: 'undo', label: 'Undo', group: 'Editing' },
   { id: 'redo', label: 'Redo', group: 'Editing' },
   { id: 'addMarker', label: 'Add a marker', group: 'Timeline' },
@@ -114,6 +116,7 @@ const common = {
   deselect: ['Escape'],
   addMarker: ['M'],
   addTransition: ['Ctrl+D'],
+  freezeFrame: ['Alt+F'],
   toggleMagnetic: [],
   selectTool: ['V'],
   bladeTool: ['C'],

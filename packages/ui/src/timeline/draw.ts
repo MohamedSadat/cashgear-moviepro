@@ -2,6 +2,7 @@
 // and waveforms, the ruler, markers and gesture feedback. Only what is in view is
 // drawn, so the cost follows the canvas size, not the clip count. The playhead is
 // an element over the canvas, so playback never redraws it.
+import { sourceAt } from '../speed/timing';
 import { titleName } from '../titles/templates';
 import {
   FLICKS_PER_SECOND,
@@ -211,14 +212,14 @@ function drawFilmstrip(
   const first = input.images.get(visuals.thumbnails[0]);
   if (!first || h < 6) return;
   const tile = Math.max(8, (h * first.width) / first.height);
-  const speed = clip.speed.num / clip.speed.den;
   // Tiles are laid from the clip's start, so they stay put while scrolling.
   const firstTile = Math.max(0, Math.floor(-x / tile));
   const lastTile = Math.min(Math.ceil(w / tile), Math.ceil((input.view.width - x) / tile));
   for (let i = firstTile; i < lastTile; i++) {
     const left = x + i * tile;
     const middle = ((i + 0.5) * tile * FLICKS_PER_SECOND) / input.view.scale;
-    const seconds = (clip.sourceIn + middle * speed) / FLICKS_PER_SECOND;
+    // What the clip shows there, at its speed, along its ramp, either way round.
+    const seconds = sourceAt(clip, middle) / FLICKS_PER_SECOND;
     const url = thumbnailAt(visuals, seconds);
     const image = url ? input.images.get(url) : null;
     if (image) ctx.drawImage(image, left, y, tile, h);
@@ -239,22 +240,23 @@ function drawWaveform(
   const waveform = visuals.waveform;
   if (!waveform || h < 4) return;
   const pyramid = input.peaks.get(waveform.peaks, waveform.peaksPerSecond);
-  const speed = clip.speed.num / clip.speed.den;
-  const secondsPerPixel = (speed / input.view.scale) * 1;
-  const perPixel = secondsPerPixel * waveform.peaksPerSecond;
+  const flicksPerPixel = FLICKS_PER_SECOND / input.view.scale;
   const gain = Math.min(1, 10 ** (clip.volumeDb / 20));
   const middle = y + h / 2;
   const from = Math.max(0, Math.floor(x));
   const to = Math.min(input.view.width, Math.ceil(x + w));
-  const source = clip.sourceIn / FLICKS_PER_SECOND;
   if (to <= from) return;
   // One outline (the top edge left to right, the bottom edge back) is far cheaper
   // for the GPU to fill than a rectangle per pixel column.
   const bottoms: number[] = [];
   ctx.beginPath();
   for (let px = from; px < to; px++) {
-    const start = source + (px - x) * secondsPerPixel;
-    const [min, max] = pyramid.range(start, start + secondsPerPixel, perPixel);
+    // The media this column plays, at its speed and either way round.
+    const a = sourceAt(clip, (px - x) * flicksPerPixel) / FLICKS_PER_SECOND;
+    const b = sourceAt(clip, (px + 1 - x) * flicksPerPixel) / FLICKS_PER_SECOND;
+    const start = Math.min(a, b);
+    const length = Math.max(1e-6, Math.abs(b - a));
+    const [min, max] = pyramid.range(start, start + length, length * waveform.peaksPerSecond);
     const top = middle - (max / 127) * (h / 2) * gain;
     const bottom = middle - (min / 127) * (h / 2) * gain;
     // At least a pixel thick, so silence still shows as a line.
@@ -356,10 +358,15 @@ function drawSoundHandles(ctx: CanvasRenderingContext2D, input: DrawInput, clip:
   ctx.restore();
 }
 
+/** How the clip plays its media, before its name: a freeze, a ramp or a speed, and reversed. */
 function speedLabel(clip: Clip) {
-  if (clip.speed.num === clip.speed.den) return '';
-  const value = clip.speed.num / clip.speed.den;
-  return `${Number(value.toFixed(2))}× `;
+  const parts: string[] = [];
+  if (clip.freeze) parts.push('Freeze');
+  else if (clip.ramp?.length) parts.push('Ramp');
+  else if (clip.speed.num !== clip.speed.den)
+    parts.push(`${Number((clip.speed.num / clip.speed.den).toFixed(2))}×`);
+  if (clip.reverse) parts.push('↺');
+  return parts.length ? `${parts.join(' ')} ` : '';
 }
 
 function drawClip(

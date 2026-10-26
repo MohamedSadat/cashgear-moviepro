@@ -12,6 +12,7 @@ import type { Catalog, CatalogItem } from '../effects/catalog';
 import type { PlaybackControls } from '../monitor/usePlayback';
 import type { ProjectState } from '../project/useProject';
 import { soundMediaId, soundRequest, type Sound } from '../sounds/catalog';
+import { freezeSeconds } from '../speed/timing';
 import type { ActionId } from '../shortcuts/keymap';
 import { findClip, projectEnd, withPartners } from '../timeline/controller';
 import {
@@ -434,6 +435,20 @@ export function useEditor(
               entry.entry.id === defaultTransition.kind,
           );
           if (item) void applyTransition(item);
+        },
+        freezeFrame: () => {
+          if (!current) return;
+          // The selected video clip under the playhead, or the main-track one there.
+          const under = (clip: Clip) =>
+            clip.video && clip.start <= time && time < clip.start + clip.duration;
+          const target =
+            selection
+              .map((id) => findClip(current, id)?.clip)
+              .find((clip) => clip && under(clip)) ??
+            current.tracks.find((track) => track.id === current.mainTrack)?.clips.find(under);
+          if (!target) return project.notice('No video clip is under the playhead to freeze.');
+          const duration = Math.round((freezeSeconds * FLICKS_PER_SECOND) / frame) * frame;
+          execute({ type: 'freezeFrame', clip: target.id, at: time, duration });
         },
         toggleSnapping: () => options.onSnapping(!options.snapping),
         toggleMagnetic: () =>

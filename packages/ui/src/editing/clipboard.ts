@@ -41,6 +41,9 @@ export function copyClips(project: Project, ids: number[]): ClipboardItem[] {
           crop: clip.crop,
           opacity: clip.opacity,
           volumeDb: clip.volumeDb,
+          blendMode: clip.blendMode,
+          keepPitch: clip.keepPitch,
+          frameBlending: clip.frameBlending,
           // Sound settings only where there is sound to take them.
           ...(clip.audio
             ? { fadeIn: clip.fadeIn ?? 0, fadeOut: clip.fadeOut ?? 0, denoise: clip.denoise ?? 0 }
@@ -64,6 +67,11 @@ export function copyClips(project: Project, ids: number[]): ClipboardItem[] {
         })),
         keyframes: clip.keyframes,
         title: clip.title,
+        // Timing and masks travel too; masks keep their ids for their keyframes.
+        ramp: clip.ramp,
+        reverse: clip.reverse,
+        freeze: clip.freeze,
+        masks: clip.masks,
       },
       group: clip.link !== null && (groups.get(clip.link) ?? 0) > 1 ? clip.link : null,
     }));

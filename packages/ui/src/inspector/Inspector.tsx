@@ -1,139 +1,38 @@
-import { useState, type ReactNode } from 'react';
 import { CgButton } from '@cashgear/ui';
 import {
   FLICKS_PER_SECOND,
+  type BlendMode,
   type Clip,
   type ClipProperties,
   type Command,
-  type Speed,
 } from '@cgv/engine-client';
 import type { EditorState } from '../editing/useEditor';
-import { isAnimated, numberAt } from '../effects/animation';
 import { frameDuration } from '../timeline/geometry';
-import { CurveLane } from './CurveLane';
+import { AnimatedField, Section, type PropertyField } from './AnimatedField';
 import { EffectStack } from './EffectStack';
-import {
-  KeyControls,
-  ScrubField,
-  clamp,
-  keyCommand,
-  keyContext,
-  usePausedTime,
-  type KeyContext,
-} from './fields';
+import { ScrubField, keyContext, usePausedTime } from './fields';
+import { MaskSection } from './MaskSection';
+import { SpeedSection } from './SpeedSection';
 import { TitleInspector } from './TitleInspector';
 import { TransitionInspector } from './TransitionInspector';
 import { titleName } from '../titles/templates';
 
-const speeds: Speed[] = [
-  { num: 1, den: 4 },
-  { num: 1, den: 2 },
-  { num: 1, den: 1 },
-  { num: 3, den: 2 },
-  { num: 2, den: 1 },
-  { num: 4, den: 1 },
+/** Blend modes in the order editors list them. */
+export const blendModes: { mode: BlendMode; label: string }[] = [
+  { mode: 'normal', label: 'Normal' },
+  { mode: 'darken', label: 'Darken' },
+  { mode: 'multiply', label: 'Multiply' },
+  { mode: 'colorBurn', label: 'Colour burn' },
+  { mode: 'lighten', label: 'Lighten' },
+  { mode: 'screen', label: 'Screen' },
+  { mode: 'colorDodge', label: 'Colour dodge' },
+  { mode: 'add', label: 'Add' },
+  { mode: 'overlay', label: 'Overlay' },
+  { mode: 'softLight', label: 'Soft light' },
+  { mode: 'hardLight', label: 'Hard light' },
+  { mode: 'difference', label: 'Difference' },
+  { mode: 'exclusion', label: 'Exclusion' },
 ];
-
-/** A speed as a reduced fraction, to two decimal places. */
-export function speedOf(value: number): Speed {
-  let num = Math.round(clamp(value, 0.1, 100) * 100);
-  let den = 100;
-  const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
-  const divisor = gcd(num, den);
-  num /= divisor;
-  den /= divisor;
-  return { num, den };
-}
-
-const speedLabel = (speed: Speed) => `${Number((speed.num / speed.den).toFixed(2))}×`;
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="cgv-inspector-section" aria-label={title}>
-      <h3>{title}</h3>
-      {children}
-    </section>
-  );
-}
-
-interface PropertyField {
-  label: string;
-  /** Keyframe properties set together; the first one's value shows. */
-  properties: string[];
-  /** The static value, in the model's units. */
-  base: number;
-  /** Shown value per model unit (100 for a fraction shown as %). */
-  display: number;
-  min: number;
-  max: number;
-  step: number;
-  precision: number;
-  unit: string;
-  testId: string;
-  /** The static change, when not animated, in the model's units. */
-  set(value: number): Command;
-}
-
-/** A clip property with its keyframe controls and, when asked, its curve. */
-function AnimatedField({
-  editor,
-  context,
-  field,
-  disabled,
-}: {
-  editor: EditorState;
-  context: KeyContext;
-  field: PropertyField;
-  disabled: boolean;
-}) {
-  const [curve, setCurve] = useState(false);
-  const lead = field.properties[0];
-  const animated = isAnimated(context.clip, lead);
-  const value = animated ? numberAt(context.clip, lead, context.offset, field.base) : field.base;
-  return (
-    <>
-      <ScrubField
-        label={field.label}
-        value={value * field.display}
-        min={field.min * field.display}
-        max={field.max * field.display}
-        step={field.step}
-        precision={field.precision}
-        unit={field.unit}
-        testId={field.testId}
-        editor={editor}
-        disabled={disabled}
-        command={(shown) =>
-          animated
-            ? keyCommand(context, field.properties, shown / field.display)
-            : field.set(shown / field.display)
-        }
-        keys={
-          <KeyControls
-            editor={editor}
-            context={context}
-            properties={field.properties}
-            label={field.label}
-            value={value}
-            disabled={disabled}
-            curve={{ open: curve, toggle: () => setCurve(!curve) }}
-          />
-        }
-      />
-      {animated && curve && (
-        <CurveLane
-          editor={editor}
-          context={context}
-          properties={field.properties}
-          label={field.label}
-          min={field.min}
-          max={field.max}
-          disabled={disabled}
-        />
-      )}
-    </>
-  );
-}
 
 /**
  * The selected clip's picture, sound, speed and effects, or the selected
@@ -196,7 +95,6 @@ export function Inspector({ editor }: { editor: EditorState }) {
     testId: 'field-opacity',
     set: (opacity) => set({ opacity }),
   });
-  const speed = clip.speed;
   return (
     <aside
       className="cgv-inspector"
@@ -284,6 +182,27 @@ export function Inspector({ editor }: { editor: EditorState }) {
             set: (rotation) => set({ transform: { rotation } }),
           })}
           {opacity}
+          {!adjustment && (
+            <label className="cgv-field" data-testid="field-blend-mode">
+              <span className="cgv-field-label">Blend</span>
+              <select
+                aria-label="Blend mode"
+                value={clip.blendMode ?? 'normal'}
+                disabled={locked}
+                onChange={(event) =>
+                  void editor.project.execute(
+                    set({ blendMode: event.currentTarget.value as BlendMode }),
+                  )
+                }
+              >
+                {blendModes.map(({ mode, label }) => (
+                  <option key={mode} value={mode}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <CgButton
             appearance="ghost"
             size="small"
@@ -388,46 +307,18 @@ export function Inspector({ editor }: { editor: EditorState }) {
       )}
       {clip.audio && <EffectStack editor={editor} context={context} disabled={locked} audio />}
       {!still && (
-        <Section title="Speed">
-          <div className="cgv-speed-presets" role="group" aria-label="Speed presets">
-            {speeds.map((preset) => {
-              const active = preset.num === speed.num && preset.den === speed.den;
-              return (
-                <CgButton
-                  key={speedLabel(preset)}
-                  appearance={active ? 'soft' : 'ghost'}
-                  intent={active ? 'primary' : 'neutral'}
-                  size="small"
-                  aria-pressed={active}
-                  disabled={locked}
-                  onClick={() =>
-                    void editor.project.execute({ type: 'setSpeed', clip: clip.id, speed: preset })
-                  }
-                >
-                  {speedLabel(preset)}
-                </CgButton>
-              );
-            })}
-          </div>
-          <ScrubField
-            label="Speed"
-            value={Number((speed.num / speed.den).toFixed(2))}
-            min={0.1}
-            max={100}
-            step={0.01}
-            precision={2}
-            unit="×"
-            testId="field-speed"
-            editor={editor}
-            disabled={locked}
-            command={(value) => ({ type: 'setSpeed', clip: clip.id, speed: speedOf(value) })}
-          />
-          {speed.num !== speed.den && clip.audio && (
-            <p className="cgv-muted">Sound plays only at normal speed for now.</p>
-          )}
-        </Section>
+        <SpeedSection
+          editor={editor}
+          clip={clip}
+          playhead={playhead}
+          frame={frame}
+          disabled={locked}
+        />
       )}
       {clip.video && <EffectStack editor={editor} context={context} disabled={locked} />}
+      {clip.video && !adjustment && (
+        <MaskSection editor={editor} context={context} disabled={locked} />
+      )}
     </aside>
   );
 }
