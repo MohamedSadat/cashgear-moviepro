@@ -1,0 +1,152 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Day in my life",
+  "category": "Vlog",
+  "kind": "project",
+  "aspect": "landscape",
+  "description": "Six moments of a day, each with a time stamp lower third.",
+  "tracks": [
+    {
+      "name": "Clips",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 2.5
+        },
+        {
+          "type": "slot",
+          "slot": 2,
+          "at": 2.5,
+          "seconds": 2.5
+        },
+        {
+          "type": "slot",
+          "slot": 3,
+          "at": 5,
+          "seconds": 2.5
+        },
+        {
+          "type": "slot",
+          "slot": 4,
+          "at": 7.5,
+          "seconds": 2.5
+        },
+        {
+          "type": "slot",
+          "slot": 5,
+          "at": 10,
+          "seconds": 2.5
+        },
+        {
+          "type": "slot",
+          "slot": 6,
+          "at": 12.5,
+          "seconds": 2.5
+        }
+      ],
+      "transitions": [
+        {
+          "from": 0,
+          "to": 1,
+          "kind": "wipe",
+          "seconds": 0.4,
+          "params": {
+            "direction": "right",
+            "softness": 0.1
+          }
+        },
+        {
+          "from": 1,
+          "to": 2,
+          "kind": "wipe",
+          "seconds": 0.4,
+          "params": {
+            "direction": "right",
+            "softness": 0.1
+          }
+        },
+        {
+          "from": 2,
+          "to": 3,
+          "kind": "wipe",
+          "seconds": 0.4,
+          "params": {
+            "direction": "right",
+            "softness": 0.1
+          }
+        },
+        {
+          "from": 3,
+          "to": 4,
+          "kind": "wipe",
+          "seconds": 0.4,
+          "params": {
+            "direction": "right",
+            "softness": 0.1
+          }
+        },
+        {
+          "from": 4,
+          "to": 5,
+          "kind": "wipe",
+          "seconds": 0.4,
+          "params": {
+            "direction": "right",
+            "softness": 0.1
+          }
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "lower-minimal",
+          "at": 0.4,
+          "seconds": 2,
+          "texts": ["7:00 AM", "Morning coffee"]
+        },
+        {
+          "type": "title",
+          "template": "lower-minimal",
+          "at": 2.9,
+          "seconds": 2,
+          "texts": ["9:30 AM", "Off to work"]
+        },
+        {
+          "type": "title",
+          "template": "lower-minimal",
+          "at": 5.4,
+          "seconds": 2,
+          "texts": ["1:00 PM", "Lunch break"]
+        },
+        {
+          "type": "title",
+          "template": "lower-minimal",
+          "at": 7.9,
+          "seconds": 2,
+          "texts": ["6:00 PM", "Golden hour"]
+        }
+      ]
+    },
+    {
+      "name": "Music",
+      "role": "music",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "happy-ukulele",
+          "at": 0,
+          "seconds": 15,
+          "fadeOut": 1.5
+        }
+      ]
+    }
+  ],
+  "seconds": 15,
+  "slots": 6
+}

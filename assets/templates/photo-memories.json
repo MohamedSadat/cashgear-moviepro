@@ -1,0 +1,220 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Photo memories",
+  "category": "Slideshows",
+  "kind": "project",
+  "aspect": "landscape",
+  "description": "Eight memories, dipping through white, in the look of old film.",
+  "tracks": [
+    {
+      "name": "Photos",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 2.5,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 2,
+          "at": 2.5,
+          "seconds": 2.5,
+          "motion": "zoomOut"
+        },
+        {
+          "type": "slot",
+          "slot": 3,
+          "at": 5,
+          "seconds": 2.5,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 4,
+          "at": 7.5,
+          "seconds": 2.5,
+          "motion": "zoomOut"
+        },
+        {
+          "type": "slot",
+          "slot": 5,
+          "at": 10,
+          "seconds": 2.5,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 6,
+          "at": 12.5,
+          "seconds": 2.5,
+          "motion": "zoomOut"
+        },
+        {
+          "type": "slot",
+          "slot": 7,
+          "at": 15,
+          "seconds": 2.5,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 8,
+          "at": 17.5,
+          "seconds": 2.5,
+          "motion": "zoomOut"
+        }
+      ],
+      "transitions": [
+        {
+          "from": 0,
+          "to": 1,
+          "kind": "dip",
+          "seconds": 0.5,
+          "params": {
+            "color": {
+              "r": 1,
+              "g": 1,
+              "b": 1,
+              "a": 1
+            }
+          }
+        },
+        {
+          "from": 1,
+          "to": 2,
+          "kind": "dip",
+          "seconds": 0.5,
+          "params": {
+            "color": {
+              "r": 1,
+              "g": 1,
+              "b": 1,
+              "a": 1
+            }
+          }
+        },
+        {
+          "from": 2,
+          "to": 3,
+          "kind": "dip",
+          "seconds": 0.5,
+          "params": {
+            "color": {
+              "r": 1,
+              "g": 1,
+              "b": 1,
+              "a": 1
+            }
+          }
+        },
+        {
+          "from": 3,
+          "to": 4,
+          "kind": "dip",
+          "seconds": 0.5,
+          "params": {
+            "color": {
+              "r": 1,
+              "g": 1,
+              "b": 1,
+              "a": 1
+            }
+          }
+        },
+        {
+          "from": 4,
+          "to": 5,
+          "kind": "dip",
+          "seconds": 0.5,
+          "params": {
+            "color": {
+              "r": 1,
+              "g": 1,
+              "b": 1,
+              "a": 1
+            }
+          }
+        },
+        {
+          "from": 5,
+          "to": 6,
+          "kind": "dip",
+          "seconds": 0.5,
+          "params": {
+            "color": {
+              "r": 1,
+              "g": 1,
+              "b": 1,
+              "a": 1
+            }
+          }
+        },
+        {
+          "from": 6,
+          "to": 7,
+          "kind": "dip",
+          "seconds": 0.5,
+          "params": {
+            "color": {
+              "r": 1,
+              "g": 1,
+              "b": 1,
+              "a": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Look",
+      "clips": [
+        {
+          "type": "adjustment",
+          "at": 0,
+          "seconds": 20,
+          "effects": [
+            {
+              "kind": "old-film",
+              "params": {
+                "sepia": 0.35,
+                "grain": 0.2,
+                "scratches": 0.2,
+                "flicker": 0.1
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "handwritten",
+          "at": 0.3,
+          "seconds": 2.2,
+          "texts": ["Our memories"]
+        }
+      ]
+    },
+    {
+      "name": "Music",
+      "role": "music",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "lofi-evening",
+          "at": 0,
+          "seconds": 20,
+          "fadeOut": 2
+        }
+      ]
+    }
+  ],
+  "seconds": 20,
+  "slots": 8
+}

@@ -1,0 +1,142 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Wedding day",
+  "category": "Slideshows",
+  "kind": "project",
+  "aspect": "landscape",
+  "description": "Six soft, warm moments joined by blurred dissolves, under an elegant title.",
+  "tracks": [
+    {
+      "name": "Clips",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 3.5,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 2,
+          "at": 3.5,
+          "seconds": 3.5,
+          "motion": "panRight"
+        },
+        {
+          "type": "slot",
+          "slot": 3,
+          "at": 7,
+          "seconds": 3.5,
+          "motion": "zoomOut"
+        },
+        {
+          "type": "slot",
+          "slot": 4,
+          "at": 10.5,
+          "seconds": 3.5,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 5,
+          "at": 14,
+          "seconds": 3.5,
+          "motion": "panRight"
+        },
+        {
+          "type": "slot",
+          "slot": 6,
+          "at": 17.5,
+          "seconds": 3.5,
+          "motion": "zoomOut"
+        }
+      ],
+      "transitions": [
+        {
+          "from": 0,
+          "to": 1,
+          "kind": "blur-dissolve",
+          "seconds": 0.8
+        },
+        {
+          "from": 1,
+          "to": 2,
+          "kind": "blur-dissolve",
+          "seconds": 0.8
+        },
+        {
+          "from": 2,
+          "to": 3,
+          "kind": "blur-dissolve",
+          "seconds": 0.8
+        },
+        {
+          "from": 3,
+          "to": 4,
+          "kind": "blur-dissolve",
+          "seconds": 0.8
+        },
+        {
+          "from": 4,
+          "to": 5,
+          "kind": "blur-dissolve",
+          "seconds": 0.8
+        }
+      ]
+    },
+    {
+      "name": "Look",
+      "clips": [
+        {
+          "type": "adjustment",
+          "at": 0,
+          "seconds": 21,
+          "effects": [
+            {
+              "kind": "temperature-tint",
+              "params": {
+                "temperature": 0.25
+              }
+            },
+            {
+              "kind": "vignette",
+              "params": {
+                "amount": 0.3,
+                "softness": 0.7
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "elegant",
+          "at": 0.5,
+          "seconds": 3.5,
+          "texts": ["Forever Begins"]
+        }
+      ]
+    },
+    {
+      "name": "Music",
+      "role": "music",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "ambient-drift",
+          "at": 0,
+          "seconds": 21,
+          "fadeOut": 3
+        }
+      ]
+    }
+  ],
+  "seconds": 21,
+  "slots": 6
+}

@@ -1,0 +1,110 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Square highlights",
+  "category": "Social",
+  "kind": "project",
+  "aspect": "square",
+  "description": "Four 1:1 highlights for a feed, ending on your handle.",
+  "tracks": [
+    {
+      "name": "Clips",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 2.5,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 2,
+          "at": 2.5,
+          "seconds": 2.5,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 3,
+          "at": 5,
+          "seconds": 2.5,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 4,
+          "at": 7.5,
+          "seconds": 2.5,
+          "motion": "zoomIn"
+        }
+      ],
+      "transitions": [
+        {
+          "from": 0,
+          "to": 1,
+          "kind": "cross-dissolve",
+          "seconds": 0.4
+        },
+        {
+          "from": 1,
+          "to": 2,
+          "kind": "cross-dissolve",
+          "seconds": 0.4
+        },
+        {
+          "from": 2,
+          "to": 3,
+          "kind": "cross-dissolve",
+          "seconds": 0.4
+        }
+      ]
+    },
+    {
+      "name": "Stickers",
+      "clips": [
+        {
+          "type": "sticker",
+          "sticker": "fire",
+          "at": 0.4,
+          "seconds": 2,
+          "properties": {
+            "transform": {
+              "x": 360,
+              "y": -360,
+              "scaleX": 0.35,
+              "scaleY": 0.35
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "follow",
+          "at": 7.6,
+          "seconds": 2.4,
+          "texts": ["@yourhandle"]
+        }
+      ]
+    },
+    {
+      "name": "Music",
+      "role": "music",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "boom-bap",
+          "at": 0,
+          "seconds": 10,
+          "fadeOut": 1
+        }
+      ]
+    }
+  ],
+  "seconds": 10,
+  "slots": 4
+}

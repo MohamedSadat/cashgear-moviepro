@@ -16,6 +16,7 @@ import { EffectsBrowser } from './effects/EffectsBrowser';
 import { usePreviews } from './effects/usePreviews';
 import { SoundsBrowser } from './sounds/SoundsBrowser';
 import { StickersBrowser } from './stickers/StickersBrowser';
+import { TemplatesBrowser } from './templates/TemplatesBrowser';
 import { TitlesBrowser } from './titles/TitlesBrowser';
 import { useTitlePreviews } from './titles/useTitlePreviews';
 import { useEditor, type EditorState } from './editing/useEditor';
@@ -326,6 +327,11 @@ export function AppShell({ platform }: Props) {
                 id: 'media',
                 label: 'Media',
                 render: () => <MediaLibraryPanel project={project} />,
+              },
+              {
+                id: 'templates',
+                label: 'Templates',
+                render: () => <TemplatesBrowser editor={editor} />,
               },
               {
                 id: 'titles',

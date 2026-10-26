@@ -1,0 +1,135 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Travel slideshow",
+  "category": "Slideshows",
+  "kind": "project",
+  "aspect": "landscape",
+  "description": "Six photos or clips drifting in slow zooms and pans, with a title and an acoustic bed.",
+  "tracks": [
+    {
+      "name": "Clips",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 3,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 2,
+          "at": 3,
+          "seconds": 3,
+          "motion": "panLeft"
+        },
+        {
+          "type": "slot",
+          "slot": 3,
+          "at": 6,
+          "seconds": 3,
+          "motion": "zoomOut"
+        },
+        {
+          "type": "slot",
+          "slot": 4,
+          "at": 9,
+          "seconds": 3,
+          "motion": "panRight"
+        },
+        {
+          "type": "slot",
+          "slot": 5,
+          "at": 12,
+          "seconds": 3,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 6,
+          "at": 15,
+          "seconds": 3,
+          "motion": "panLeft"
+        }
+      ],
+      "transitions": [
+        {
+          "from": 0,
+          "to": 1,
+          "kind": "cross-dissolve",
+          "seconds": 0.6
+        },
+        {
+          "from": 1,
+          "to": 2,
+          "kind": "cross-dissolve",
+          "seconds": 0.6
+        },
+        {
+          "from": 2,
+          "to": 3,
+          "kind": "cross-dissolve",
+          "seconds": 0.6
+        },
+        {
+          "from": 3,
+          "to": 4,
+          "kind": "cross-dissolve",
+          "seconds": 0.6
+        },
+        {
+          "from": 4,
+          "to": 5,
+          "kind": "cross-dissolve",
+          "seconds": 0.6
+        }
+      ]
+    },
+    {
+      "name": "Look",
+      "clips": [
+        {
+          "type": "adjustment",
+          "at": 0,
+          "seconds": 18,
+          "effects": [
+            {
+              "kind": "vignette",
+              "params": {
+                "amount": 0.4
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "elegant",
+          "at": 0.4,
+          "seconds": 3,
+          "texts": ["My Journey"]
+        }
+      ]
+    },
+    {
+      "name": "Music",
+      "role": "music",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "acoustic-morning",
+          "at": 0,
+          "seconds": 18,
+          "fadeOut": 2
+        }
+      ]
+    }
+  ],
+  "seconds": 18,
+  "slots": 6
+}

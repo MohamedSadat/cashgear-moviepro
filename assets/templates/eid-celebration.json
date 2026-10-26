@@ -1,0 +1,119 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Eid celebration",
+  "category": "Arabic",
+  "kind": "project",
+  "aspect": "landscape",
+  "description": "Four joyful moments spinning into each other, with an Eid greeting.",
+  "tracks": [
+    {
+      "name": "Clips",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 3,
+          "motion": "zoomOut"
+        },
+        {
+          "type": "slot",
+          "slot": 2,
+          "at": 3,
+          "seconds": 3,
+          "motion": "zoomOut"
+        },
+        {
+          "type": "slot",
+          "slot": 3,
+          "at": 6,
+          "seconds": 3,
+          "motion": "zoomOut"
+        },
+        {
+          "type": "slot",
+          "slot": 4,
+          "at": 9,
+          "seconds": 3,
+          "motion": "zoomOut"
+        }
+      ],
+      "transitions": [
+        {
+          "from": 0,
+          "to": 1,
+          "kind": "spin",
+          "seconds": 0.5,
+          "params": {
+            "direction": "clockwise"
+          }
+        },
+        {
+          "from": 1,
+          "to": 2,
+          "kind": "spin",
+          "seconds": 0.5,
+          "params": {
+            "direction": "clockwise"
+          }
+        },
+        {
+          "from": 2,
+          "to": 3,
+          "kind": "spin",
+          "seconds": 0.5,
+          "params": {
+            "direction": "clockwise"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "arabic-welcome",
+          "at": 0.3,
+          "seconds": 3.5,
+          "texts": ["عيد مبارك"]
+        }
+      ]
+    },
+    {
+      "name": "Stickers",
+      "clips": [
+        {
+          "type": "sticker",
+          "sticker": "party",
+          "at": 6.2,
+          "seconds": 3,
+          "properties": {
+            "transform": {
+              "x": 560,
+              "y": 260,
+              "scaleX": 0.35,
+              "scaleY": 0.35
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Music",
+      "role": "music",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "happy-ukulele",
+          "at": 0,
+          "seconds": 12,
+          "fadeOut": 1.5
+        }
+      ]
+    }
+  ],
+  "seconds": 12,
+  "slots": 4
+}

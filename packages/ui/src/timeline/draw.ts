@@ -148,6 +148,8 @@ export interface DropPreview {
   duration: number;
   /** Inserted at a cut on the magnetic main track. */
   insert: boolean;
+  /** The template slot clip it fills instead, if dropped on one. */
+  slot?: number;
 }
 
 /** Where a dragged effect or transition would go. */

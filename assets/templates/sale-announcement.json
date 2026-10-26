@@ -1,0 +1,145 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Sale announcement",
+  "category": "Promo",
+  "kind": "project",
+  "aspect": "landscape",
+  "description": "A big sale headline on red, then three products with sale badges.",
+  "tracks": [
+    {
+      "name": "Clips",
+      "clips": [
+        {
+          "type": "background",
+          "color": {
+            "r": 0.7843,
+            "g": 0.1176,
+            "b": 0.2275,
+            "a": 1
+          },
+          "at": 0,
+          "seconds": 1.5
+        },
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 1.5,
+          "seconds": 2.5
+        },
+        {
+          "type": "slot",
+          "slot": 2,
+          "at": 4,
+          "seconds": 2.5
+        },
+        {
+          "type": "slot",
+          "slot": 3,
+          "at": 6.5,
+          "seconds": 2.5
+        }
+      ],
+      "transitions": [
+        {
+          "from": 0,
+          "to": 1,
+          "kind": "push",
+          "seconds": 0.4,
+          "params": {
+            "direction": "up"
+          }
+        },
+        {
+          "from": 1,
+          "to": 2,
+          "kind": "slide",
+          "seconds": 0.4,
+          "params": {
+            "direction": "left"
+          }
+        },
+        {
+          "from": 2,
+          "to": 3,
+          "kind": "slide",
+          "seconds": 0.4,
+          "params": {
+            "direction": "left"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "breaking",
+          "at": 0.1,
+          "seconds": 1.6,
+          "texts": ["BIG SALE"]
+        }
+      ]
+    },
+    {
+      "name": "Stickers",
+      "clips": [
+        {
+          "type": "sticker",
+          "sticker": "sale",
+          "at": 1.8,
+          "seconds": 2.2,
+          "properties": {
+            "transform": {
+              "x": -620,
+              "y": -280,
+              "scaleX": 0.35,
+              "scaleY": 0.35
+            }
+          }
+        },
+        {
+          "type": "sticker",
+          "sticker": "burst",
+          "at": 4.3,
+          "seconds": 2.2,
+          "properties": {
+            "transform": {
+              "x": 620,
+              "y": 280,
+              "scaleX": 0.35,
+              "scaleY": 0.35
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sounds",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "impact",
+          "at": 0,
+          "seconds": 2
+        }
+      ]
+    },
+    {
+      "name": "Music",
+      "role": "music",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "electro-pulse",
+          "at": 0,
+          "seconds": 9,
+          "fadeOut": 1
+        }
+      ]
+    }
+  ],
+  "seconds": 9,
+  "slots": 3
+}

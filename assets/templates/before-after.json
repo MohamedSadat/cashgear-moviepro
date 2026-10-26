@@ -1,0 +1,129 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Before and after",
+  "category": "Social",
+  "kind": "project",
+  "aspect": "landscape",
+  "description": "A split screen of before and after, then the after on its own.",
+  "tracks": [
+    {
+      "name": "Before",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 5,
+          "properties": {
+            "transform": {
+              "x": -480,
+              "y": 0,
+              "scaleX": 1,
+              "scaleY": 1
+            },
+            "crop": {
+              "left": 0.25,
+              "right": 0.25,
+              "top": 0,
+              "bottom": 0
+            }
+          }
+        },
+        {
+          "type": "slot",
+          "slot": 3,
+          "at": 5,
+          "seconds": 4,
+          "motion": "zoomIn"
+        }
+      ],
+      "transitions": [
+        {
+          "from": 0,
+          "to": 1,
+          "kind": "wipe",
+          "seconds": 0.6,
+          "params": {
+            "direction": "left"
+          }
+        }
+      ]
+    },
+    {
+      "name": "After",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 2,
+          "at": 0,
+          "seconds": 5,
+          "properties": {
+            "transform": {
+              "x": 480,
+              "y": 0,
+              "scaleX": 1,
+              "scaleY": 1
+            },
+            "crop": {
+              "left": 0.25,
+              "right": 0.25,
+              "top": 0,
+              "bottom": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "default",
+          "at": 0.3,
+          "seconds": 4.2,
+          "texts": ["Before"],
+          "properties": {
+            "transform": {
+              "x": -480,
+              "y": 380,
+              "scaleX": 0.6,
+              "scaleY": 0.6
+            }
+          }
+        },
+        {
+          "type": "title",
+          "template": "default",
+          "at": 0.3,
+          "seconds": 4.2,
+          "texts": ["After"],
+          "properties": {
+            "transform": {
+              "x": 480,
+              "y": 380,
+              "scaleX": 0.6,
+              "scaleY": 0.6
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Music",
+      "role": "music",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "corporate-bright",
+          "at": 0,
+          "seconds": 9,
+          "fadeOut": 1
+        }
+      ]
+    }
+  ],
+  "seconds": 9,
+  "slots": 3
+}

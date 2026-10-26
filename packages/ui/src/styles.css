@@ -1942,6 +1942,140 @@ body,
   font-size: 11px;
 }
 
+/* ---- Project templates ---- */
+
+.cgv-template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cgv-template {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  align-items: center;
+  padding: 6px;
+  border: 1px solid var(--cgv-border);
+  border-radius: 6px;
+}
+
+.cgv-storyboard {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 2px;
+  height: 18px;
+}
+
+.cgv-storyboard > span {
+  display: grid;
+  place-items: center;
+  min-width: 6px;
+  border-radius: 2px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cgv-storyboard-slot {
+  background: color-mix(in srgb, var(--cgv-accent) 35%, transparent);
+  color: inherit;
+}
+
+.cgv-storyboard-fixed {
+  background: var(--cg-surface-subtle);
+}
+
+.cgv-template-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.cgv-template-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cgv-template-summary,
+.cgv-template-description,
+.cgv-slot-help {
+  font-size: 11px;
+}
+
+.cgv-slot-help {
+  margin: 4px 0;
+}
+
+.cgv-slot-list,
+.cgv-slot-media {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cgv-slot-list li,
+.cgv-slot-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 4px;
+  font-size: 12px;
+}
+
+.cgv-slot-pick {
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cgv-slot-pick:hover {
+  background: var(--cg-surface-subtle);
+}
+
+.cgv-slot-pick[aria-pressed='true'] .cgv-slot-number,
+.cgv-slot-list li[data-filled='true'] .cgv-slot-number {
+  background: var(--cgv-accent);
+  color: #fff;
+}
+
+.cgv-slot-number {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--cgv-accent);
+  border-radius: 50%;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cgv-slot-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cgv-slot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
 /* ---- Voiceover ---- */
 
 .cgv-voiceover {

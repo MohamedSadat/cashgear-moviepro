@@ -1,0 +1,80 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Credits",
+  "category": "Outros",
+  "kind": "outro",
+  "description": "Your shot in a corner while the thanks roll up beside it.",
+  "tracks": [
+    {
+      "name": "Background",
+      "clips": [
+        {
+          "type": "background",
+          "color": {
+            "r": 0.0431,
+            "g": 0.0549,
+            "b": 0.0784,
+            "a": 1
+          },
+          "at": 0,
+          "seconds": 6
+        }
+      ]
+    },
+    {
+      "name": "Clip",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 6,
+          "properties": {
+            "transform": {
+              "x": -430,
+              "y": 0,
+              "scaleX": 0.45,
+              "scaleY": 0.45
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "title-and-subtitle",
+          "at": 0.4,
+          "seconds": 5.4,
+          "texts": ["Thanks to", "everyone who made this"],
+          "properties": {
+            "transform": {
+              "x": 420,
+              "y": 0,
+              "scaleX": 0.6,
+              "scaleY": 0.6
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Music",
+      "role": "music",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "cinematic-rise",
+          "at": 0,
+          "seconds": 6,
+          "fadeOut": 2
+        }
+      ]
+    }
+  ],
+  "seconds": 6,
+  "slots": 1
+}

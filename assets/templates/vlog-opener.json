@@ -1,0 +1,140 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Vlog opener",
+  "category": "Vlog",
+  "kind": "project",
+  "aspect": "landscape",
+  "description": "Four quick cuts that push into a fifth shot with a bold title.",
+  "tracks": [
+    {
+      "name": "Clips",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 1.2
+        },
+        {
+          "type": "slot",
+          "slot": 2,
+          "at": 1.2,
+          "seconds": 1.2
+        },
+        {
+          "type": "slot",
+          "slot": 3,
+          "at": 2.4,
+          "seconds": 1.2
+        },
+        {
+          "type": "slot",
+          "slot": 4,
+          "at": 3.5999999999999996,
+          "seconds": 1.2
+        },
+        {
+          "type": "slot",
+          "slot": 5,
+          "at": 4.8,
+          "seconds": 3.2
+        }
+      ],
+      "transitions": [
+        {
+          "from": 0,
+          "to": 1,
+          "kind": "push",
+          "seconds": 0.3,
+          "params": {
+            "direction": "left"
+          }
+        },
+        {
+          "from": 1,
+          "to": 2,
+          "kind": "push",
+          "seconds": 0.3,
+          "params": {
+            "direction": "left"
+          }
+        },
+        {
+          "from": 2,
+          "to": 3,
+          "kind": "push",
+          "seconds": 0.3,
+          "params": {
+            "direction": "left"
+          }
+        },
+        {
+          "from": 3,
+          "to": 4,
+          "kind": "push",
+          "seconds": 0.3,
+          "params": {
+            "direction": "left"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "statement",
+          "at": 4.9,
+          "seconds": 2.8,
+          "texts": ["Let's go!"]
+        }
+      ]
+    },
+    {
+      "name": "Sounds",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "swoosh",
+          "at": 1.05,
+          "seconds": 0.45
+        },
+        {
+          "type": "sound",
+          "sound": "swoosh",
+          "at": 2.25,
+          "seconds": 0.45
+        },
+        {
+          "type": "sound",
+          "sound": "swoosh",
+          "at": 3.45,
+          "seconds": 0.45
+        },
+        {
+          "type": "sound",
+          "sound": "swoosh",
+          "at": 4.65,
+          "seconds": 0.45
+        }
+      ]
+    },
+    {
+      "name": "Music",
+      "role": "music",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "boom-bap",
+          "at": 0,
+          "seconds": 8,
+          "fadeOut": 1
+        }
+      ]
+    }
+  ],
+  "seconds": 8,
+  "slots": 5
+}

@@ -1,0 +1,89 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Bilingual promo",
+  "category": "Arabic",
+  "kind": "project",
+  "aspect": "landscape",
+  "description": "An offer in Arabic and a name in Arabic and English over three shots.",
+  "tracks": [
+    {
+      "name": "Clips",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 3,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 2,
+          "at": 3,
+          "seconds": 3,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 3,
+          "at": 6,
+          "seconds": 3,
+          "motion": "zoomIn"
+        }
+      ],
+      "transitions": [
+        {
+          "from": 0,
+          "to": 1,
+          "kind": "push",
+          "seconds": 0.4,
+          "params": {
+            "direction": "right"
+          }
+        },
+        {
+          "from": 1,
+          "to": 2,
+          "kind": "push",
+          "seconds": 0.4,
+          "params": {
+            "direction": "right"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "arabic-offer",
+          "at": 0.3,
+          "seconds": 2.6
+        },
+        {
+          "type": "title",
+          "template": "lower-bilingual",
+          "at": 3.4,
+          "seconds": 5.2
+        }
+      ]
+    },
+    {
+      "name": "Music",
+      "role": "music",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "corporate-bright",
+          "at": 0,
+          "seconds": 9,
+          "fadeOut": 1
+        }
+      ]
+    }
+  ],
+  "seconds": 9,
+  "slots": 3
+}

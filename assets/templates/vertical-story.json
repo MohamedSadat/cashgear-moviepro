@@ -1,0 +1,117 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Story",
+  "category": "Social",
+  "kind": "project",
+  "aspect": "portrait",
+  "description": "A 9:16 story of three shots sliding up, with stickers and a call-out.",
+  "tracks": [
+    {
+      "name": "Clips",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 4,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 2,
+          "at": 4,
+          "seconds": 4,
+          "motion": "zoomOut"
+        },
+        {
+          "type": "slot",
+          "slot": 3,
+          "at": 8,
+          "seconds": 4,
+          "motion": "zoomIn"
+        }
+      ],
+      "transitions": [
+        {
+          "from": 0,
+          "to": 1,
+          "kind": "slide",
+          "seconds": 0.4,
+          "params": {
+            "direction": "up"
+          }
+        },
+        {
+          "from": 1,
+          "to": 2,
+          "kind": "slide",
+          "seconds": 0.4,
+          "params": {
+            "direction": "up"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stickers",
+      "clips": [
+        {
+          "type": "sticker",
+          "sticker": "heart-eyes",
+          "at": 0.6,
+          "seconds": 3,
+          "properties": {
+            "transform": {
+              "x": 0,
+              "y": -560,
+              "scaleX": 0.45,
+              "scaleY": 0.45
+            }
+          }
+        },
+        {
+          "type": "sticker",
+          "sticker": "sparkles",
+          "at": 4.4,
+          "seconds": 3,
+          "properties": {
+            "transform": {
+              "x": 0,
+              "y": 520,
+              "scaleX": 0.45,
+              "scaleY": 0.45
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "callout",
+          "at": 8.5,
+          "seconds": 3.3,
+          "texts": ["Swipe up"]
+        }
+      ]
+    },
+    {
+      "name": "Music",
+      "role": "music",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "sunny-steps",
+          "at": 0,
+          "seconds": 12,
+          "fadeOut": 1
+        }
+      ]
+    }
+  ],
+  "seconds": 12,
+  "slots": 3
+}

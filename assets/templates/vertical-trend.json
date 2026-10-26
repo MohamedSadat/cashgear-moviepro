@@ -1,0 +1,193 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Trend",
+  "category": "Social",
+  "kind": "project",
+  "aspect": "portrait",
+  "description": "Six one-second cuts for a 9:16 trend, with glitches on the beats.",
+  "tracks": [
+    {
+      "name": "Clips",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 1
+        },
+        {
+          "type": "slot",
+          "slot": 2,
+          "at": 1,
+          "seconds": 1
+        },
+        {
+          "type": "slot",
+          "slot": 3,
+          "at": 2,
+          "seconds": 1
+        },
+        {
+          "type": "slot",
+          "slot": 4,
+          "at": 3,
+          "seconds": 1
+        },
+        {
+          "type": "slot",
+          "slot": 5,
+          "at": 4,
+          "seconds": 1
+        },
+        {
+          "type": "slot",
+          "slot": 6,
+          "at": 5,
+          "seconds": 1
+        }
+      ],
+      "transitions": [
+        {
+          "from": 0,
+          "to": 1,
+          "kind": "zoom",
+          "seconds": 0.2,
+          "params": {
+            "mode": "in"
+          }
+        },
+        {
+          "from": 1,
+          "to": 2,
+          "kind": "zoom",
+          "seconds": 0.2,
+          "params": {
+            "mode": "in"
+          }
+        },
+        {
+          "from": 2,
+          "to": 3,
+          "kind": "zoom",
+          "seconds": 0.2,
+          "params": {
+            "mode": "in"
+          }
+        },
+        {
+          "from": 3,
+          "to": 4,
+          "kind": "zoom",
+          "seconds": 0.2,
+          "params": {
+            "mode": "in"
+          }
+        },
+        {
+          "from": 4,
+          "to": 5,
+          "kind": "zoom",
+          "seconds": 0.2,
+          "params": {
+            "mode": "in"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Glitches",
+      "clips": [
+        {
+          "type": "adjustment",
+          "at": 0.9,
+          "seconds": 0.3,
+          "effects": [
+            {
+              "kind": "glitch",
+              "params": {
+                "amount": 0.8
+              }
+            }
+          ]
+        },
+        {
+          "type": "adjustment",
+          "at": 2.9,
+          "seconds": 0.3,
+          "effects": [
+            {
+              "kind": "glitch",
+              "params": {
+                "amount": 0.8
+              }
+            }
+          ]
+        },
+        {
+          "type": "adjustment",
+          "at": 4.9,
+          "seconds": 0.3,
+          "effects": [
+            {
+              "kind": "glitch",
+              "params": {
+                "amount": 0.8
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "neon",
+          "at": 0,
+          "seconds": 1.8,
+          "texts": ["TRENDING"]
+        }
+      ]
+    },
+    {
+      "name": "Sounds",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "glitch",
+          "at": 0.9,
+          "seconds": 0.6
+        },
+        {
+          "type": "sound",
+          "sound": "glitch",
+          "at": 2.9,
+          "seconds": 0.6
+        },
+        {
+          "type": "sound",
+          "sound": "glitch",
+          "at": 4.9,
+          "seconds": 0.6
+        }
+      ]
+    },
+    {
+      "name": "Music",
+      "role": "music",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "electro-pulse",
+          "at": 0,
+          "seconds": 6,
+          "fadeOut": 0.5
+        }
+      ]
+    }
+  ],
+  "seconds": 6,
+  "slots": 6
+}

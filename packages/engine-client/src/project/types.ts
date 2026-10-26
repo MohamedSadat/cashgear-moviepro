@@ -258,6 +258,8 @@ export interface Clip {
   keyframes?: Record<string, Keyframe[]>;
   /** What a title clip draws. */
   title?: Title;
+  /** The template slot (1 and up) this clip is, as a placeholder or filled. */
+  slot?: number;
 }
 
 /** What a track carries, so music can dip under dialogue. */
@@ -376,6 +378,8 @@ export interface ClipSpec {
   freeze?: boolean;
   /** A pasted copy's masks; they get new ids, and keyframes follow them. */
   masks?: Mask[];
+  /** The template slot the new clip is (a placeholder title) or fills. */
+  slot?: number;
 }
 
 export type Edge = 'start' | 'end';
@@ -415,6 +419,8 @@ export type Command =
   | { type: 'setRamp'; clip: number; points: RampShape[] }
   | { type: 'setReverse'; clip: number; reverse: boolean }
   | { type: 'freezeFrame'; clip: number; at: number; duration: number }
+  /** Fills a template slot with media's picture; a short video holds its last frame. */
+  | { type: 'fillSlot'; clip: number; media: string; sourceIn?: number }
   | { type: 'addMask'; clip: number; mask: Mask; index?: number }
   | { type: 'setMask'; clip: number; mask: Mask }
   | { type: 'removeMask'; clip: number; mask: number }

@@ -31,6 +31,8 @@ export interface RecoveryPrompt {
 
 export interface ProjectState {
   snapshot: ProjectSnapshot | null;
+  /** The newest snapshot, before React has drawn it: for steps that follow a switch. */
+  latest(): ProjectSnapshot | null;
   entry: ProjectEntry | null;
   /** Known projects, most recently opened first. */
   entries: ProjectEntry[];
@@ -588,6 +590,7 @@ export function useProject(
     finish,
     onLive,
     notice,
+    latest: () => snapshotRef.current,
     undo,
     redo,
     save,

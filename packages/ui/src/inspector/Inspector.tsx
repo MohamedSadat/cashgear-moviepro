@@ -106,11 +106,20 @@ export function Inspector({ editor }: { editor: EditorState }) {
       <h2 title={media?.name}>
         {adjustment
           ? 'Adjustment layer'
-          : title
-            ? `Title: ${titleName(clip.title)}`
-            : (media?.name ?? 'Clip')}
+          : title && clip.slot !== undefined
+            ? `Slot ${clip.slot}`
+            : title
+              ? `Title: ${titleName(clip.title)}`
+              : (media?.name ?? 'Clip')}
       </h2>
       {locked && <p className="cgv-muted">This clip is on a locked track.</p>}
+      {clip.slot !== undefined && (
+        <p className="cgv-muted" data-testid="slot-note">
+          {title
+            ? `Template slot ${clip.slot}: drop a photo or video on it, or fill it from Templates.`
+            : `Template slot ${clip.slot}: drop another photo or video on it to replace this one.`}
+        </p>
+      )}
       {adjustment && (
         <Section title="Adjustment">
           <p className="cgv-muted">Its effects apply to every track below it.</p>

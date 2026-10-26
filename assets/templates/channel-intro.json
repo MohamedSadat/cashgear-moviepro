@@ -1,0 +1,63 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Channel intro",
+  "category": "Intros",
+  "kind": "intro",
+  "description": "Two shots pushing past each other with a welcome back.",
+  "tracks": [
+    {
+      "name": "Clips",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 2
+        },
+        {
+          "type": "slot",
+          "slot": 2,
+          "at": 2,
+          "seconds": 2
+        }
+      ],
+      "transitions": [
+        {
+          "from": 0,
+          "to": 1,
+          "kind": "push",
+          "seconds": 0.4,
+          "params": {
+            "direction": "left"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "title-and-subtitle",
+          "at": 0.2,
+          "seconds": 3.6,
+          "texts": ["Welcome back", "to the channel"]
+        }
+      ]
+    },
+    {
+      "name": "Sounds",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "whoosh",
+          "at": 1.6,
+          "seconds": 1.2
+        }
+      ]
+    }
+  ],
+  "seconds": 4,
+  "slots": 2
+}

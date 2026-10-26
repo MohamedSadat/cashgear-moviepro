@@ -923,6 +923,20 @@ export class TimelineController {
     const row = above ? null : (rowAt(this.rows, this.view, y) ?? null);
     if (!above && !row) return null;
     if (row?.track.locked) return null;
+    // Media dropped on a template slot fills it.
+    const time = xToTime(this.view, x);
+    const slot = row?.track.clips.find(
+      (c) => c.slot !== undefined && c.start <= time && time < c.start + c.duration,
+    );
+    if (slot && media.hasVideo)
+      return {
+        row,
+        start: slot.start,
+        duration: slot.duration,
+        insert: false,
+        media,
+        slot: slot.id,
+      };
     const insert = !!row && project.magnetic && row.track.id === project.mainTrack;
     if (insert) start = nearestCut(row.track.clips, start);
     else if (this.host.snapping()) {
@@ -1061,6 +1075,11 @@ export class TimelineController {
     event.preventDefault();
     const drop = this.dropAt(id, event);
     if (!drop) return;
+    if (drop.slot !== undefined) {
+      const filled = await this.host.execute({ type: 'fillSlot', clip: drop.slot, media: id });
+      if (filled) this.host.select([drop.slot], 'replace');
+      return;
+    }
     const clip = { media: id, duration: drop.duration };
     const created = drop.row
       ? await this.host.execute({

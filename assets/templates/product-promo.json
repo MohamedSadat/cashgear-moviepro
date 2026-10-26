@@ -1,0 +1,110 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Product promo",
+  "category": "Promo",
+  "kind": "project",
+  "aspect": "landscape",
+  "description": "Three product shots zooming into each other, a headline and a call to action.",
+  "tracks": [
+    {
+      "name": "Clips",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 3,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 2,
+          "at": 3,
+          "seconds": 3,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 3,
+          "at": 6,
+          "seconds": 3,
+          "motion": "zoomIn"
+        }
+      ],
+      "transitions": [
+        {
+          "from": 0,
+          "to": 1,
+          "kind": "zoom",
+          "seconds": 0.5,
+          "params": {
+            "mode": "in"
+          }
+        },
+        {
+          "from": 1,
+          "to": 2,
+          "kind": "zoom",
+          "seconds": 0.5,
+          "params": {
+            "mode": "in"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "statement",
+          "at": 0.3,
+          "seconds": 2.5,
+          "texts": ["New Collection"]
+        },
+        {
+          "type": "title",
+          "template": "lower-boxes",
+          "at": 6.2,
+          "seconds": 2.6,
+          "texts": ["Shop now", "LIMITED TIME"]
+        }
+      ]
+    },
+    {
+      "name": "Stickers",
+      "clips": [
+        {
+          "type": "sticker",
+          "sticker": "new",
+          "at": 3.2,
+          "seconds": 2.5,
+          "properties": {
+            "transform": {
+              "x": 620,
+              "y": -300,
+              "scaleX": 0.3,
+              "scaleY": 0.3
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Music",
+      "role": "music",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "corporate-bright",
+          "at": 0,
+          "seconds": 9,
+          "fadeOut": 1
+        }
+      ]
+    }
+  ],
+  "seconds": 9,
+  "slots": 3
+}

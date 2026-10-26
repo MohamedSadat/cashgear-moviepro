@@ -23,6 +23,8 @@ import {
   stickerScale,
   type Sticker,
 } from '../stickers/catalog';
+import { fillCommands, packRequests, placeTemplate } from '../templates/apply';
+import { templateSettings, type ProjectTemplate } from '../templates/templates';
 import { templateSpec, type TitleTemplate } from '../titles/templates';
 import { frameDuration } from '../timeline/geometry';
 import { copyClips, planPaste, type ClipboardItem } from './clipboard';
@@ -76,6 +78,13 @@ export interface EditorState {
    * on a free Music track (a new one if none is free), effects above the others.
    */
   addSound(sound: Sound, time?: number, track?: number): Promise<void>;
+  /**
+   * Starts a new project from a project template, or puts an intro or outro at
+   * `time` (the playhead). Its slots hold placeholders until filled.
+   */
+  applyTemplate(template: ProjectTemplate, time?: number): Promise<void>;
+  /** Fills the project's template slots in order with `media` (ids), as one undo step. */
+  fillSlots(media: string[]): Promise<void>;
   tool: Tool;
   setTool(tool: Tool): void;
   snapping: boolean;
@@ -340,6 +349,39 @@ export function useEditor(
     if (created?.length) setSelection([created[0]]);
   }, []);
 
+  const applyTemplate = useCallback(async (template: ProjectTemplate, time?: number) => {
+    const { project, playback } = state.current;
+    const whole = template.kind === 'project';
+    if (whole) await project.newProject();
+    const before = project.latest()?.project;
+    if (!before) return;
+    const requests = packRequests(template, before);
+    if (requests.length) await project.importRequests(requests);
+    const current = project.latest()?.project ?? before;
+    const settings = whole ? templateSettings(template, current.settings) : current.settings;
+    const at = whole ? 0 : (time ?? playback.state?.time ?? 0);
+    const label = whole
+      ? `Use ${template.name.toLowerCase()}`
+      : `Add ${template.name.toLowerCase()}`;
+    const created = await project.transaction(label, async (step) => {
+      if (whole) {
+        await step({ type: 'setSettings', settings });
+        await step({ type: 'rename', name: template.name });
+      }
+      return placeTemplate(template, { ...current, settings }, at, step);
+    });
+    // An intro or outro is selected, to show where it went; a new project starts clear.
+    if (created?.length) setSelection(whole ? [] : [created[0]]);
+  }, []);
+
+  const fillSlots = useCallback(async (media: string[]) => {
+    const { project, current } = state.current;
+    if (!current) return;
+    const commands = fillCommands(current, media);
+    if (commands.length)
+      await project.executeGroup(commands.length === 1 ? 'Fill slot' : 'Fill template', commands);
+  }, []);
+
   const playhead = useCallback(() => state.current.playback.state?.time ?? 0, []);
 
   const run = useCallback(
@@ -495,6 +537,8 @@ export function useEditor(
     addTitle,
     addSticker,
     addSound,
+    applyTemplate,
+    fillSlots,
     tool,
     setTool,
     snapping: options.snapping,

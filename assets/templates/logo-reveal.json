@@ -1,0 +1,89 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Logo reveal",
+  "category": "Intros",
+  "kind": "intro",
+  "description": "Your logo or photo opening on black, presenting what follows.",
+  "tracks": [
+    {
+      "name": "Background",
+      "clips": [
+        {
+          "type": "background",
+          "color": {
+            "r": 0.0196,
+            "g": 0.0275,
+            "b": 0.0431,
+            "a": 1
+          },
+          "at": 0,
+          "seconds": 3.5
+        }
+      ]
+    },
+    {
+      "name": "Logo",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0.3,
+          "seconds": 3.2,
+          "properties": {
+            "transform": {
+              "x": 0,
+              "y": -60,
+              "scaleX": 0.45,
+              "scaleY": 0.45
+            }
+          }
+        }
+      ],
+      "transitions": [
+        {
+          "from": null,
+          "to": 0,
+          "kind": "luma-wipe",
+          "seconds": 1,
+          "params": {
+            "gradient": "iris"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "elegant",
+          "at": 1.4,
+          "seconds": 2.1,
+          "texts": ["Presents"],
+          "properties": {
+            "transform": {
+              "x": 0,
+              "y": 320,
+              "scaleX": 0.55,
+              "scaleY": 0.55
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sounds",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "chime",
+          "at": 0.3,
+          "seconds": 2
+        }
+      ]
+    }
+  ],
+  "seconds": 3.5,
+  "slots": 1
+}

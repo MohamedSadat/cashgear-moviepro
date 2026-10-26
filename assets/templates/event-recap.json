@@ -1,0 +1,116 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Event recap",
+  "category": "Promo",
+  "kind": "project",
+  "aspect": "landscape",
+  "description": "Five highlights wiping round like a clock, under a title and subtitle.",
+  "tracks": [
+    {
+      "name": "Clips",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 2,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 2,
+          "at": 2,
+          "seconds": 2,
+          "motion": "panLeft"
+        },
+        {
+          "type": "slot",
+          "slot": 3,
+          "at": 4,
+          "seconds": 2,
+          "motion": "zoomOut"
+        },
+        {
+          "type": "slot",
+          "slot": 4,
+          "at": 6,
+          "seconds": 2,
+          "motion": "panRight"
+        },
+        {
+          "type": "slot",
+          "slot": 5,
+          "at": 8,
+          "seconds": 2,
+          "motion": "zoomIn"
+        }
+      ],
+      "transitions": [
+        {
+          "from": 0,
+          "to": 1,
+          "kind": "luma-wipe",
+          "seconds": 0.5,
+          "params": {
+            "gradient": "clock"
+          }
+        },
+        {
+          "from": 1,
+          "to": 2,
+          "kind": "luma-wipe",
+          "seconds": 0.5,
+          "params": {
+            "gradient": "clock"
+          }
+        },
+        {
+          "from": 2,
+          "to": 3,
+          "kind": "luma-wipe",
+          "seconds": 0.5,
+          "params": {
+            "gradient": "clock"
+          }
+        },
+        {
+          "from": 3,
+          "to": 4,
+          "kind": "luma-wipe",
+          "seconds": 0.5,
+          "params": {
+            "gradient": "clock"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "title-and-subtitle",
+          "at": 0.2,
+          "seconds": 2.6,
+          "texts": ["Event Recap", "The highlights"]
+        }
+      ]
+    },
+    {
+      "name": "Music",
+      "role": "music",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "cinematic-rise",
+          "at": 0,
+          "seconds": 10,
+          "fadeOut": 1.5
+        }
+      ]
+    }
+  ],
+  "seconds": 10,
+  "slots": 5
+}

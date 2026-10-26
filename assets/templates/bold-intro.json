@@ -1,0 +1,67 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Bold intro",
+  "category": "Intros",
+  "kind": "intro",
+  "description": "Your shot behind a neon channel name, on a riser and an impact.",
+  "tracks": [
+    {
+      "name": "Clip",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 4,
+          "motion": "zoomIn",
+          "effects": [
+            {
+              "kind": "exposure",
+              "params": {
+                "stops": -1
+              }
+            },
+            {
+              "kind": "vignette",
+              "params": {
+                "amount": 0.6
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "neon",
+          "at": 0.6,
+          "seconds": 3.4,
+          "texts": ["YOUR CHANNEL"]
+        }
+      ]
+    },
+    {
+      "name": "Sounds",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "riser",
+          "at": 0,
+          "seconds": 1.2
+        },
+        {
+          "type": "sound",
+          "sound": "impact",
+          "at": 0.6,
+          "seconds": 2.5
+        }
+      ]
+    }
+  ],
+  "seconds": 4,
+  "slots": 1
+}

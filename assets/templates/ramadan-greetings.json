@@ -1,0 +1,150 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Ramadan greetings",
+  "category": "Arabic",
+  "kind": "project",
+  "aspect": "landscape",
+  "description": "Four warm shots opening like an iris, with a Ramadan greeting.",
+  "tracks": [
+    {
+      "name": "Clips",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 3,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 2,
+          "at": 3,
+          "seconds": 3,
+          "motion": "panLeft"
+        },
+        {
+          "type": "slot",
+          "slot": 3,
+          "at": 6,
+          "seconds": 3,
+          "motion": "zoomIn"
+        },
+        {
+          "type": "slot",
+          "slot": 4,
+          "at": 9,
+          "seconds": 3,
+          "motion": "panLeft"
+        }
+      ],
+      "transitions": [
+        {
+          "from": 0,
+          "to": 1,
+          "kind": "luma-wipe",
+          "seconds": 0.6,
+          "params": {
+            "gradient": "iris"
+          }
+        },
+        {
+          "from": 1,
+          "to": 2,
+          "kind": "luma-wipe",
+          "seconds": 0.6,
+          "params": {
+            "gradient": "iris"
+          }
+        },
+        {
+          "from": 2,
+          "to": 3,
+          "kind": "luma-wipe",
+          "seconds": 0.6,
+          "params": {
+            "gradient": "iris"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Look",
+      "clips": [
+        {
+          "type": "adjustment",
+          "at": 0,
+          "seconds": 12,
+          "effects": [
+            {
+              "kind": "temperature-tint",
+              "params": {
+                "temperature": 0.2
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "arabic-ramadan",
+          "at": 0.4,
+          "seconds": 4
+        }
+      ]
+    },
+    {
+      "name": "Stickers",
+      "clips": [
+        {
+          "type": "sticker",
+          "sticker": "star",
+          "at": 0.6,
+          "seconds": 3.6,
+          "properties": {
+            "transform": {
+              "x": -640,
+              "y": -300,
+              "scaleX": 0.3,
+              "scaleY": 0.3
+            }
+          }
+        },
+        {
+          "type": "sticker",
+          "sticker": "sparkles",
+          "at": 6.4,
+          "seconds": 3.6,
+          "properties": {
+            "transform": {
+              "x": 640,
+              "y": -300,
+              "scaleX": 0.3,
+              "scaleY": 0.3
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Music",
+      "role": "music",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "ambient-drift",
+          "at": 0,
+          "seconds": 12,
+          "fadeOut": 2
+        }
+      ]
+    }
+  ],
+  "seconds": 12,
+  "slots": 4
+}

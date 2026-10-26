@@ -1,0 +1,117 @@
+{
+  "pack": "builtin",
+  "version": 1,
+  "name": "Thanks for watching",
+  "category": "Outros",
+  "kind": "outro",
+  "description": "Your last shot blurred behind a thank-you and a subscribe button.",
+  "tracks": [
+    {
+      "name": "Clip",
+      "clips": [
+        {
+          "type": "slot",
+          "slot": 1,
+          "at": 0,
+          "seconds": 5,
+          "effects": [
+            {
+              "kind": "gaussian-blur",
+              "params": {
+                "radius": 0.02
+              }
+            },
+            {
+              "kind": "exposure",
+              "params": {
+                "stops": -0.7
+              }
+            }
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "from": 0,
+          "to": null,
+          "kind": "dip",
+          "seconds": 1,
+          "params": {
+            "color": {
+              "r": 0,
+              "g": 0,
+              "b": 0,
+              "a": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Titles",
+      "clips": [
+        {
+          "type": "title",
+          "template": "default",
+          "at": 0.3,
+          "seconds": 4.4,
+          "texts": ["Thanks for watching"],
+          "properties": {
+            "transform": {
+              "x": 0,
+              "y": -120,
+              "scaleX": 0.9,
+              "scaleY": 0.9
+            }
+          }
+        },
+        {
+          "type": "title",
+          "template": "subscribe",
+          "at": 1.2,
+          "seconds": 3.5,
+          "properties": {
+            "transform": {
+              "x": 0,
+              "y": 180,
+              "scaleX": 0.8,
+              "scaleY": 0.8
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stickers",
+      "clips": [
+        {
+          "type": "sticker",
+          "sticker": "thumbs-up",
+          "at": 1.5,
+          "seconds": 3.2,
+          "properties": {
+            "transform": {
+              "x": 560,
+              "y": 180,
+              "scaleX": 0.3,
+              "scaleY": 0.3
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sounds",
+      "clips": [
+        {
+          "type": "sound",
+          "sound": "ding",
+          "at": 1.2,
+          "seconds": 1.8
+        }
+      ]
+    }
+  ],
+  "seconds": 5,
+  "slots": 1
+}
