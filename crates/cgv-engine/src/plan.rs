@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use cgv_model::{
-    parse_lut_ref, Clip, ClipId, Crop, LutId, LutShape, ParamValue, Params, Project, Speed, Title,
-    Track, TrackId, Transform, Transition,
+    parse_lut_ref, BlendMode, Clip, ClipId, Crop, LutId, LutShape, Mask, ParamValue, Params,
+    Project, Speed, Title, Track, TrackId, Transform, Transition,
 };
 use cgv_time::Flicks;
 use serde::{Deserialize, Serialize};
@@ -53,6 +53,18 @@ pub struct LayerPlan {
     /// draws them itself, and the layer has no media.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<Title>,
+    /// The clip plays backwards, so its source frames come in falling order.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reverse: bool,
+    /// Slow motion blends frames: show the source frame at `source_time` mixed
+    /// with the next by how far between them `source_time` falls.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub blend_frames: bool,
+    #[serde(default, skip_serializing_if = "BlendMode::is_normal")]
+    pub blend_mode: BlendMode,
+    /// Masks at this frame, keyframes applied.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub masks: Vec<Mask>,
 }
 
 /// How a frame is drawn, bottom track first.
@@ -138,6 +150,7 @@ fn effect_plans(clip: &Clip, offset: Flicks) -> Vec<EffectPlan> {
 /// where it runs out.
 fn visual_layer(project: &Project, track: TrackId, clip: &Clip, time: Flicks) -> Option<LayerPlan> {
     let offset = time - clip.start;
+    let frame = project.settings.frame_duration();
     if let Some(title) = clip.title.as_ref().filter(|_| clip.is_title()) {
         let opacity = clip.opacity_at(offset);
         if !clip.video || opacity <= 0.0 {
@@ -163,6 +176,10 @@ fn visual_layer(project: &Project, track: TrackId, clip: &Clip, time: Flicks) ->
             // transform does.
             moving: !clip.keyframes.is_empty(),
             title: Some(title.at(&clip.keyframes, offset)),
+            reverse: false,
+            blend_frames: false,
+            blend_mode: clip.blend_mode,
+            masks: clip.masks_at(offset),
         });
     }
     let media = project.media(&clip.media)?;
@@ -171,18 +188,21 @@ fn visual_layer(project: &Project, track: TrackId, clip: &Clip, time: Flicks) ->
         return None;
     }
     let still = media.is_still();
+    let at = clip.source_at(offset, frame);
     let source_time = if still {
         Flicks::ZERO
     } else if media.loops() {
-        Flicks(
-            (clip.source_in + clip.speed.source_span(offset))
-                .0
-                .rem_euclid(media.duration.0),
-        )
+        Flicks(at.0.rem_euclid(media.duration.0))
     } else {
-        let at = clip.source_in + clip.speed.source_span(offset);
         Flicks(at.0.clamp(0, (media.duration.0 - 1).max(0)))
     };
+    // Frame blending is for slow motion: a source frame lasting longer than a
+    // project frame.
+    let blend_frames = clip.frame_blending
+        && !still
+        && !media.loops()
+        && !clip.freeze
+        && clip.speed_at(offset) < 1.0;
     Some(LayerPlan {
         clip: clip.id,
         track,
@@ -202,6 +222,10 @@ fn visual_layer(project: &Project, track: TrackId, clip: &Clip, time: Flicks) ->
         effects: effect_plans(clip, offset),
         moving: clip.has_moving_keyframes(),
         title: None,
+        reverse: clip.reverse && !clip.freeze,
+        blend_frames,
+        blend_mode: clip.blend_mode,
+        masks: clip.masks_at(offset),
     })
 }
 

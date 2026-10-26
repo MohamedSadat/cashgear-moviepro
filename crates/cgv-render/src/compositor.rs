@@ -1,9 +1,9 @@
 //! The GPU side of the compositor (browser only). A frame is built in steps:
 //! each layer's source becomes a linear, premultiplied texture; layers run their
-//! effects; transitions blend their two sides; then the layers draw bottom first
-//! into the composition target, which adjustment layers change in place. The
-//! target is presented on the monitor or read back. Preview and export share all
-//! of it.
+//! effects, then their masks; transitions blend their two sides; then the layers
+//! draw bottom first into the composition target, which adjustment layers and
+//! layers with blend modes read a copy of. The target is presented on the
+//! monitor or read back. Preview and export share all of it.
 use std::cell::Cell;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
@@ -11,7 +11,7 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use cgv_model::title::Title;
-use cgv_model::Params;
+use cgv_model::{BlendMode, Mask, Params};
 use cgv_text::{FaceInfo, Painter, View};
 use wgpu::*;
 
@@ -20,6 +20,7 @@ use crate::geometry::{
     drawn_part, effect_size, export_picture, layer_geometry, nv12_texels, visible_map, Affine,
     CropRect, LayerGeometry, LayerTransform, Picture,
 };
+use crate::masks::{blend_index, mask_uniforms, MASK_FLOATS};
 
 /// Layers sample sRGB-encoded storage, which the GPU decodes to linear light.
 const LAYER_FORMAT: TextureFormat = TextureFormat::Rgba8UnormSrgb;
@@ -30,6 +31,8 @@ const CONVERT_UNIFORM_SIZE: u64 = 64;
 const EXPORT_UNIFORM_SIZE: u64 = 80;
 /// The `frame` uniform of an effect pass.
 const EFFECT_FRAME_SIZE: u64 = 64;
+/// The `Masks` uniform of the mask pass.
+const MASK_UNIFORM_SIZE: u64 = (MASK_FLOATS * 4) as u64;
 /// Uniform slots per frame: one per layer and frame conversion, two or more per
 /// effect pass.
 const UNIFORM_SLOTS: u64 = 2048;
@@ -116,6 +119,10 @@ pub struct LayerStep<'a> {
     pub effects: Vec<EffectRun<'a>>,
     /// Its drawn size may change from frame to frame (see [`effect_size`]).
     pub moving: bool,
+    /// How it mixes with what is below.
+    pub blend: BlendMode,
+    /// Shapes that cut its picture after its effects.
+    pub masks: Vec<Mask>,
 }
 
 /// How a frame is drawn, bottom first. A frame has a handful of steps, built
@@ -147,11 +154,12 @@ enum Source {
     Title(u64),
 }
 
-/// A layer ready to draw: its texture and its layer uniforms.
+/// A layer ready to draw: its texture, its layer uniforms and its blend mode.
 #[derive(Clone, Copy, Debug)]
 struct Drawable {
     source: Source,
     offset: u32,
+    blend: BlendMode,
 }
 
 /// What the composition passes do, in order.
@@ -160,6 +168,17 @@ enum Op<'s> {
     /// A full-frame texture over the composition (a transition's result).
     Over(usize),
     Adjust(&'s [EffectRun<'s>], f64),
+}
+
+impl Op<'_> {
+    /// Reads the composition so far, so it needs a pass of its own.
+    fn isolated(&self) -> bool {
+        match self {
+            Op::Draw(drawable) => !drawable.blend.is_normal(),
+            Op::Adjust(..) => true,
+            Op::Over(_) => false,
+        }
+    }
 }
 
 /// The frame being composed: the project's size and the output's.
@@ -195,8 +214,13 @@ fn begin_pass<'e>(
 }
 
 /// The layer shader's uniforms: where the picture goes, how its texture maps,
-/// its visible part and the quad drawn around it.
-fn layer_values(geometry: &LayerGeometry, to_texture: &Affine, opacity: f64) -> Vec<u8> {
+/// its visible part, the quad drawn around it and its blend mode.
+fn layer_values(
+    geometry: &LayerGeometry,
+    to_texture: &Affine,
+    opacity: f64,
+    blend: BlendMode,
+) -> Vec<u8> {
     let clip = geometry.to_clip.to_f32();
     let tex = to_texture.to_f32();
     let v = geometry.visible.map(|value| value as f32);
@@ -216,7 +240,7 @@ fn layer_values(geometry: &LayerGeometry, to_texture: &Affine, opacity: f64) -> 
         tex[3],
         tex[4],
         tex[5],
-        0.0,
+        blend_index(blend) as f32,
         0.0,
         v[0],
         v[1],
@@ -446,7 +470,10 @@ pub struct Compositor {
     export_layout: BindGroupLayout,
     effect_layout: BindGroupLayout,
     copy_layout: BindGroupLayout,
+    mask_layout: BindGroupLayout,
     layer_pipeline: RenderPipeline,
+    blend_pipeline: RenderPipeline,
+    mask_pipeline: RenderPipeline,
     extract_pipeline: RenderPipeline,
     copy_pipeline: RenderPipeline,
     over_pipeline: RenderPipeline,
@@ -626,6 +653,34 @@ impl Compositor {
             label: Some("Copy"),
             entries: &[texture_entry(40), sampler_entry(41)],
         });
+        let mask_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Masks"),
+            entries: &[
+                uniform_entry(50, true, MASK_UNIFORM_SIZE),
+                texture_entry(51),
+                sampler_entry(52),
+            ],
+        });
+        // A layer with a blend mode replaces what is under it with the mix of
+        // itself and a copy of the composition (group 2).
+        let blend_pipeline = Self::pipeline(
+            device,
+            &shader,
+            &[&layer_uniform_layout, &texture_layout, &copy_layout],
+            ("vs_layer", "fs_blend"),
+            comp_format,
+            None,
+            PrimitiveTopology::TriangleStrip,
+        );
+        let mask_pipeline = Self::pipeline(
+            device,
+            &shader,
+            &[&mask_layout],
+            ("vs_full", "fs_mask"),
+            comp_format,
+            None,
+            PrimitiveTopology::TriangleList,
+        );
         let layer_pipeline = Self::pipeline(
             device,
             &shader,
@@ -738,6 +793,9 @@ impl Compositor {
             present_layout,
             export_layout,
             layer_pipeline,
+            blend_pipeline,
+            mask_pipeline,
+            mask_layout,
             extract_pipeline,
             copy_pipeline: copy(None),
             over_pipeline: copy(Some(BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
@@ -1433,6 +1491,17 @@ impl Compositor {
                     transition,
                     progress,
                 } => {
+                    // The result mixes in as its sides do when they agree.
+                    let modes: Vec<BlendMode> = [from, to]
+                        .iter()
+                        .filter_map(|s| s.as_ref())
+                        .map(|s| s.blend)
+                        .collect();
+                    let blend = match modes.as_slice() {
+                        [one] => *one,
+                        [a, b] if a == b => *a,
+                        _ => BlendMode::Normal,
+                    };
                     let from = match from {
                         Some(side) => self.render_side(device, queue, frame, scene, side)?,
                         None => None,
@@ -1454,7 +1523,14 @@ impl Compositor {
                         *progress,
                     )?;
                     frame.outputs.push(blended);
-                    ops.push(Op::Over(frame.outputs.len() - 1));
+                    let index = frame.outputs.len() - 1;
+                    if blend.is_normal() {
+                        ops.push(Op::Over(index));
+                    } else {
+                        ops.push(Op::Draw(
+                            self.full_frame(device, frame, scene, index, blend)?,
+                        ));
+                    }
                 }
                 Step::Adjustment { effects, opacity } => {
                     if !effects.is_empty() && *opacity > 0.0 {
@@ -1463,23 +1539,139 @@ impl Compositor {
                 }
             }
         }
-        // Then the composition, in passes split where an adjustment layer reads it.
+        // Then the composition, in passes split where an adjustment layer or a
+        // blend mode reads it.
         let mut clear = true;
         let mut rest = &ops[..];
         loop {
-            let split = rest
-                .iter()
-                .position(|op| matches!(op, Op::Adjust(..)))
-                .unwrap_or(rest.len());
+            let split = rest.iter().position(Op::isolated).unwrap_or(rest.len());
             self.draw_ops(device, frame, &rest[..split], clear);
             clear = false;
-            let Some(Op::Adjust(effects, opacity)) = rest.get(split) else {
-                break;
-            };
-            self.adjust(device, frame, scene.output, effects, *opacity)?;
+            match rest.get(split) {
+                Some(Op::Adjust(effects, opacity)) => {
+                    self.adjust(device, frame, scene.output, effects, *opacity)?
+                }
+                Some(Op::Draw(drawable)) => self.blend_draw(device, frame, scene.output, *drawable),
+                _ => break,
+            }
             rest = &rest[split + 1..];
         }
         Ok(())
+    }
+
+    /// A full-frame output (a transition's result) as a layer of its own, to draw
+    /// with a blend mode.
+    fn full_frame(
+        &self,
+        device: &Device,
+        frame: &mut FrameBuild,
+        scene: &Scene,
+        index: usize,
+        blend: BlendMode,
+    ) -> Result<Drawable, String> {
+        let picture = Picture {
+            width: scene.project.0,
+            height: scene.project.1,
+            rotation: 0,
+        };
+        let geometry = layer_geometry(
+            scene.project,
+            scene.scale,
+            &picture,
+            &LayerTransform::default(),
+            &CropRect::default(),
+        )
+        .ok_or("The frame has no size")?;
+        let values = layer_values(&geometry, &geometry.to_texture, 1.0, blend);
+        let offset = Self::slot(frame, self.align, &values)?;
+        let output = &mut frame.outputs[index];
+        if output.binding.is_none() {
+            output.binding = Some(self.texture_binding(device, &output.view));
+        }
+        Ok(Drawable {
+            source: Source::Output(index),
+            offset: offset as u32,
+            blend,
+        })
+    }
+
+    /// Draws a layer with a blend mode: the composition so far is copied, and the
+    /// layer replaces what it covers with its mix with that copy.
+    fn blend_draw(
+        &mut self,
+        device: &Device,
+        frame: &mut FrameBuild,
+        output: (u32, u32),
+        drawable: Drawable,
+    ) {
+        let backdrop = self.pool.acquire(device, self.target_key(output));
+        let comp_binding = self.copy_binding(device, &self.comp.as_ref().expect("target").view);
+        {
+            let mut pass = begin_pass(&mut frame.encoder, "Blend backdrop", &backdrop.view, true);
+            pass.set_pipeline(&self.copy_pipeline);
+            pass.set_bind_group(0, &comp_binding, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        let backdrop_binding = self.copy_binding(device, &backdrop.view);
+        let layer_binding = self.binding(frame, drawable.source).clone();
+        {
+            let comp = self.comp.as_ref().expect("target");
+            let mut pass = begin_pass(&mut frame.encoder, "Blend", &comp.view, false);
+            pass.set_pipeline(&self.blend_pipeline);
+            pass.set_bind_group(0, &self.layer_uniforms, &[drawable.offset]);
+            pass.set_bind_group(1, &layer_binding, &[]);
+            pass.set_bind_group(2, &backdrop_binding, &[]);
+            pass.draw(0..4, 0..1);
+        }
+        frame.outputs.push(backdrop);
+    }
+
+    /// Runs a layer's masks over `input`, which covers `area` of its picture (x, y,
+    /// width, height in the picture's pixels), and returns the masked texture.
+    #[allow(clippy::too_many_arguments)]
+    fn run_masks(
+        &mut self,
+        device: &Device,
+        frame: &mut FrameBuild,
+        input: Pooled,
+        masks: &[Mask],
+        picture: (f64, f64),
+        area: [f64; 4],
+    ) -> Result<Pooled, String> {
+        let texel = (area[2] / input.key.width as f64).max(area[3] / input.key.height as f64);
+        let values = mask_uniforms(masks, picture, area, texel);
+        let offset = Self::slot(frame, self.align, &floats(&values))?;
+        let target = self.pool.acquire(device, input.key);
+        let binding = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Masks"),
+            layout: &self.mask_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 50,
+                    resource: BindingResource::Buffer(BufferBinding {
+                        buffer: &self.uniforms,
+                        offset: 0,
+                        size: BufferSize::new(MASK_UNIFORM_SIZE),
+                    }),
+                },
+                BindGroupEntry {
+                    binding: 51,
+                    resource: BindingResource::TextureView(&input.view),
+                },
+                BindGroupEntry {
+                    binding: 52,
+                    resource: BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        });
+        {
+            let mut pass = begin_pass(&mut frame.encoder, "Masks", &target.view, true);
+            pass.set_pipeline(&self.mask_pipeline);
+            pass.set_bind_group(0, &binding, &[offset as u32]);
+            pass.draw(0..3, 0..1);
+        }
+        self.pool.release(input);
+        Ok(target)
     }
 
     fn target_key(&self, size: (u32, u32)) -> TextureKey {
@@ -1555,17 +1747,18 @@ impl Compositor {
                 pooled.binding = Some(self.texture_binding(device, &pooled.view));
             }
         }
-        if step.effects.is_empty() {
-            let values = layer_values(&geometry, &geometry.to_texture, opacity);
+        if step.effects.is_empty() && step.masks.is_empty() {
+            let values = layer_values(&geometry, &geometry.to_texture, opacity, step.blend);
             let offset = Self::slot(frame, self.align, &values)?;
             return Ok(Some(Drawable {
                 source: Source::Layer(index),
                 offset: offset as u32,
+                blend: step.blend,
             }));
         }
         let limit = device.limits().max_texture_dimension_2d;
         let size = effect_size(&geometry, &draw.picture, limit, step.moving);
-        let values = layer_values(&geometry, &geometry.to_texture, 1.0);
+        let values = layer_values(&geometry, &geometry.to_texture, 1.0, BlendMode::Normal);
         let extract = Self::slot(frame, self.align, &values)?;
         let input = self.pool.acquire(device, self.target_key(size));
         {
@@ -1578,15 +1771,32 @@ impl Compositor {
         }
         let aspect = size.0 as f64 / size.1 as f64;
         let mut result = self.run_effects(device, frame, input, aspect, &step.effects)?;
+        if !step.masks.is_empty() {
+            let (width, height) = draw.picture.upright();
+            let [u0, v0, u1, v1] = geometry.visible;
+            let area = [
+                u0 * width,
+                v0 * height,
+                (u1 - u0) * width,
+                (v1 - v0) * height,
+            ];
+            result = self.run_masks(device, frame, result, &step.masks, (width, height), area)?;
+        }
         if result.binding.is_none() {
             result.binding = Some(self.texture_binding(device, &result.view));
         }
-        let values = layer_values(&geometry, &visible_map(geometry.visible), opacity);
+        let values = layer_values(
+            &geometry,
+            &visible_map(geometry.visible),
+            opacity,
+            step.blend,
+        );
         let offset = Self::slot(frame, self.align, &values)?;
         frame.outputs.push(result);
         Ok(Some(Drawable {
             source: Source::Output(frame.outputs.len() - 1),
             offset: offset as u32,
+            blend: step.blend,
         }))
     }
 
@@ -1711,16 +1921,17 @@ impl Compositor {
         }
         self.titles.get_mut(&step.key).unwrap().used = self.frames;
         let to_drawing = visible_map(part.visible);
-        if step.effects.is_empty() {
-            let values = layer_values(&geometry, &to_drawing, opacity);
+        if step.effects.is_empty() && step.masks.is_empty() {
+            let values = layer_values(&geometry, &to_drawing, opacity, step.blend);
             let offset = Self::slot(frame, self.align, &values)?;
             return Ok(Some(Drawable {
                 source: Source::Title(step.key),
                 offset: offset as u32,
+                blend: step.blend,
             }));
         }
-        // Effects run on a copy, so the drawing stays for the next frame.
-        let values = layer_values(&geometry, &to_drawing, 1.0);
+        // Effects and masks run on a copy, so the drawing stays for the next frame.
+        let values = layer_values(&geometry, &to_drawing, 1.0, BlendMode::Normal);
         let extract = Self::slot(frame, self.align, &values)?;
         let input = self.pool.acquire(device, self.target_key(part.size));
         {
@@ -1733,15 +1944,26 @@ impl Compositor {
         }
         let aspect = part.size.0 as f64 / part.size.1 as f64;
         let mut result = self.run_effects(device, frame, input, aspect, &step.effects)?;
+        if !step.masks.is_empty() {
+            let (width, height) = scene.project;
+            let area = [
+                u0 * width,
+                v0 * height,
+                (u1 - u0) * width,
+                (v1 - v0) * height,
+            ];
+            result = self.run_masks(device, frame, result, &step.masks, (width, height), area)?;
+        }
         if result.binding.is_none() {
             result.binding = Some(self.texture_binding(device, &result.view));
         }
-        let values = layer_values(&geometry, &to_drawing, opacity);
+        let values = layer_values(&geometry, &to_drawing, opacity, step.blend);
         let offset = Self::slot(frame, self.align, &values)?;
         frame.outputs.push(result);
         Ok(Some(Drawable {
             source: Source::Output(frame.outputs.len() - 1),
             offset: offset as u32,
+            blend: step.blend,
         }))
     }
 

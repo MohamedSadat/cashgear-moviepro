@@ -207,6 +207,8 @@ impl Engine {
                     })
                     .collect(),
                 moving: layer.moving,
+                blend: layer.blend_mode,
+                masks: layer.masks.clone(),
             })
         };
         let steps: Vec<Step> = plan
