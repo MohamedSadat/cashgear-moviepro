@@ -15,6 +15,7 @@ import { FLICKS_PER_SECOND } from '../project/types';
 import type { MeterReading } from '../audio/meters';
 import type { AudioPlayer } from './audio-player';
 import { drawFrame, drawsGpuFrames, type FramePicture, type LayerSource } from './draw';
+import type { Color } from '../project/types';
 import type {
   FramePlan,
   LayerPlan,
@@ -239,6 +240,51 @@ export class PlaybackController {
     this.seek(time);
     await this.whenSettled();
     return (await this.deps.engine.read_pixels()) as Pixels;
+  }
+
+  /**
+   * The eyedropper: the colour of clip `clip`'s own picture at `x`, `y` (fractions
+   * of the frame) at `time`, drawn alone without its effects, masks or blend, at
+   * full opacity. Null where it shows nothing. The monitor is drawn again after.
+   */
+  async pickColor(time: number, x: number, y: number, clip: number): Promise<Color | null> {
+    this.pause();
+    const session = this.deps.session();
+    if (!session) return null;
+    await this.whenSettled();
+    const at = session.frame_time(session.frame_at(time));
+    const plan = JSON.parse(session.plan_frame(at)) as FramePlan;
+    const layer = plan.layers.find((candidate) => candidate.clip === clip);
+    if (!layer) return null;
+    const alone: FramePlan = {
+      ...plan,
+      layers: [
+        { ...layer, effects: [], masks: [], opacity: 1, blendMode: 'normal', blendFrames: false },
+      ],
+      steps: [{ kind: 'layer', layer: 0 }],
+      luts: [],
+    };
+    const json = JSON.stringify(alone);
+    const opened: ManagedFrame[] = [];
+    this.rendering = true;
+    try {
+      const [sources] = await Promise.all([
+        this.gatherAwaited(alone, opened),
+        this.deps.fonts.ensure(json, alone),
+      ]);
+      this.draw(session, json, alone, sources, 1, false);
+      const pixels = (await this.deps.engine.read_pixels()) as Pixels;
+      const px = Math.min(pixels.width - 1, Math.max(0, Math.floor(x * pixels.width)));
+      const py = Math.min(pixels.height - 1, Math.max(0, Math.floor(y * pixels.height)));
+      const i = (py * pixels.width + px) * 4;
+      if (pixels.data[i + 3] === 0) return null;
+      const [r, g, b] = [0, 1, 2].map((c) => Number((pixels.data[i + c] / 255).toFixed(4)));
+      return { r, g, b, a: 1 };
+    } finally {
+      for (const frame of opened) frame.close();
+      this.rendering = false;
+      this.invalidate();
+    }
   }
 
   dispose() {

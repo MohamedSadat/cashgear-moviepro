@@ -28,6 +28,7 @@ import { MixerPanel } from './mixer/MixerPanel';
 import { useMeters, type MeterStore } from './mixer/useMeters';
 import { useVoiceover, type VoiceoverState } from './voiceover/useVoiceover';
 import { VoiceoverPanel } from './voiceover/VoiceoverPanel';
+import { MonitorOverlay } from './monitor/MonitorOverlay';
 import { TransportBar } from './monitor/TransportBar';
 import { usePlayback, type PlaybackControls } from './monitor/usePlayback';
 import type { MediaLibraryState } from './media/useMediaLibrary';
@@ -126,6 +127,11 @@ export function AppShell({ platform }: Props) {
   const [titling, setTitling] = useState(false);
   const titlePreviews = useTitlePreviews(titling);
   const keymap = useMemo(() => effectiveKeymap(settings.shortcuts), [settings.shortcuts]);
+  // How each video shows upright, for the monitor's handles.
+  const rotations = useMemo(
+    () => new Map(library.items.map((item) => [item.id, item.video?.rotation ?? 0])),
+    [library.items],
+  );
   const [dialog, setDialog] = useState<'projects' | 'settings' | 'shortcuts' | 'export' | null>(
     null,
   );
@@ -255,7 +261,9 @@ export function AppShell({ platform }: Props) {
           decode={options.decode}
           onState={onState}
           onClient={setClient}
-        />
+        >
+          <MonitorOverlay editor={editor} rotations={rotations} client={client} />
+        </ProgramMonitor>
         <VoiceoverPanel voiceover={voiceover} />
       </div>
       <TransportBar playback={playback} />

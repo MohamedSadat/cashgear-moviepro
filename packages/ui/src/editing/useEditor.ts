@@ -3,6 +3,7 @@ import {
   FLICKS_PER_SECOND,
   type Clip,
   type ClipSpec,
+  type Color,
   type Command,
   type Project,
   type Track,
@@ -55,6 +56,9 @@ export interface EditorState {
   /** The selected transition (selecting one clears the clips), and its track. */
   transition: { transition: Transition; track: Track } | null;
   selectTransition(id: number | null): void;
+  /** A colour setting waiting for a click on the monitor (the eyedropper), if any. */
+  picking: PickTarget | null;
+  setPicking(target: PickTarget | null): void;
   /** The engine's effects, transitions and looks, once loaded. */
   catalog: Catalog | null;
   /** Adds effect `item` to `clips` (the selection by default), as one undo step. */
@@ -82,6 +86,13 @@ export interface EditorState {
   /** Runs a shortcut, toolbar or menu action. */
   run(action: ActionId): void;
   timeline: MutableRefObject<TimelineHandle | null>;
+}
+
+/** A colour setting the eyedropper fills: the colour of the clip's own picture where clicked. */
+export interface PickTarget {
+  clip: number;
+  /** The command that sets the picked colour. */
+  command(color: Color): Command;
 }
 
 /** Transition `id` and the track it is on. */
@@ -121,6 +132,7 @@ export function useEditor(
   const [transitionId, setTransitionId] = useState<number | null>(null);
   const [tool, setTool] = useState<Tool>('select');
   const [clipboard, setClipboard] = useState<ClipboardItem[]>([]);
+  const [picking, setPicking] = useState<PickTarget | null>(null);
   const timeline = useRef<TimelineHandle | null>(null);
   const snapshot = project.snapshot;
   const current = snapshot?.project ?? null;
@@ -473,7 +485,10 @@ export function useEditor(
     focused,
     transition,
     selectTransition,
+    picking,
+    setPicking,
     catalog: options.catalog,
+
     applyEffect,
     applyTransition,
     addAdjustmentLayer,

@@ -157,6 +157,7 @@ function ColorParam({ editor, context, effect, param, disabled }: ParamProps) {
       testId={`param-${param.id}`}
       editor={editor}
       disabled={disabled}
+      pick={{ clip: context.clip.id }}
       command={(color) =>
         animated
           ? keyCommand(context, [property], color)

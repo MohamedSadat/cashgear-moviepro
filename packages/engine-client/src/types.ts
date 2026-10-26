@@ -11,6 +11,7 @@ import type {
 } from './media/types';
 import type {
   ClipAt,
+  Color,
   Command,
   MediaRef,
   Outcome,
@@ -147,6 +148,12 @@ export interface EngineApi {
   renderPixels(time: number): Promise<Pixels>;
   /** Diagnostics: the latest composition as it is, without drawing again. */
   readComposition(): Promise<Pixels>;
+  /**
+   * The eyedropper: the colour of clip `clip`'s own picture at `x`, `y` (fractions
+   * of the frame from its top left) at `time`, drawn alone without its effects
+   * or masks. Null where the clip shows nothing.
+   */
+  pickColor(time: number, x: number, y: number, clip: number): Promise<Color | null>;
 }
 
 /** Messages the worker posts outside the RPC channel. */

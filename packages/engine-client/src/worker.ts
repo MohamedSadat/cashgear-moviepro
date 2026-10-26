@@ -256,6 +256,7 @@ const api: EngineApi = {
     return { ms: performance.now() - started };
   },
   renderPixels: (time) => requireDiagnostics().pixels(time),
+  pickColor: (time, x, y, clip) => requirePlayback().pickColor(time, x, y, clip),
   async readComposition() {
     requireDiagnostics();
     return (await engine!.read_pixels()) as Pixels;

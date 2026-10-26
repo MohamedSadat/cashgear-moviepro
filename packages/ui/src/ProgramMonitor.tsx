@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import {
   createEngineClient,
   type BackendPreference,
@@ -32,6 +32,8 @@ interface Props {
   onState: (state: MonitorState) => void;
   /** The engine worker behind this monitor, for media and diagnostics; null once it is gone. */
   onClient: (client: EngineClient | null) => void;
+  /** Drawn over the picture: the monitor's handles. */
+  children?: ReactNode;
 }
 
 const startupTimeout = 30000;
@@ -49,6 +51,7 @@ export function ProgramMonitor({
   decode = 'auto',
   onState,
   onClient,
+  children,
 }: Props) {
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -59,7 +62,7 @@ export function ProgramMonitor({
     canvas.setAttribute('aria-label', 'Program monitor');
     canvas.dataset.testid = 'program-monitor';
     canvas.dataset.frames = '0';
-    container.appendChild(canvas);
+    container.prepend(canvas);
     let disposed = false;
     let ready = false;
     let failed = false;
@@ -145,5 +148,10 @@ export function ProgramMonitor({
       canvas.remove();
     };
   }, [generation, backend, diagnostic, gpuFault, pattern, decode, onState, onClient]);
-  return <div className="cgv-monitor" ref={host} />;
+  // The engine adds its canvas first; the overlay stays above it.
+  return (
+    <div className="cgv-monitor" ref={host}>
+      {children}
+    </div>
+  );
 }

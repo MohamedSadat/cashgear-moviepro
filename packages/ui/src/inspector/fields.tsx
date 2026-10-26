@@ -276,6 +276,7 @@ export function ColorField({
   editor,
   disabled,
   keys,
+  pick,
 }: {
   label: string;
   value: Color;
@@ -284,23 +285,53 @@ export function ColorField({
   editor: EditorState;
   disabled?: boolean;
   keys?: ReactNode;
+  /** The eyedropper: picks the colour from the clip's picture on the monitor. */
+  pick?: { clip: number };
 }) {
   // A label passes clicks on it to its first button, the stopwatch.
-  const Field = keys ? 'div' : 'label';
+  const Field = keys || pick ? 'div' : 'label';
+  const picking = !!pick && editor.picking?.clip === pick.clip;
+  const input = (
+    <input
+      type="color"
+      className="cgv-color"
+      aria-label={label}
+      value={colorToHex(value)}
+      disabled={disabled}
+      onChange={(event) =>
+        void editor.project.execute(command(hexToColor(event.currentTarget.value, value.a)))
+      }
+    />
+  );
   return (
     <Field className="cgv-field" data-testid={testId}>
       {keys}
       <span className="cgv-field-label">{label}</span>
-      <input
-        type="color"
-        className="cgv-color"
-        aria-label={label}
-        value={colorToHex(value)}
-        disabled={disabled}
-        onChange={(event) =>
-          void editor.project.execute(command(hexToColor(event.currentTarget.value, value.a)))
-        }
-      />
+      {pick ? (
+        <span className="cgv-color-row">
+          {input}
+          <button
+            type="button"
+            className="cgv-key-button"
+            data-testid={`${testId}-pick`}
+            aria-pressed={picking}
+            aria-label={`Pick ${label.toLowerCase()} from the monitor`}
+            title="Pick from the monitor: click the colour on the clip's picture"
+            disabled={disabled}
+            onClick={() =>
+              editor.setPicking(
+                picking
+                  ? null
+                  : { clip: pick.clip, command: (color) => command({ ...color, a: value.a }) },
+              )
+            }
+          >
+            ⌖
+          </button>
+        </span>
+      ) : (
+        input
+      )}
     </Field>
   );
 }

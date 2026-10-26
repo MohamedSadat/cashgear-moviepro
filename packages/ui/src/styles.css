@@ -387,6 +387,130 @@ body,
   display: block;
 }
 
+/* Handles over the picture: only the handles take the pointer. */
+.cgv-monitor-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.cgv-overlay-picker {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  cursor: crosshair;
+  outline: 2px dashed var(--cgv-accent);
+  outline-offset: -2px;
+}
+
+.cgv-color-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cgv-overlay-svg {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+
+.cgv-overlay-modes {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: flex;
+  gap: 2px;
+  pointer-events: auto;
+  opacity: 0.4;
+  transition: opacity 0.15s;
+}
+
+.cgv-monitor:hover .cgv-overlay-modes {
+  opacity: 1;
+}
+
+.cgv-overlay-modes button {
+  padding: 2px 8px;
+  border: 1px solid rgb(255 255 255 / 0.25);
+  border-radius: 4px;
+  font-size: 11px;
+  color: #fff;
+  background: rgb(0 0 0 / 0.55);
+  cursor: pointer;
+}
+
+.cgv-overlay-modes button[aria-pressed='true'] {
+  border-color: var(--cgv-accent);
+  background: rgb(61 139 253 / 0.55);
+}
+
+.cgv-overlay-box {
+  fill: transparent;
+  stroke: #fff;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 1px #000);
+  pointer-events: all;
+  cursor: move;
+}
+
+.cgv-overlay-ghost {
+  fill: none;
+  stroke: rgb(255 255 255 / 0.4);
+  stroke-dasharray: 4 4;
+}
+
+.cgv-overlay-svg line {
+  stroke: #fff;
+  stroke-width: 1;
+  filter: drop-shadow(0 0 1px #000);
+}
+
+.cgv-overlay-handle {
+  fill: #fff;
+  stroke: #1b1e24;
+  stroke-width: 1;
+  pointer-events: all;
+  cursor: pointer;
+}
+
+.cgv-overlay-curve {
+  fill: var(--cgv-accent);
+  stroke: #fff;
+  pointer-events: all;
+  cursor: pointer;
+}
+
+.cgv-overlay-pivot {
+  fill: none;
+  stroke: #fff;
+}
+
+.cgv-overlay-mask .cgv-overlay-box {
+  stroke: var(--cgv-volume-line);
+  stroke-dasharray: 5 3;
+}
+
+.cgv-overlay-mask.is-active .cgv-overlay-box {
+  stroke-dasharray: none;
+}
+
+.cgv-kenburns-start .cgv-overlay-box {
+  stroke: #4cc38a;
+}
+
+.cgv-kenburns-end .cgv-overlay-box {
+  stroke: #ef5a5a;
+}
+
+.cgv-overlay-kenburns text {
+  font-size: 11px;
+  fill: #fff;
+  filter: drop-shadow(0 0 1px #000);
+}
+
 /* Program monitor transport */
 
 .cgv-transport {
