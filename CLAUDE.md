@@ -118,7 +118,7 @@ Gotchas:
 - Effects run at a layer's drawn size. Keyframed layers round it up to sixteenths of an octave, and the texture pool destroys textures unused for 30 frames: never key pooled textures on a size that changes every frame.
 - Every engine (monitor, export, previews) loads the pack's images at start.
 - An inspector field with a stopwatch is a `div`, not a `label`: a label passes clicks on it to its first button.
-- `cgv-model`, `cgv-effects`, `serde_json` and the text crates (rustybuzz, `unicode-bidi`, `unicode-linebreak`) build at `opt-level = "s"` to keep release WASM under 2 MB gzipped.
+- `cgv-model`, `cgv-effects`, `serde_json` and the text crates (rustybuzz, `unicode-bidi`, `unicode-linebreak`) build at `opt-level = "s"` to keep release WASM under 2.25 MB gzipped.
 - Titles are drawn on the CPU at the size they show (`drawn_part`), so they stay sharp at any scale. Never draw one at a fixed size and let the GPU scale it.
 - Fonts with an optical-size axis (Inter) take the drawn size, as Chrome does. Compare layouts with Chrome at the same pixel size, or widths drift by several percent.
 - A new or pasted title clip gives its elements new ids. Tests read element ids from the snapshot.

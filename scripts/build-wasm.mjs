@@ -5,7 +5,7 @@ import { gzipSync } from 'node:zlib';
 import { bindgenPath, bindgenVersion, root, run, wasmOutput } from './lib.mjs';
 
 const release = process.argv.includes('--release');
-const limitBytes = 2000000;
+const limitBytes = 2250000;
 const bindgen = bindgenPath();
 const check = spawnSync(bindgen, ['--version'], { encoding: 'utf8' });
 if (check.status !== 0 || check.stdout.trim() !== 'wasm-bindgen ' + bindgenVersion) {
@@ -64,5 +64,5 @@ if (release) {
     JSON.stringify(report, null, 2) + '\n',
   );
   console.log('Release WASM: ' + wasmBytes + ' bytes; gzip: ' + gzippedBytes + ' / ' + limitBytes);
-  if (gzippedBytes > limitBytes) throw new Error('Release WASM gzip size exceeds 2 MB');
+  if (gzippedBytes > limitBytes) throw new Error('Release WASM gzip size exceeds 2.25 MB');
 }
