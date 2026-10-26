@@ -688,3 +688,145 @@ fn mastering_applies_its_gain_on_time_and_limits_true_peaks() {
     let peak = 20.0 * meter.true_peak().log10();
     assert!(peak <= -0.9 && peak > -1.5, "{peak}");
 }
+
+/// A timing map of constant `speed` from source sample `source` at timeline
+/// sample `start`, negated when reversed.
+fn timed(speed: f64, start: i64, source: f64, reverse: bool, keep_pitch: bool) -> Timing {
+    let map = (0..=200)
+        .map(|i| {
+            let t = start + i * 480;
+            // Reversed, the source runs down from `source`; the map holds it negated.
+            let along = (t - start) as f64 * speed;
+            (
+                t,
+                if reverse {
+                    along - source
+                } else {
+                    source + along
+                },
+            )
+        })
+        .collect();
+    Timing {
+        map,
+        reverse,
+        keep_pitch,
+        key: (speed * 1000.0) as u64 + reverse as u64 + 2 * keep_pitch as u64,
+    }
+}
+
+fn timed_clip(media: &str, end: i64, timing: Timing) -> AudioClip {
+    AudioClip {
+        timing: Some(timing),
+        ..clip(media, 0, end, 0)
+    }
+}
+
+/// Frequency from upward zero crossings.
+fn frequency(samples: &[f32]) -> f64 {
+    let mut crossings = Vec::new();
+    for i in 1..samples.len() {
+        let (a, b) = (samples[i - 1], samples[i]);
+        if a < 0.0 && b >= 0.0 {
+            crossings.push(i as f64 - 1.0 + (-a / (b - a)) as f64);
+        }
+    }
+    let periods = crossings.len() - 1;
+    periods as f64 * RATE as f64 / (crossings[periods] - crossings[0])
+}
+
+fn left(mixed: &[f32]) -> Vec<f32> {
+    mixed.iter().step_by(2).copied().collect()
+}
+
+#[test]
+fn time_stretched_clips_keep_their_pitch_and_varispeed_ones_follow_the_speed() {
+    let mut mixer = Mixer::new(RATE, 2, DEFAULT_BUDGET_BYTES);
+    fill(&mut mixer, "tone", 0..8, tone(1000.0, 0.5));
+    for (speed, keep, expected) in [
+        (0.5, true, 1000.0),
+        (2.0, true, 1000.0),
+        (0.5, false, 500.0),
+        (2.0, false, 2000.0),
+    ] {
+        let end = (3.0 / speed * RATE as f64).min(3.0 * RATE as f64) as i64;
+        let plan = plan(vec![timed_clip(
+            "tone",
+            end,
+            timed(speed, 0, 0.0, false, keep),
+        )]);
+        let mixed = left(&mixer.mix(&plan, 4800, 48_000));
+        let measured = frequency(&mixed);
+        let cents = 1200.0 * (measured / expected).log2();
+        assert!(cents.abs() < 10.0, "{speed}× keep {keep}: {measured} Hz");
+        let level = (mixed.iter().map(|x| x * x).sum::<f32>() / mixed.len() as f32).sqrt();
+        assert!(
+            (level / 0.3536 - 1.0).abs() < 0.08,
+            "{speed}× keep {keep}: level {level}"
+        );
+    }
+}
+
+#[test]
+fn reversed_clips_play_their_sound_backwards() {
+    let mut mixer = Mixer::new(RATE, 1, DEFAULT_BUDGET_BYTES);
+    // Noise has no period, so the only window that continues it is its own.
+    let noise = |i: i64| (((i * 7919 + 13) % 10007) as f32 / 10007.0 - 0.5) * 0.8;
+    fill(&mut mixer, "noise", 0..3, noise);
+    for keep in [false, true] {
+        // Two seconds of media from its end: timeline sample t hears source 95,999 - t.
+        let timing = timed(1.0, 0, 96_000.0 - 1.0, true, keep);
+        let plan = plan(vec![timed_clip("noise", 96_000, timing)]);
+        let mixed = mixer.mix(&plan, 10_000, 4_000);
+        for (i, &value) in mixed.iter().enumerate() {
+            let expected = noise(96_000 - 1 - (10_000 + i as i64));
+            assert!(
+                (value - expected).abs() < 1e-3,
+                "keep {keep}, sample {i}: {value} {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn stretched_sound_mixed_in_chunks_matches_one_long_mix() {
+    let make = || {
+        let mut mixer = Mixer::new(RATE, 2, DEFAULT_BUDGET_BYTES);
+        fill(&mut mixer, "tone", 0..6, |i| {
+            tone(330.0, 0.4)(i) + tone(1250.0, 0.2)(i) * ((i / 3000) % 2) as f32
+        });
+        mixer
+    };
+    let plan = plan(vec![timed_clip(
+        "tone",
+        192_000,
+        timed(0.6, 0, 1000.0, false, true),
+    )]);
+    let whole = make().mix(&plan, 0, 96_000);
+    let mut chunked = make();
+    let mut pieces = Vec::new();
+    for start in (0..96_000).step_by(1024) {
+        pieces.extend(chunked.mix(&plan, start, 1024.min(96_000 - start as usize)));
+    }
+    assert_eq!(pieces.len(), whole.len());
+    let worst = pieces
+        .iter()
+        .zip(&whole)
+        .fold(0.0f32, |worst, (a, b)| worst.max((a - b).abs()));
+    assert!(worst < 1e-5, "{worst}");
+}
+
+#[test]
+fn clips_faster_than_four_times_are_silent() {
+    let mut mixer = Mixer::new(RATE, 2, DEFAULT_BUDGET_BYTES);
+    fill(&mut mixer, "tone", 0..60, tone(440.0, 0.5));
+    for keep in [true, false] {
+        let plan = plan(vec![timed_clip(
+            "tone",
+            48_000,
+            timed(6.0, 0, 0.0, false, keep),
+        )]);
+        let mixed = mixer.mix(&plan, 2_000, 20_000);
+        assert!(mixed.iter().all(|x| x.abs() < 1e-6), "keep {keep}");
+    }
+}

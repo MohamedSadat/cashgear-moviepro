@@ -13,6 +13,10 @@
 //! Sources at another rate are resampled with `rubato` when a block is stored.
 //! Each block is resampled from slightly more audio than it holds, so blocks do
 //! not depend on each other or on the order they were decoded in.
+//!
+//! A clip at another speed, on a ramp or reversed reads its blocks through its
+//! [`Timing`]: time-stretched to keep its pitch, or at varispeed. Above
+//! [`MAX_SOUND_SPEED`] it is silent.
 use std::collections::HashMap;
 
 use rubato::audioadapter_buffers::direct::SequentialSlice;
@@ -34,6 +38,83 @@ pub const BLOCK_PAD_SECONDS: f64 = 0.1;
 pub const DEFAULT_BUDGET_BYTES: usize = 64 * 1024 * 1024;
 /// Seconds an effect chain hears before the first sample it plays after a seek.
 pub const WARMUP_SECONDS: f64 = 1.0;
+/// Clips playing faster than this are silent: what is left of sound is noise.
+pub const MAX_SOUND_SPEED: f64 = 4.0;
+
+/// How a clip at another speed or direction reads its media.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Timing {
+    /// Source positions, in samples at the project rate, at timeline samples in
+    /// order: joined by straight lines and continued past the ends. A reversed
+    /// clip's positions are negated, so they rise as it plays.
+    pub map: Vec<(i64, f64)>,
+    pub reverse: bool,
+    /// Time-stretch keeps the pitch; varispeed lets it follow the speed.
+    pub keep_pitch: bool,
+    /// Identifies the clip and its timing: what a stretcher remembers is kept by it.
+    pub key: u64,
+}
+
+impl Timing {
+    /// The segment of the map around timeline sample `t`.
+    fn segment(&self, t: f64) -> ((i64, f64), (i64, f64)) {
+        let map = &self.map;
+        let after = map.partition_point(|&(at, _)| (at as f64) <= t);
+        let index = after.clamp(1, map.len().max(2) - 1);
+        (map[index - 1], map[index.min(map.len() - 1)])
+    }
+
+    /// The (negated, when reversed) source position at timeline sample `t`.
+    pub fn position(&self, t: f64) -> f64 {
+        match self.map.as_slice() {
+            [] => t,
+            [(at, position)] => position + (t - *at as f64),
+            _ => {
+                let ((t0, p0), (t1, p1)) = self.segment(t);
+                p0 + (p1 - p0) * (t - t0 as f64) / (t1 - t0) as f64
+            }
+        }
+    }
+
+    /// Source samples per timeline sample at `t`.
+    pub fn speed(&self, t: f64) -> f64 {
+        if self.map.len() < 2 {
+            return 1.0;
+        }
+        let ((t0, p0), (t1, p1)) = self.segment(t);
+        ((p1 - p0) / (t1 - t0) as f64).abs()
+    }
+
+    /// The (actual) source samples rendering timeline samples `from..to` reads,
+    /// with what time-stretch or varispeed reads around them.
+    pub fn source_range(&self, from: i64, to: i64, rate: u32) -> (i64, i64) {
+        let grains = cgv_dsp::stretch::Grains::at(rate);
+        let hop = grains.hop as f64;
+        let early = from as f64 - 8.0 * hop;
+        let late = to as f64 + 2.0 * hop;
+        let fastest = [early, from as f64, to as f64, late]
+            .iter()
+            .map(|&t| self.speed(t))
+            .fold(1.0f64, f64::max)
+            .min(MAX_SOUND_SPEED);
+        let reach =
+            (grains.window + grains.reach) as f64 + cgv_dsp::stretch::sinc_reach(fastest) as f64;
+        let mut ends = [self.position(early), self.position(late)];
+        // A ramp's turning points lie between the map's points.
+        for &(at, position) in &self.map {
+            if (early..=late).contains(&(at as f64)) {
+                ends[0] = ends[0].min(position);
+                ends[1] = ends[1].max(position);
+            }
+        }
+        let (low, high) = (ends[0].min(ends[1]) - reach, ends[0].max(ends[1]) + reach);
+        if self.reverse {
+            ((-high).floor() as i64, (-low).ceil() as i64)
+        } else {
+            (low.floor() as i64, high.ceil() as i64)
+        }
+    }
+}
 
 /// A clip as the mixer sees it. Positions are samples at the project rate.
 #[derive(Clone, Debug, PartialEq)]
@@ -64,6 +145,8 @@ pub struct AudioClip {
     /// Clips with the same key, one after another on a track, run through one
     /// effect chain, so a seamless cut keeps reverb and echo tails.
     pub chain: u64,
+    /// Another speed, a ramp or reverse; None plays `source_start` on at normal speed.
+    pub timing: Option<Timing>,
 }
 
 impl AudioClip {
@@ -83,6 +166,7 @@ impl AudioClip {
             denoised: None,
             effects: Vec::new(),
             chain: 0,
+            timing: None,
         }
     }
 
@@ -264,8 +348,17 @@ impl Mixer {
                 if from >= to {
                     continue;
                 }
-                let first = (clip.source_start + from - clip.start).max(0);
-                let last = (clip.source_start + to - clip.start - 1).max(0);
+                let (first, last) = match &clip.timing {
+                    Some(timing) => {
+                        let (low, high) = timing.source_range(from, to, self.rate);
+                        (low.max(0), high.max(0))
+                    }
+                    None => (
+                        (clip.source_start + from - clip.start).max(0),
+                        (clip.source_start + to - clip.start - 1).max(0),
+                    ),
+                };
+
                 for source in clip.sources() {
                     for block in first.div_euclid(len)..=last.div_euclid(len) {
                         needed.push((source.to_string(), block));

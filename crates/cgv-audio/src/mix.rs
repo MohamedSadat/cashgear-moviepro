@@ -8,9 +8,16 @@ use std::hash::{Hash, Hasher};
 use cgv_dsp::dynamics::{Limiter, LimiterSettings};
 use cgv_dsp::loudness::Loudness;
 use cgv_dsp::meter::{Level, LevelMeter, HOP_SECONDS};
+use cgv_dsp::stretch::{sinc_at, sinc_reach, Grains, Stretcher};
 use cgv_dsp::Chain;
 
-use crate::{AudioClip, AudioPlan, AudioTrack, Block, Mixer, Role, FADE_SECONDS, WARMUP_SECONDS};
+use crate::{
+    AudioClip, AudioPlan, AudioTrack, Block, Mixer, Role, Timing, FADE_SECONDS, MAX_SOUND_SPEED,
+    WARMUP_SECONDS,
+};
+
+/// Each timed clip's stretcher, with the mix that last used it.
+type Stretchers = HashMap<u64, (Stretcher, u64)>;
 
 type Planar = Vec<Vec<f32>>;
 
@@ -82,6 +89,7 @@ impl Mastering {
 #[derive(Default)]
 pub(crate) struct State {
     chains: HashMap<u64, ChainState>,
+    stretchers: Stretchers,
     /// RMS of the dialogue tracks per hop, for the plan with this fingerprint.
     speech: BTreeMap<i64, f32>,
     speech_key: u64,
@@ -142,11 +150,261 @@ fn rise(p: f32) -> f32 {
     (p.clamp(0.0, 1.0) * FRAC_PI_2).sin()
 }
 
+/// The clip's gain at timeline sample `t`: its volume (or envelope), fades and
+/// the anti-click ramps of edges that are neither faded nor seamless.
+fn gain_at(clip: &AudioClip, t: i64, ramp: f32, cursor: &mut usize) -> f32 {
+    let mut gain = if clip.envelope.is_empty() {
+        clip.gain
+    } else {
+        envelope_gain(&clip.envelope, t, cursor)
+    };
+    if clip.fade_in > 0 {
+        gain *= rise(((t - clip.start) as f32 + 0.5) / clip.fade_in as f32);
+    } else if !clip.seamless_in {
+        gain *= (((t - clip.start) as f32 + 0.5) / ramp).min(1.0);
+    }
+    if clip.fade_out > 0 {
+        gain *= rise(((clip.end - t) as f32 - 0.5) / clip.fade_out as f32);
+    } else if !clip.seamless_out {
+        gain *= (((clip.end - t) as f32 - 0.5) / ramp).clamp(0.0, 1.0);
+    }
+    gain
+}
+
+/// One channel of a medium's stored sound, `out.len()` samples from source
+/// sample `start`; silence where no block is stored.
+fn read_run(
+    blocks: &HashMap<(String, i64), Block>,
+    key: &str,
+    rate: u32,
+    channel: usize,
+    start: i64,
+    out: &mut [f32],
+) {
+    let len = rate as i64;
+    let mut filled = 0;
+    while filled < out.len() {
+        let at = start + filled as i64;
+        let index = at.rem_euclid(len) as usize;
+        let run = (len as usize - index).min(out.len() - filled);
+        let stored = (at >= 0)
+            .then(|| blocks.get(&(key.to_string(), at.div_euclid(len))))
+            .flatten();
+        match stored {
+            Some(block) => {
+                let plane = &block.channels[channel.min(block.channels.len() - 1)];
+                out[filled..filled + run].copy_from_slice(&plane[index..index + run]);
+            }
+            None => out[filled..filled + run].fill(0.0),
+        }
+        filled += run;
+    }
+}
+
+/// A timed clip's source as it reads it: dry and noise-reduced sound mixed, and
+/// backwards when reversed.
+struct ClipReader<'a> {
+    blocks: &'a HashMap<(String, i64), Block>,
+    rate: u32,
+    dry: Option<&'a str>,
+    wet: Option<(&'a str, f32)>,
+    reverse: bool,
+}
+
+impl ClipReader<'_> {
+    /// `out.len()` samples of `channel` from (negated, when reversed) position `start`.
+    fn read(&self, channel: usize, start: i64, out: &mut [f32]) {
+        let n = out.len() as i64;
+        let first = if self.reverse {
+            -(start + n - 1)
+        } else {
+            start
+        };
+        match self.dry {
+            Some(key) => read_run(self.blocks, key, self.rate, channel, first, out),
+            None => out.fill(0.0),
+        }
+        if let Some((key, amount)) = self.wet {
+            let mut wet = vec![0.0f32; out.len()];
+            read_run(self.blocks, key, self.rate, channel, first, &mut wet);
+            for (o, w) in out.iter_mut().zip(wet) {
+                *o = *o * (1.0 - amount) + w * amount;
+            }
+        }
+        if self.reverse {
+            out.reverse();
+        }
+    }
+
+    /// Mono or stereo, as the source's stored blocks are.
+    fn channels(&self, near: i64) -> usize {
+        let block = near.max(0).div_euclid(self.rate as i64);
+        [self.dry, self.wet.map(|(key, _)| key)]
+            .into_iter()
+            .flatten()
+            .find_map(|key| self.blocks.get(&(key.to_string(), block)))
+            .map_or(1, |block| block.channels.len().min(2))
+    }
+}
+
+/// The clip's sound over `from..to`, time-stretched: windows on the timeline's
+/// hop grid, each read where its stretcher puts it.
+#[allow(clippy::too_many_arguments)]
+fn stretch_into(
+    raw: &mut [Vec<f32>],
+    reader: &ClipReader,
+    stretcher: &mut Stretcher,
+    timing: &Timing,
+    rate: u32,
+    from: i64,
+    to: i64,
+) {
+    let grains = Grains::at(rate);
+    let hop = grains.hop as i64;
+    let channels = raw.len();
+    let nominal = |k: i64| timing.position((k * hop) as f64).round() as i64;
+    let mut mono = |start: i64, out: &mut [f32]| {
+        reader.read(0, start, out);
+        if channels > 1 {
+            let mut other = vec![0.0f32; out.len()];
+            reader.read(1, start, &mut other);
+            for (a, b) in out.iter_mut().zip(other) {
+                *a = (*a + b) * 0.5;
+            }
+        }
+    };
+    let mut window = vec![0.0f32; grains.window];
+    for k in from.div_euclid(hop) - 1..=(to - 1).div_euclid(hop) {
+        let start = stretcher.start(grains, k, &nominal, &mut mono);
+        let span = timing.position(((k + 1) * hop) as f64) - timing.position((k * hop) as f64);
+        if span.abs() / hop as f64 > MAX_SOUND_SPEED {
+            continue;
+        }
+        for (channel, samples) in raw.iter_mut().enumerate() {
+            reader.read(channel, start, &mut window);
+            for (i, &x) in window.iter().enumerate() {
+                let t = k * hop + i as i64;
+                if t >= from && t < to {
+                    samples[(t - from) as usize] += x * grains.weight(i);
+                }
+            }
+        }
+    }
+}
+
+/// The clip's sound over `from..to` at varispeed: the source read between its
+/// samples, its pitch following the speed.
+fn varispeed_into(raw: &mut [Vec<f32>], reader: &ClipReader, timing: &Timing, from: i64, to: i64) {
+    let mut ends = [timing.position(from as f64), timing.position(to as f64)];
+    for &(at, position) in &timing.map {
+        if (from..=to).contains(&at) {
+            ends[0] = ends[0].min(position);
+            ends[1] = ends[1].max(position);
+        }
+    }
+    let reach = sinc_reach(MAX_SOUND_SPEED);
+    let first = ends[0].min(ends[1]).floor() as i64 - reach;
+    let count = (ends[0].max(ends[1]).ceil() as i64 + reach - first + 1).max(1) as usize;
+    let mut source = vec![0.0f32; count];
+    for (channel, samples) in raw.iter_mut().enumerate() {
+        reader.read(channel, first, &mut source);
+        let get = |i: i64| {
+            let at = i - first;
+            if at >= 0 && (at as usize) < source.len() {
+                source[at as usize]
+            } else {
+                0.0
+            }
+        };
+        for t in from..to {
+            let speed = timing.speed(t as f64);
+            if speed <= MAX_SOUND_SPEED {
+                samples[(t - from) as usize] = sinc_at(get, timing.position(t as f64), speed);
+            }
+        }
+    }
+}
+
+/// Adds a timed clip's sound over timeline samples `from..to` into `out`, at
+/// `offset` samples in.
+#[allow(clippy::too_many_arguments)]
+fn render_timed(
+    blocks: &mut HashMap<(String, i64), Block>,
+    stretchers: &mut Stretchers,
+    clock: u64,
+    rate: u32,
+    clip: &AudioClip,
+    timing: &Timing,
+    from: i64,
+    to: i64,
+    out: &mut [Vec<f32>],
+    offset: usize,
+) {
+    let base = offset as i64 - from;
+    let (from, to) = (clip.start.max(from), clip.end.min(to));
+    if from >= to {
+        return;
+    }
+    let (wet, amount) = match &clip.denoised {
+        Some((key, amount)) => (Some(key.as_str()), amount.clamp(0.0, 1.0)),
+        None => (None, 0.0),
+    };
+    let dry = (amount < 1.0).then_some(clip.media.as_str());
+    let len = rate as i64;
+    let (low, high) = timing.source_range(from, to, rate);
+    for key in [dry, wet].into_iter().flatten() {
+        for block in low.max(0).div_euclid(len)..=high.max(0).div_euclid(len) {
+            if let Some(stored) = blocks.get_mut(&(key.to_string(), block)) {
+                stored.last_used = clock;
+            }
+        }
+    }
+    let reader = ClipReader {
+        blocks,
+        rate,
+        dry,
+        wet: wet.map(|key| (key, amount)),
+        reverse: timing.reverse,
+    };
+    let channels = reader.channels(low);
+    let mut raw = vec![vec![0.0f32; (to - from) as usize]; channels];
+    if timing.keep_pitch {
+        let entry = stretchers
+            .entry(timing.key)
+            .or_insert_with(|| (Stretcher::default(), clock));
+        entry.1 = clock;
+        stretch_into(&mut raw, &reader, &mut entry.0, timing, rate, from, to);
+    } else {
+        varispeed_into(&mut raw, &reader, timing, from, to);
+    }
+    let ramp = (rate as f64 * FADE_SECONDS).round().max(1.0) as f32;
+    let mut cursor = 0;
+    for t in from..to {
+        let gain = gain_at(clip, t, ramp, &mut cursor);
+        let i = (t - from) as usize;
+        let frame = (base + t) as usize;
+        match (channels > 1, out.len()) {
+            (false, _) => {
+                let v = gain * raw[0][i];
+                for channel in out.iter_mut() {
+                    channel[frame] += v;
+                }
+            }
+            (true, 1) => out[0][frame] += gain * 0.5 * (raw[0][i] + raw[1][i]),
+            (true, _) => {
+                out[0][frame] += gain * raw[0][i];
+                out[1][frame] += gain * raw[1][i];
+            }
+        }
+    }
+}
+
 /// Adds clip `clip`'s sound over timeline samples `from..to` into `out`, at
 /// `offset` samples in.
 #[allow(clippy::too_many_arguments)]
 fn render_clip(
     blocks: &mut HashMap<(String, i64), Block>,
+    stretchers: &mut Stretchers,
     clock: u64,
     rate: u32,
     clip: &AudioClip,
@@ -155,6 +413,11 @@ fn render_clip(
     out: &mut [Vec<f32>],
     offset: usize,
 ) {
+    if let Some(timing) = &clip.timing {
+        return render_timed(
+            blocks, stretchers, clock, rate, clip, timing, from, to, out, offset,
+        );
+    }
     // Where timeline sample t lands in `out`.
     let base = offset as i64 - from;
     let (from, to) = (clip.start.max(from), clip.end.min(to));
@@ -194,21 +457,7 @@ fn render_clip(
         let stereo = dry.or(wet).is_some_and(|planes| planes.len() > 1);
         if dry.is_some() || wet.is_some() {
             for t in at..run_end {
-                let mut gain = if clip.envelope.is_empty() {
-                    clip.gain
-                } else {
-                    envelope_gain(&clip.envelope, t, &mut cursor)
-                };
-                if clip.fade_in > 0 {
-                    gain *= rise(((t - clip.start) as f32 + 0.5) / clip.fade_in as f32);
-                } else if !clip.seamless_in {
-                    gain *= (((t - clip.start) as f32 + 0.5) / ramp).min(1.0);
-                }
-                if clip.fade_out > 0 {
-                    gain *= rise(((clip.end - t) as f32 - 0.5) / clip.fade_out as f32);
-                } else if !clip.seamless_out {
-                    gain *= (((clip.end - t) as f32 - 0.5) / ramp).clamp(0.0, 1.0);
-                }
+                let gain = gain_at(clip, t, ramp, &mut cursor);
                 let sample = (index + t - at) as usize;
                 let value = |channel: usize| {
                     let pick = |planes: &Planar| planes[channel.min(planes.len() - 1)][sample];
@@ -384,6 +633,9 @@ impl Mixer {
         self.state
             .chains
             .retain(|_, state| clock.saturating_sub(state.used) < 200);
+        self.state
+            .stretchers
+            .retain(|_, (_, used)| clock.saturating_sub(*used) < 200);
         master
     }
 
@@ -404,6 +656,7 @@ impl Mixer {
                 for clip in run {
                     render_clip(
                         &mut self.blocks,
+                        &mut self.state.stretchers,
                         self.clock,
                         self.rate,
                         clip,
@@ -441,6 +694,7 @@ impl Mixer {
                     for clip in run {
                         render_clip(
                             &mut self.blocks,
+                            &mut self.state.stretchers,
                             self.clock,
                             rate,
                             clip,
@@ -457,6 +711,7 @@ impl Mixer {
             for clip in run {
                 render_clip(
                     &mut self.blocks,
+                    &mut self.state.stretchers,
                     self.clock,
                     rate,
                     clip,
@@ -544,6 +799,7 @@ impl Mixer {
                 for clip in &track.clips {
                     render_clip(
                         &mut self.blocks,
+                        &mut self.state.stretchers,
                         self.clock,
                         self.rate,
                         clip,

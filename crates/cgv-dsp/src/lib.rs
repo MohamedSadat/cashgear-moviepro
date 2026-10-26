@@ -11,6 +11,7 @@ pub mod loudness;
 pub mod meter;
 pub mod oversample;
 pub mod reverb;
+pub mod stretch;
 
 pub use effect::{Chain, Settings};
 

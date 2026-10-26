@@ -1,17 +1,21 @@
 //! What the mixer plays: the audible tracks between two timeline samples, with
 //! each clip's fades, crossfades, noise reduction and sound effects, and each
 //! track's volume, pan, role and ducking. Pure, like the frame plan.
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
 
-use cgv_audio::{db_to_gain, AudioClip, AudioPlan, AudioTrack, DuckSettings, Role, Settings};
+use cgv_audio::{
+    db_to_gain, AudioClip, AudioPlan, AudioTrack, DuckSettings, Role, Settings, Timing,
+};
 use cgv_dsp::biquad::FilterKind;
 use cgv_dsp::delay::EchoSettings;
 use cgv_dsp::dynamics::{CompressorSettings, GateSettings, LimiterSettings};
 use cgv_dsp::effect::{EqBand, PassSettings};
 use cgv_dsp::reverb::ReverbSettings;
 use cgv_effects::{Definition, Kind, ParamKind, Registry};
-use cgv_model::{Clip, Effect, ParamValue, Project, Speed, Track, TrackRole};
-use cgv_time::Flicks;
+use cgv_model::{Clip, Effect, ParamValue, Project, Track, TrackRole};
+use cgv_time::{Flicks, FLICKS_PER_SECOND};
 
 /// Media key of a medium's noise-reduced blocks.
 pub fn denoised_key(media: &str) -> String {
@@ -23,14 +27,64 @@ fn registry() -> &'static Registry {
     REGISTRY.get_or_init(|| Registry::builtin().expect("the built-in pack loads"))
 }
 
-/// Whether `clip` can play sound in this phase: only at normal speed (time-stretch
-/// comes in Phase 9).
+/// Whether `clip` plays sound: a freeze frame has none.
 fn audible(project: &Project, clip: &Clip) -> bool {
     clip.audio
-        && clip.speed == Speed::NORMAL
+        && !clip.freeze
         && project
             .media(&clip.media)
             .is_some_and(|media| media.has_audio)
+}
+
+/// Timeline samples between the points of a timed clip's map (10 ms at 48 kHz).
+const MAP_STEP: i64 = 480;
+
+/// How a clip at another speed, on a ramp or reversed reads its media, over
+/// timeline samples `from..to` (the clip's own, from `start`): its source
+/// position every [`MAP_STEP`] samples, negated when reversed.
+fn timing(clip: &Clip, rate: u32, start: i64, from: i64, to: i64) -> Timing {
+    let samples = |flicks: Flicks| flicks.0 as f64 * rate as f64 / FLICKS_PER_SECOND as f64;
+    let in_point = samples(clip.source_in);
+    let out_point = samples(clip.source_out());
+    let position = |t: i64| {
+        let span = samples(clip.span_at(Flicks::from_samples(t - start, rate)));
+        if clip.reverse {
+            -(out_point - span)
+        } else {
+            in_point + span
+        }
+    };
+    let mut map = Vec::new();
+    let mut t = from - (from - start).rem_euclid(MAP_STEP);
+    loop {
+        map.push((t, position(t)));
+        if t >= to {
+            break;
+        }
+        t += MAP_STEP;
+    }
+    if map.len() < 2 {
+        map.push((t + MAP_STEP, position(t + MAP_STEP)));
+    }
+    let mut hasher = DefaultHasher::new();
+    (clip.id.0, &clip.media, clip.source_in.0, clip.duration.0).hash(&mut hasher);
+    (
+        clip.speed.num,
+        clip.speed.den,
+        clip.reverse,
+        clip.keep_pitch,
+        start,
+    )
+        .hash(&mut hasher);
+    for point in &clip.ramp {
+        (point.time.0, point.speed.to_bits()).hash(&mut hasher);
+    }
+    Timing {
+        map,
+        reverse: clip.reverse,
+        keep_pitch: clip.keep_pitch,
+        key: hasher.finish(),
+    }
 }
 
 /// The same sound effects, ids aside.
@@ -44,7 +98,9 @@ fn same_effects(a: &Clip, b: &Clip) -> bool {
 /// True when `next` starts where `clip` ends and continues the same sound, so the
 /// cut needs no ramp and their effects run as one chain.
 fn continues(track: &Track, clip: &Clip, next: &Clip) -> bool {
-    next.media == clip.media
+    !clip.retimed()
+        && !next.retimed()
+        && next.media == clip.media
         && next.start == clip.end()
         && next.source_in == clip.source_out()
         && next.volume_db == clip.volume_db
@@ -252,6 +308,11 @@ pub fn audio_plan(project: &Project, from: i64, to: i64) -> AudioPlan {
                 .iter()
                 .filter_map(sound_settings)
                 .collect();
+            // The map reaches over the transitions too, from the clip's own start.
+            let timing = clip.retimed().then(|| {
+                let own = clip.start.to_samples(rate);
+                timing(clip, rate, own, start.max(from), end.min(to))
+            });
             clips.push(AudioClip {
                 media: clip.media.clone(),
                 start,
@@ -267,8 +328,10 @@ pub fn audio_plan(project: &Project, from: i64, to: i64) -> AudioPlan {
                     .then(|| (denoised_key(&clip.media), clip.denoise as f32)),
                 effects,
                 chain,
+                timing,
             });
         }
+
         let role = match track.role {
             TrackRole::Dialogue => Role::Dialogue,
             TrackRole::Music => Role::Music,
@@ -312,6 +375,7 @@ mod tests {
     const FRAME: i64 = 23_520_000;
     /// Samples a frame at 30 fps and 48 kHz.
     const SAMPLES: i64 = 1600;
+    const FRAME_SAMPLES: i64 = SAMPLES;
 
     fn media(id: &str, kind: MediaKind) -> MediaRef {
         MediaRef {
@@ -414,13 +478,82 @@ mod tests {
             })
             .unwrap();
         assert_eq!(clips(&session, 0, 48_000 * 10).len(), 1);
+        // At another speed it plays through its timing.
         session
             .execute(&Command::SetSpeed {
                 clip: video,
-                speed: Speed::new(1, 2).unwrap(),
+                speed: cgv_model::Speed::new(1, 2).unwrap(),
             })
             .unwrap();
-        assert!(clips(&session, 0, 48_000 * 10).is_empty());
+        let slow = clips(&session, 0, 48_000 * 10);
+        let timing = slow[0].timing.as_ref().expect("a timed clip");
+        assert_eq!(slow[0].end, 96_000);
+        assert!((timing.position(48_000.0) - 24_000.0).abs() < 1e-6);
+        assert!((timing.speed(30_000.0) - 0.5).abs() < 1e-9);
+        assert!(timing.keep_pitch && !timing.reverse);
+    }
+
+    #[test]
+    fn reversed_and_ramped_clips_read_their_media_through_a_map() {
+        let mut session = session();
+        let bottom = track(&session, 0);
+        let clip = append(&mut session, bottom, "sound", 60);
+        session
+            .execute(&Command::SetReverse {
+                clip,
+                reverse: true,
+            })
+            .unwrap();
+        let found = clips(&session, 0, 48_000 * 2);
+        let timing = found[0].timing.as_ref().unwrap();
+        // Two seconds of media, from its end back: positions are negated.
+        assert!(timing.reverse);
+        assert!((timing.position(0.0) + 96_000.0).abs() < 1e-6);
+        assert!((timing.position(96_000.0) - 0.0).abs() < 1e-6);
+        let (low, high) = timing.source_range(0, 96_000, 48_000);
+        assert!(low <= 0 && high >= 96_000, "{low}..{high}");
+        session
+            .execute(&Command::SetRamp {
+                clip,
+                points: vec![
+                    cgv_model::RampShape {
+                        at: 0.0,
+                        speed: 1.0,
+                    },
+                    cgv_model::RampShape {
+                        at: 1.0,
+                        speed: 3.0,
+                    },
+                ],
+            })
+            .unwrap();
+        let found = clips(&session, 0, 48_000 * 2);
+        let timing = found[0].timing.as_ref().unwrap();
+        assert!((timing.speed(1_000.0) - 1.0).abs() < 0.1);
+        assert!(timing.speed(40_000.0) > 2.5);
+        // The key changes with the timing, so a stretcher never mixes two.
+        assert_ne!(timing.key, 0);
+        // A freeze frame is silent.
+        let top = track(&session, 1);
+        let video = append(&mut session, top, "video", 60);
+        session
+            .execute(&Command::FreezeFrame {
+                clip: video,
+                at: Flicks(FRAME * 10),
+                duration: Flicks(FRAME * 30),
+            })
+            .unwrap();
+        let plan = audio_plan(session.project(), 0, FRAME_SAMPLES * 100);
+        let above = plan.tracks.iter().find(|t| t.id == top.0).unwrap();
+        // Its sound stops at the freeze and goes on after it.
+        let edges: Vec<(i64, i64)> = above.clips.iter().map(|c| (c.start, c.end)).collect();
+        assert_eq!(
+            edges,
+            [
+                (0, FRAME_SAMPLES * 10),
+                (FRAME_SAMPLES * 40, FRAME_SAMPLES * 90)
+            ]
+        );
     }
 
     #[test]
