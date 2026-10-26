@@ -1,0 +1,91 @@
+{
+  "id": "chroma-key",
+  "name": "Chroma Key",
+  "category": "Keying",
+  "type": "effect",
+  "version": 1,
+  "description": "Removes a green or blue screen, and the colour it spills on the subject.",
+  "space": "srgb",
+  "params": [
+    {
+      "id": "color",
+      "name": "Key colour",
+      "type": "color",
+      "default": [0, 0.69, 0.25, 1]
+    },
+    {
+      "id": "tolerance",
+      "name": "Tolerance",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.3,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "softness",
+      "name": "Softness",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.2,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "spill",
+      "name": "Spill suppression",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.6,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "choke",
+      "name": "Edge thickness",
+      "type": "number",
+      "min": -0.01,
+      "max": 0.01,
+      "default": 0,
+      "step": 0.0005,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "feather",
+      "name": "Edge feather",
+      "type": "number",
+      "min": 0,
+      "max": 0.02,
+      "default": 0.001,
+      "step": 0.0005,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "view",
+      "name": "View",
+      "type": "choice",
+      "options": [
+        { "id": "result", "name": "Result" },
+        { "id": "matte", "name": "Matte" }
+      ],
+      "default": "result",
+      "animate": false
+    }
+  ],
+  "passes": [
+    { "entry": "key" },
+    { "entry": "choke_horizontal" },
+    { "entry": "choke_vertical" },
+    { "entry": "feather_horizontal" },
+    { "entry": "feather_vertical" },
+    { "entry": "finish" }
+  ]
+}
