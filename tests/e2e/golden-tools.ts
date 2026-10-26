@@ -83,6 +83,20 @@ export async function render(page: Page, time: number): Promise<PNG> {
   return png;
 }
 
+/** The frame number in the barcode strip of an untransformed test clip, or -1. */
+export function barcode(pixels: Pixels) {
+  const y = Math.floor(pixels.height / 16);
+  let value = 0;
+  for (let bit = 0; bit < 16; bit++) {
+    const x = Math.floor(((bit + 0.5) * pixels.width) / 16);
+    const at = (y * pixels.width + x) * 4;
+    const luma = (pixels.data[at] + pixels.data[at + 1] + pixels.data[at + 2]) / 3;
+    if (luma > 180) value |= 1 << bit;
+    else if (luma > 70) return -1;
+  }
+  return value;
+}
+
 /** Smooth value noise from 0 to 1, repeatable. */
 function noise(x: number, y: number) {
   const hash = (i: number, j: number) => {

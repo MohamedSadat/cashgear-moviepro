@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
-import { compare, passes, type Pixels } from './golden-tools';
+import { barcode, compare, passes, type Pixels } from './golden-tools';
 
 // Phase 3: one renderFrame(t) for preview and export, real-time multitrack
 // playback with the sound card as master clock, seeks, shuttle and frame steps.
@@ -159,20 +159,6 @@ async function fill(page: Page, track: number, media: string, copies: number) {
       ...(await run(page, { type: 'append', track, clip: { media, duration: 300 * FRAME } })),
     );
   return ids;
-}
-
-/** The frame number in the barcode strip of an untransformed test clip, or -1. */
-function barcode(pixels: Pixels) {
-  const y = Math.floor(pixels.height / 16);
-  let value = 0;
-  for (let bit = 0; bit < 16; bit++) {
-    const x = Math.floor(((bit + 0.5) * pixels.width) / 16);
-    const at = (y * pixels.width + x) * 4;
-    const luma = (pixels.data[at] + pixels.data[at + 1] + pixels.data[at + 2]) / 3;
-    if (luma > 180) value |= 1 << bit;
-    else if (luma > 70) return -1;
-  }
-  return value;
 }
 
 function record(testInfo: TestInfo, name: string, body: unknown) {
