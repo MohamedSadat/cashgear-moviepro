@@ -572,3 +572,164 @@ fn format_6_saves_the_new_settings_and_opens_format_5() {
     let opened = file::from_json(&old.to_string()).unwrap();
     assert_eq!(&opened, plain.project());
 }
+
+/// A template slot: a placeholder title numbered `slot`, `frames` long, on track `index`.
+fn placeholder(s: &mut Session, index: usize, slot: u32, frames: i64) -> ClipId {
+    use cgv_model::title::{Shape, ShapeKind};
+    let track = track_id(s, index);
+    let title = Title {
+        elements: vec![Element {
+            id: ElementId(1),
+            x: 0.0,
+            y: 0.0,
+            scale: 1.0,
+            rotation: 0.0,
+            opacity: 1.0,
+            fill: Color {
+                r: 0.2,
+                g: 0.2,
+                b: 0.2,
+                a: 1.0,
+            },
+            stroke: None,
+            shadow: None,
+            content: Content::Shape(Shape {
+                kind: ShapeKind::Rectangle,
+                width: 1920.0,
+                height: 1080.0,
+                radius: 0.0,
+                sides: 4,
+                inner: 0.5,
+            }),
+        }],
+    };
+    let clip = ClipSpec {
+        kind: ClipKind::Title,
+        duration: f(frames),
+        title: Some(title),
+        slot: Some(slot),
+        ..Default::default()
+    };
+    ClipId(s.execute(&Command::Append { track, clip }).unwrap().created[0])
+}
+
+#[test]
+fn a_slot_takes_media_and_keeps_its_place_look_and_transitions() {
+    let mut s = session();
+    let slot = placeholder(&mut s, 0, 1, 90);
+    let after = placeholder(&mut s, 0, 2, 60);
+    s.execute(&Command::AddEffect {
+        clip: slot,
+        effect: EffectSpec {
+            id: None,
+            kind: "vignette".into(),
+            pack: BUILTIN_PACK.into(),
+            version: 1,
+            enabled: true,
+            params: Params::new(),
+        },
+        index: None,
+        audio: false,
+    })
+    .unwrap();
+    s.execute(&Command::AddTransition {
+        track: track_id(&s, 0),
+        from: Some(slot),
+        to: Some(after),
+        transition: TransitionSpec {
+            kind: "cross-dissolve".into(),
+            pack: BUILTIN_PACK.into(),
+            version: 1,
+            duration: f(10),
+            alignment: None,
+            params: Params::new(),
+        },
+    })
+    .unwrap();
+    s.execute(&Command::FillSlot {
+        clip: slot,
+        media: "v".into(),
+        source_in: f(30),
+    })
+    .unwrap();
+    let c = clip(&s, slot);
+    assert_eq!(
+        (c.kind, c.media.as_str(), c.slot),
+        (ClipKind::Media, "v", Some(1))
+    );
+    assert_eq!((c.start, c.duration, c.source_in), (f(0), f(90), f(30)));
+    assert!(c.video && !c.audio && c.title.is_none());
+    assert_eq!(c.effects.len(), 1);
+    let transitions = &s.project().tracks[0].transitions;
+    assert_eq!(
+        (transitions[0].from, transitions[0].to),
+        (Some(slot), Some(after))
+    );
+    // A still fills any length.
+    s.execute(&Command::FillSlot {
+        clip: after,
+        media: "i".into(),
+        source_in: Flicks::ZERO,
+    })
+    .unwrap();
+    assert_eq!(clip(&s, after).duration, f(60));
+    // Sound or a clip that is no slot cannot fill one.
+    assert!(s
+        .execute(&Command::FillSlot {
+            clip: slot,
+            media: "a".into(),
+            source_in: Flicks::ZERO,
+        })
+        .is_err());
+}
+
+#[test]
+fn a_short_video_plays_to_its_end_and_holds_its_last_frame() {
+    let mut s = session();
+    s.execute(&Command::AddMedia {
+        media: media("short", MediaKind::Video, 1),
+    })
+    .unwrap();
+    let slot = placeholder(&mut s, 0, 1, 90);
+    let next = placeholder(&mut s, 0, 2, 30);
+    s.execute(&Command::AddTransition {
+        track: track_id(&s, 0),
+        from: Some(slot),
+        to: Some(next),
+        transition: TransitionSpec {
+            kind: "cross-dissolve".into(),
+            pack: BUILTIN_PACK.into(),
+            version: 1,
+            duration: f(10),
+            alignment: None,
+            params: Params::new(),
+        },
+    })
+    .unwrap();
+    let held = ClipId(
+        s.execute(&Command::FillSlot {
+            clip: slot,
+            media: "short".into(),
+            source_in: Flicks::ZERO,
+        })
+        .unwrap()
+        .created[0],
+    );
+    // One second plays, then frame 29 holds for the other two.
+    assert_eq!(layout(&s, 0), vec![(0, 30, 0), (30, 60, 29), (90, 30, 0)]);
+    let h = clip(&s, held);
+    assert!(h.freeze && h.slot == Some(1));
+    // The slot's transition now leaves from the held frame.
+    let t = &s.project().tracks[0].transitions[0];
+    assert_eq!((t.from, t.to), (Some(held), Some(next)));
+    // Filling it again with longer media makes it whole.
+    s.execute(&Command::FillSlot {
+        clip: slot,
+        media: "v".into(),
+        source_in: Flicks::ZERO,
+    })
+    .unwrap();
+    assert_eq!(layout(&s, 0), vec![(0, 90, 0), (90, 30, 0)]);
+    let t = &s.project().tracks[0].transitions[0];
+    assert_eq!((t.from, t.to), (Some(slot), Some(next)));
+}

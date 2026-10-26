@@ -372,6 +372,9 @@ pub fn validate(project: &Project) -> Result<(), String> {
             for effect in clip.effects.iter().chain(&clip.audio_effects) {
                 unique(effect.id.0, "Effect")?;
             }
+            if clip.slot.is_some_and(|slot| !(1..=999).contains(&slot)) {
+                return Err(format!("Clip {} has an invalid template slot", clip.id));
+            }
             check_masks(clip)?;
             for mask in &clip.masks {
                 unique(mask.id.0, "Mask")?;

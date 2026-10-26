@@ -185,6 +185,11 @@ impl Edit {
             Command::FreezeFrame { clip, at, duration } => {
                 self.freeze_frame(*clip, *at, *duration)?
             }
+            Command::FillSlot {
+                clip,
+                media,
+                source_in,
+            } => self.fill_slot(*clip, media, *source_in)?,
             Command::AddMask { clip, mask, index } => self.add_mask(*clip, mask, *index)?,
             Command::SetMask { clip, mask } => self.set_mask(*clip, mask)?,
             Command::RemoveMask { clip, mask } => {
@@ -914,6 +919,9 @@ impl Edit {
         if spec.title.is_some() != (spec.kind == ClipKind::Title) {
             return Err("Only title clips draw a title".into());
         }
+        if spec.slot.is_some_and(|slot| !(1..=999).contains(&slot)) {
+            return Err("Template slots are numbered from 1 to 999".into());
+        }
         let (media, video, audio) = match spec.kind {
             ClipKind::Adjustment | ClipKind::Title => {
                 let what = if spec.kind == ClipKind::Title {
@@ -984,6 +992,7 @@ impl Edit {
             audio_effects: Vec::new(),
             keyframes: BTreeMap::new(),
             title: None,
+            slot: spec.slot,
         };
         if let Some(properties) = &spec.properties {
             apply_properties(&mut clip, properties)?;
@@ -1817,6 +1826,7 @@ impl Edit {
             audio_effects: Vec::new(),
             keyframes: Keyframes::new(),
             title: None,
+            slot: None,
         };
         if clip.spans(at) {
             self.split(at, &[id])?;
@@ -1832,6 +1842,141 @@ impl Edit {
         self.check_clip(&frozen)?;
         let track = self.track_mut(index);
         track.insert_sorted(frozen);
+        self.check_track(index)
+    }
+
+    /// Fills slot clip `id` with `media`: the clip keeps its place, length, look and
+    /// transitions. A video too short for the slot plays to its end, then a freeze
+    /// of its last frame (in the same slot) holds for the rest.
+    fn fill_slot(&mut self, id: ClipId, media: &str, source_in: Flicks) -> Result<(), String> {
+        let (index, clip) = self.editable(id)?;
+        let slot = clip
+            .slot
+            .ok_or_else(|| format!("Clip {id} is not a template slot"))?;
+        let media = self
+            .project
+            .media(media)
+            .cloned()
+            .ok_or_else(|| format!("No media {media} in the project"))?;
+        if !media.has_video {
+            return Err(format!("{} has no picture to fill a slot", media.name));
+        }
+        // A tail held by an earlier fill goes, so the slot is whole again; the
+        // transition at its end comes back to the slot.
+        let tail = self.project.tracks[index]
+            .clips
+            .iter()
+            .find(|c| c.start == clip.end() && c.slot == Some(slot) && c.freeze)
+            .cloned();
+        let mut duration = clip.duration;
+        if let Some(tail) = &tail {
+            duration += tail.duration;
+            let track = self.track_mut(index);
+            track.clips.retain(|c| c.id != tail.id);
+            for transition in track.transitions.iter_mut() {
+                if transition.from == Some(tail.id) {
+                    transition.from = Some(id);
+                }
+            }
+        }
+        let still = media.is_still();
+        let mut filled = Clip {
+            kind: ClipKind::Media,
+            media: media.id.clone(),
+            title: None,
+            source_in: if still {
+                Flicks::ZERO
+            } else {
+                source_in.max(Flicks::ZERO)
+            },
+            duration,
+            freeze: false,
+            video: true,
+            // The template's sound plays; the clip brings its picture.
+            audio: false,
+            link: None,
+            fade_in: Flicks::ZERO,
+            fade_out: Flicks::ZERO,
+            denoise: 0.0,
+            audio_effects: Vec::new(),
+            volume_db: 0.0,
+            ..clip.clone()
+        };
+        if still {
+            (filled.speed, filled.ramp, filled.reverse) = (Speed::NORMAL, Vec::new(), false);
+        }
+        if media.loops() {
+            filled.source_in = Flicks(filled.source_in.0.rem_euclid(media.duration.0.max(1)));
+        }
+        // Keyframes of the placeholder's own text and of sound have nothing to animate.
+        filled
+            .keyframes
+            .retain(|name, _| !name.starts_with("title.") && name != "volumeDb");
+        let mut held = None;
+        if !still && !media.loops() {
+            let available = media.duration - filled.source_in;
+            if available < self.frame {
+                return Err(format!("{} has nothing after that point", media.name));
+            }
+            if filled.source_span() > available + SOURCE_SLACK {
+                // Play to the end, in whole frames, then hold the last frame shown.
+                let plays = filled.time_for_span(available).0 / self.frame.0 * self.frame.0;
+                let plays = Flicks(plays.max(self.frame.0));
+                if plays < duration {
+                    let last = plays - self.frame;
+                    let shown = filled.source_at(last, self.frame);
+                    let mut effects = Vec::new();
+                    for (position, effect) in filled.effects.iter().enumerate() {
+                        effects.push(Effect {
+                            id: EffectId(self.alloc()),
+                            params: filled.effect_params_at(position, last),
+                            ..effect.clone()
+                        });
+                    }
+                    let mut masks = Vec::new();
+                    for mask in filled.masks_at(last) {
+                        masks.push(Mask {
+                            id: MaskId(self.alloc()),
+                            ..mask
+                        });
+                    }
+                    held = Some(Clip {
+                        id: ClipId(self.alloc()),
+                        start: filled.start + plays,
+                        duration: duration - plays,
+                        source_in: Flicks(shown.0.clamp(0, (media.duration.0 - 1).max(0))),
+                        speed: Speed::NORMAL,
+                        ramp: Vec::new(),
+                        reverse: false,
+                        freeze: true,
+                        transform: filled.transform_at(last),
+                        crop: filled.crop_at(last),
+                        opacity: filled.opacity_at(last),
+                        effects,
+                        masks,
+                        keyframes: Keyframes::new(),
+                        ..filled.clone()
+                    });
+                    filled.set_end(plays, false);
+                }
+            }
+        }
+        self.check_clip(&filled)?;
+        let track = self.track_mut(index);
+        let position = track.position(id).expect("clip on its track");
+        track.clips[position] = filled;
+        if let Some(held) = held {
+            self.created.push(held.id.0);
+            self.check_clip(&held)?;
+            let track = self.track_mut(index);
+            // The slot's end is now the held frame's.
+            for transition in track.transitions.iter_mut() {
+                if transition.from == Some(id) {
+                    transition.from = Some(held.id);
+                }
+            }
+            track.insert_sorted(held);
+        }
         self.check_track(index)
     }
 

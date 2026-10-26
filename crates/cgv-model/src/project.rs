@@ -747,6 +747,10 @@ pub struct Clip {
     /// What a title clip draws; None for other clips.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<Title>,
+    /// A template slot's number: its placeholder (a title) or the media that
+    /// fills it, which [`crate::Command::FillSlot`] replaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u32>,
 }
 
 impl Clip {

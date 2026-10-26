@@ -8,3 +8,4 @@ cc 07a8d91ccdbd6b67fc9bac557ae312b607babd73abaf25eca56c7c631b1e9119 # linked cli
 cc 1ebec517faff467a46876e386d08988ecfb38726126f2e13445a6b93cf8a3cc6 # a clip moved with overwrite onto the track of a clip following the main track trimmed it
 cc ef4960c200e7162cd44cb337ba152dfaddd1ef4492397daa7688208efb43645d # a split copied its effect ids into the right half
 cc baee70ebc946017025da3b7268bcbcb6bdc8df934d50086856f7a70cd3c21ae4 # a frame rate change fitted transitions with the old frame
+cc edfb85a7fc6b65cc6a7a2fac364f054f65798184ba121dc36f1db4c2634568b8 # shrinks to seed = 14138944237009366154, steps = 14, magnetic = false

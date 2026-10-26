@@ -269,6 +269,8 @@ fn random_spec(project: &Project, rng: &mut Rng) -> ClipSpec {
             kind: ClipKind::Title,
             duration: Flicks(rng.range(1, 90) * frame),
             title: Some(random_title(rng)),
+            // Template placeholders are titles with a slot number.
+            slot: rng.percent(40).then(|| rng.range(0, 4) as u32),
             ..Default::default()
         };
     }
@@ -703,6 +705,19 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
             mask: mask_id,
             index: rng.below(3) as usize,
         },
+        139 => {
+            let slots: Vec<ClipId> = project
+                .clips()
+                .filter(|c| c.slot.is_some())
+                .map(|c| c.id)
+                .collect();
+            let ids: Vec<&str> = project.media.iter().map(|m| m.id.as_str()).collect();
+            Command::FillSlot {
+                clip: rng.pick(&slots).unwrap_or(any_clip),
+                media: rng.pick(&ids).unwrap_or("none").to_string(),
+                source_in: Flicks(rng.range(0, 600) * FRAME),
+            }
+        }
         124..=126 => Command::SetTrackSound {
             track,
             sound: TrackSound {

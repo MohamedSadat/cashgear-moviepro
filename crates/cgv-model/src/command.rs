@@ -71,6 +71,9 @@ pub struct ClipSpec {
     /// keyframes follow them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub masks: Vec<Mask>,
+    /// The template slot the new clip is (a placeholder title) or fills.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u32>,
 }
 
 /// Transform values to change; missing ones stay as they are, so edits of
@@ -375,6 +378,16 @@ pub enum Command {
         clip: ClipId,
         reverse: bool,
     },
+    /// Fills template slot clip `clip` with `media` from `source_in`: the clip keeps
+    /// its place, length, look (transform, effects, masks, keyframes) and
+    /// transitions, and shows the media's picture. A video shorter than the slot
+    /// plays to its end and its last frame holds for the rest.
+    FillSlot {
+        clip: ClipId,
+        media: String,
+        #[serde(default)]
+        source_in: Flicks,
+    },
     /// Holds the frame showing at `at` for `duration`: the clip splits there and a
     /// freeze frame goes in between, pushing the later clips of its track, and of
     /// its linked partners' tracks, along.
@@ -623,6 +636,8 @@ impl Command {
             Command::SetReverse { reverse: true, .. } => "Reverse",
             Command::SetReverse { .. } => "Play forwards",
             Command::FreezeFrame { .. } => "Freeze frame",
+            Command::FillSlot { .. } => "Fill slot",
+
             Command::AddMask { .. } => "Add mask",
             Command::SetMask { .. } => "Change mask",
             Command::RemoveMask { .. } => "Delete mask",
