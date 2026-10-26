@@ -32,13 +32,13 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `cgv-native`: desktop-only native side.
   - `cgv-effects`: the effect and transition catalogue: JSON schema, registry, shader assembly (`prelude.wgsl`) and settings packing.
   - `cgv-text`: fonts, shaping (rustybuzz), bidi and line breaks, and drawing titles on the CPU (`paint.rs`). No GPU code.
-  - `cgv-dsp`: sound effects (filters, dynamics, echo, reverb), level meters, loudness (`ebur128`) and ducking curves. It knows nothing of projects, so it can be shared with CashGear Audio.
+  - `cgv-dsp`: sound effects (filters, dynamics, echo, reverb), level meters, loudness (`ebur128`), ducking curves and time-stretching that keeps pitch (`stretch.rs`, WSOLA). It knows nothing of projects, so it can be shared with CashGear Audio.
   - `cgv-denoise`: noise reduction (`nnnoiseless`) as a WASM module of its own (`src/pkg/denoise/`), run in a worker that starts when a clip first asks for it. It is too big for the engine's budget.
   - `cgv-time`, `cgv-model`, `cgv-media`, `cgv-audio`.
 - `assets/`: the built-in pack, embedded at build time. One folder per effect or transition (`effect.json` and `effect.wgsl`, plus any images) in `effects/` and `transitions/`; looks in `luts/`. `assets/README.md` is the authoring guide; `scripts/make-effect-assets.mjs` makes the looks and gradients.
-  - `fonts/` (OFL families listed in `fonts.json`, from `pnpm fetch-fonts`), `titles/` (30 templates, from `scripts/make-title-templates.mjs`), `stickers/` (animated WebP and `stickers.json`, from `scripts/make-stickers.mjs`) and `sounds/` (music and sound effects as Opus WebM and `sounds.json`, synthesised by `scripts/make-sounds.mjs`). Templates are bundled into the UI; font, sticker and sound files are build assets, fetched when used, and never inside the WASM.
+  - `fonts/` (OFL families listed in `fonts.json`, from `pnpm fetch-fonts`), `titles/` (30 templates, from `scripts/make-title-templates.mjs`), `stickers/` (animated WebP and `stickers.json`, from `scripts/make-stickers.mjs`) `sounds/` (music and sound effects as Opus WebM and `sounds.json`, synthesised by `scripts/make-sounds.mjs`) and `templates/` (20 project templates, from `scripts/make-project-templates.mjs`). Title and project templates are bundled into the UI; font, sticker and sound files are build assets, fetched when used, and never inside the WASM.
 - `packages/engine-client`: engine worker, comlink client, frame loop and capability probe. Generated bindings go in `src/pkg/` (gitignored).
-  - `media/`: Mediabunny demuxing, WebCodecs decoder sessions, the decoder pool, the frame cache, frame-accurate seeks and probes.
+  - `media/`: Mediabunny demuxing, WebCodecs decoder sessions, the decoder pool, the frame cache, frame-accurate seeks and probes. `reverse-stream.ts` plays a reversed clip by decoding its GOPs from the last one back.
   - `jobs/`: the thumbnail and waveform worker.
   - `storage/`: the OPFS cache, the IndexedDB media and project lists, and web project files in OPFS.
   - `project/`: the worker's project session (WASM), autosave timing and recovery decisions.
@@ -47,7 +47,7 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `export/`: the export worker (its own engine and copy of the project), encoders, Mediabunny muxing, targets, and pure settings (formats, presets, codec levels, bitrates).
   - `effects/`: catalogue types, pack images and the worker that draws the browser's previews (effects, transitions and titles).
   - `fonts/`: the font catalogue (bundled, imported, installed), the loader that gives each engine the files its titles need, and imported fonts in OPFS.
-- `crates/cgv-model`: the project, every edit command, undo/redo and the `.cgvproj` format, with effects, keyframes (`animation.rs`), transitions, LUTs (`lut.rs`) and titles (`title.rs`). `packages/ui/src/project`: opening, saving, autosave, recovery and relinking.
+- `crates/cgv-model`: the project, every edit command, undo/redo and the `.cgvproj` format, with effects, keyframes (`animation.rs`), transitions, LUTs (`lut.rs`), titles (`title.rs`), speed ramps, reverse and freeze frames (`timing.rs`), masks and blend modes (`masks.rs`) and template slots (`FillSlot`). `packages/ui/src/project`: opening, saving, autosave, recovery and relinking.
 - `crates/cgv-engine`: `plan_frame` (what a frame shows), the audio clip plan, transport, Auto quality and playback stats. `crates/cgv-audio`: the block mixer. `crates/cgv-render`: the compositor and WGSL.
 - `crates/cgv-media`: the media library model (Rust, via WASM). `crates/cgv-native`: the cgv-media protocol registry, byte ranges, ffprobe, proxies, export files and their GIF and MP3 conversions, the cache folder and installed fonts (`fonts.rs`, fontdb).
 - `packages/ui`: React components, on the CG component library (`@cashgear/ui`).
@@ -59,6 +59,9 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `mixer/` (the mixer panel, meters and their ballistics), `voiceover/` (recording) and `sounds/` (the Music and Sounds tabs).
   - `shortcuts/` (the key map, presets and settings dialog), `workspace/` (resizable panels and library tabs) and `settings/` (per-user settings in `localStorage`).
   - `export/`: the export dialog, its form rules and `useExport`.
+  - `speed/` (ramp maths and presets; `inspector/SpeedSection.tsx`), `masks/` (mask shapes; `inspector/MaskSection.tsx`) and `layouts/` (picture in picture and split screens; `inspector/LayoutSection.tsx`).
+  - `monitor/`: the transport, and `MonitorOverlay.tsx`, the handles over the picture (move, scale, rotate, crop, masks, Ken Burns) and the eyedropper; `geometry.ts` is pure.
+  - `templates/`: project templates (loading, placing them, filling slots) and their browser.
 - `apps/web`: Vite app.
 - `apps/desktop/src-tauri`: Tauri 2 shell.
 
@@ -124,3 +127,10 @@ Gotchas:
 - A new or pasted title clip gives its elements new ids. Tests read element ids from the snapshot.
 - Font families match in any case, and a bundled family wins over an imported or installed one of the same name. A test that needs a font no bundle has renames a bundled one in memory (`renamedFont` in `titles.spec.ts`).
 - Every Playwright run empties `test-results/`. Copy exports you want to keep (player checks) elsewhere, such as `bench/results/`.
+- A clip's media time comes from `Clip::source_at` (`timing.rs`), for ramps, reverse (sampled mid-frame) and freeze frames alike. Never work a source frame out from `start`, `source_in` and speed alone.
+- Trims, splits and speed changes keep a clip's content through `cut_start`, `set_end` and `retime`: a reversed clip moves its out point where a forward one moves its in point.
+- Sound faster than 4× is silent (`MAX_SOUND_SPEED`). Kept pitch is WSOLA (`cgv-dsp/src/stretch.rs`) over the mixer's `Timing` map, which runs backwards for reversed clips.
+- Blend modes mix sRGB-encoded values with the W3C formulas and composite in linear light. Colour dodge and burn take a channel within half a level of 0 or 1 as exact (`BLEND_EDGE`), or software GPUs flip pixels from black to white.
+- Masks cut a clip after its effects. Feather and expansion are fractions of the picture's shorter side.
+- Template slots are placeholder titles with `slot`. `FillSlot` swaps in media and keeps the clip's place and look; a video shorter than its slot holds its last frame in a freeze clip of the same slot.
+- The green-screen set (`tests/e2e/greenscreen.ts`) is drawn and encoded with the pinned FFmpeg during the test. It is not test media.

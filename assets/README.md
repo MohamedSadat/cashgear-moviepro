@@ -46,3 +46,13 @@ Each folder in `effects/` or `transitions/` is one definition: `effect.json` and
 ## Generated files
 
 `node scripts/make-effect-assets.mjs` writes the luma-wipe gradients (`transitions/luma-wipe/gradients/*.png`) and the built-in looks (`luts/*.cube`, 17 points). They come from our own code, so no third-party art or LUT licences are involved. A look is copied into a project when it is used, so the project keeps working if the look changes later.
+
+## Project templates
+
+`templates/*.json` are written by `node scripts/make-project-templates.mjs`, one file per template, named by its id. Each carries its `pack` and `version`, so a server can offer more later, and:
+
+- `name`, `category`, `description`, and `kind`: `project` starts a new project at its `aspect` (`landscape`, `portrait` or `square`); `intro` and `outro` go in at the playhead.
+- `seconds` and `slots`, as the script counted them.
+- `tracks`, bottom first; the first goes on the main track. A track has an optional `name` and sound `role`, its `clips`, and `transitions` between clips by index (`null` is a free edge).
+
+Clip times are seconds (`at`, `seconds`). A clip is a `slot` (numbered from 1, with an optional slow `motion`, effects and properties), a `title` (a title template's id and its texts in order), a `background` colour, a `sticker`, a `sound` or an `adjustment` layer. Effects, transitions, titles, stickers and sounds are named by their built-in ids, and the UI's tests check each one exists.
