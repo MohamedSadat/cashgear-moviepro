@@ -199,5 +199,10 @@ describe('project templates', () => {
       { type: 'fillSlot', clip: 1, media: 'b' },
       { type: 'fillSlot', clip: 3, media: 'c' },
     ]);
+    // Empty slots come first; when every slot is filled, a fill starts again at 1.
+    project.tracks[0].clips[1].media = 'x';
+    expect(fillCommands(project, ['a']).map((c) => c.type === 'fillSlot' && c.clip)).toEqual([1]);
+    for (const clip of project.tracks.flatMap((t) => t.clips)) clip.media = 'x';
+    expect(fillCommands(project, ['a']).map((c) => c.type === 'fillSlot' && c.clip)).toEqual([2]);
   });
 });

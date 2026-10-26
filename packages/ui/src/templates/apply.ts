@@ -300,11 +300,19 @@ export function slotsOf(project: Project): Map<number, Clip> {
   return new Map([...slots].sort((a, b) => a[0] - b[0]));
 }
 
-/** Commands filling the project's slots, in order, with `media` (ids) in order. */
+/**
+ * The slots a fill goes to, in order: the empty ones, or every one when all are
+ * filled (to fill them again).
+ */
+export function fillTargets(project: Project): Clip[] {
+  const slots = [...slotsOf(project).values()];
+  const empty = slots.filter((clip) => !clip.media);
+  return empty.length ? empty : slots;
+}
+
+/** Commands filling the slots `fillTargets` picks, in order, with `media` (ids) in order. */
 export function fillCommands(project: Project, media: string[]): Command[] {
-  return [...slotsOf(project).values()].slice(0, media.length).map((clip, i) => ({
-    type: 'fillSlot',
-    clip: clip.id,
-    media: media[i],
-  }));
+  return fillTargets(project)
+    .slice(0, media.length)
+    .map((clip, i) => ({ type: 'fillSlot', clip: clip.id, media: media[i] }));
 }

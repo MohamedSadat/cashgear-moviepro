@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { CgButton } from '@cashgear/ui';
 import { FLICKS_PER_SECOND, type Project } from '@cgv/engine-client';
 import type { EditorState } from '../editing/useEditor';
-import { slotsOf } from './apply';
+import { fillTargets, slotsOf } from './apply';
 import { projectTemplates, templateSummary, type ProjectTemplate } from './templates';
 
 /** The template's first track as a strip of its clips, slots highlighted. */
@@ -43,7 +43,8 @@ function SlotFiller({ editor, project }: { editor: EditorState; project: Project
   const toggle = (id: string) =>
     setPicked((list) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]));
   const names = new Map(project.media.map((m) => [m.id, m.name]));
-  const count = Math.min(chosen.length, slots.length);
+  const targets = fillTargets(project).length;
+  const count = Math.min(chosen.length, targets);
   return (
     <div className="cgv-effects-group cgv-slots" data-testid="template-slots">
       <h3>Slots</h3>
@@ -102,7 +103,7 @@ function SlotFiller({ editor, project }: { editor: EditorState; project: Project
               size="small"
               appearance="ghost"
               data-testid="template-fill-all"
-              onClick={() => void editor.fillSlots(media.slice(0, slots.length).map((m) => m.id))}
+              onClick={() => void editor.fillSlots(media.slice(0, targets).map((m) => m.id))}
             >
               Fill with all media
             </CgButton>
