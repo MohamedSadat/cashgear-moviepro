@@ -2,8 +2,9 @@
 // colour in the Cb-Cr plane, measured against how far the key is from grey, so
 // shadows and highlights of the screen key with it. The matte is then thickened
 // or thinned (a minimum or maximum over the edge thickness) and feathered (a
-// Gaussian), and the key colour's spill is taken out of what stays. Passes after
-// the first carry the matte in alpha and read colour from the original.
+// Gaussian), and the screen is taken out of partial edges and its spill out of
+// what stays. Passes after the first carry the matte in alpha and read colour
+// from the original.
 
 // BT.709 Cb and Cr of R'G'B'.
 fn chroma(rgb: vec3<f32>) -> vec2<f32> {
@@ -75,29 +76,30 @@ fn feather_vertical(uv: vec2<f32>) -> vec4<f32> {
     return feather(uv, vec2<f32>(0.0, 1.0));
 }
 
-// Spill: the part of each colour's chroma that points towards the key colour
-// is taken away, keeping its luma.
+// Where the matte is partial, the pixel mixes the subject with the screen: the
+// key colour's share is taken out ("unmixing"), so edges keep the subject's own
+// colour instead of a green or grey fringe. Then spill: the key's strongest
+// channel is held down to the average of the other two. Holding it to the larger
+// one would turn green on skin yellow, since skin's red is close to its green.
 fn finish(uv: vec2<f32>) -> vec4<f32> {
     let alpha = read_input(uv).a;
     if (params.view == VIEW_MATTE) {
         return vec4<f32>(vec3<f32>(alpha), 1.0);
     }
+    let key = params.color.rgb;
     var rgb = read_original(uv).rgb;
-    let k = chroma(params.color.rgb);
-    let strength = length(k);
-    if (strength > 0.01 && params.spill > 0.0) {
-        let towards = k / strength;
-        let c = chroma(rgb);
-        let along = dot(c, towards);
-        if (along > 0.0) {
-            let y = luma(rgb);
-            let fixed = c - towards * along * params.spill;
-            rgb = vec3<f32>(
-                y + 1.5748 * fixed.y,
-                y - 0.1873 * fixed.x - 0.4681 * fixed.y,
-                y + 1.8556 * fixed.x,
-            );
-        }
+    if (alpha < 1.0) {
+        // In linear light, where the camera mixed them and the layers are composited.
+        let unmixed = (srgb_to_linear(rgb) - (1.0 - alpha) * srgb_to_linear(key)) / max(alpha, 0.001);
+        rgb = linear_to_srgb(clamp(unmixed, vec3<f32>(0.0), vec3<f32>(1.0)));
     }
-    return vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)), alpha);
+    let strongest = select(
+        select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), key.b > key.g),
+        vec3<f32>(1.0, 0.0, 0.0),
+        key.r >= key.g && key.r >= key.b,
+    );
+    let others = rgb * (vec3<f32>(1.0) - strongest);
+    let excess = max(dot(rgb, strongest) - (others.r + others.g + others.b) * 0.5, 0.0);
+    rgb = rgb - strongest * excess * params.spill;
+    return vec4<f32>(rgb, alpha);
 }
