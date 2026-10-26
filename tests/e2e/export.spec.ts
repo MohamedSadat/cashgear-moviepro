@@ -40,8 +40,15 @@ interface Layer {
   crop?: Partial<Record<string, number>>;
   opacity?: number;
   effects?: { kind: string; params?: Record<string, unknown> }[];
-  /** Keys by property as [frame, value, easing]; `$n` names effect n of the layer. */
+  /** Keys by property as [frame, value, easing]; `$n` names effect n of the layer, `@n` mask n. */
   keyframes?: Record<string, [number, number, string?][]>;
+  blendMode?: string;
+  masks?: Record<string, unknown>[];
+  /** Speed points by fraction of the clip; the clip's length follows, keeping its media. */
+  ramp?: { at: number; speed: number }[];
+  reverse?: boolean;
+  /** Holds the frame at timeline frame [0] for [1] frames. */
+  freeze?: [number, number];
 }
 interface Fixture {
   name: string;
@@ -208,7 +215,7 @@ async function snapshot(page: Page) {
   )) as {
     project: {
       media: { id: string; name: string }[];
-      tracks: { id: number; clips: { id: number }[] }[];
+      tracks: { id: number; clips: { id: number; start: number; duration: number }[] }[];
     };
   };
 }
@@ -292,13 +299,21 @@ async function build(
       };
     if (layer.crop) properties.crop = { left: 0, top: 0, right: 0, bottom: 0, ...layer.crop };
     if (layer.opacity !== undefined) properties.opacity = layer.opacity;
+    if (layer.blendMode) properties.blendMode = layer.blendMode;
     if (Object.keys(properties).length)
       await execute(page, { type: 'setClipProperties', clip, properties });
+    if (layer.ramp) await execute(page, { type: 'setRamp', clip, points: layer.ramp });
+    if (layer.reverse) await execute(page, { type: 'setReverse', clip, reverse: true });
     const effects: number[] = [];
     for (const effect of layer.effects ?? [])
       effects.push((await execute(page, { type: 'addEffect', clip, effect }))[0]);
+    const masks: number[] = [];
+    for (const mask of layer.masks ?? [])
+      masks.push((await execute(page, { type: 'addMask', clip, mask: { id: 0, ...mask } }))[0]);
     for (const [name, keys] of Object.entries(layer.keyframes ?? {})) {
-      const property = name.replace(/\$(\d+)/, (_, n: string) => String(effects[Number(n)]));
+      const property = name
+        .replace(/\$(\d+)/, (_, n: string) => String(effects[Number(n)]))
+        .replace(/@(\d+)/, (_, n: string) => String(masks[Number(n)]));
       for (const [frame, value, ease] of keys)
         await execute(page, {
           type: 'setKeyframe',
@@ -309,6 +324,13 @@ async function build(
           interpolation: ease ? { kind: ease } : undefined,
         });
     }
+    if (layer.freeze)
+      await execute(page, {
+        type: 'freezeFrame',
+        clip,
+        at: layer.freeze[0] * FRAME,
+        duration: layer.freeze[1] * FRAME,
+      });
   }
   for (const transition of transitions)
     await execute(page, {
@@ -403,13 +425,13 @@ for (const backend of ['WebGPU', 'WebGL2'] as const) {
         color_space: 'bt709',
         color_range: 'tv',
       });
-      // Each track's clips run one after another.
-      const ends = new Map<number, number>();
-      fixture.layers.forEach((layer, index) => {
-        const track = layer.track ?? index;
-        ends.set(track, (ends.get(track) ?? 0) + layer.length);
-      });
-      expect(Number(video.nb_frames ?? result.frames)).toBe(Math.max(...ends.values()));
+      // The export runs to the end of the last clip (ramps and holds change lengths).
+      const end = Math.max(
+        ...(await snapshot(page)).project.tracks.flatMap((track) =>
+          track.clips.map((clip) => clip.start + clip.duration),
+        ),
+      );
+      expect(Number(video.nb_frames ?? result.frames)).toBe(Math.round(end / FRAME));
       const frames = [];
       for (const index of fixture.frames) {
         const reference = await preview(page, index);

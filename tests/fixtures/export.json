@@ -14,31 +14,62 @@
       "about": "A 1080p30 clip as YouTube 1080p: H.264 at 8 Mbit/s with AAC.",
       "size": [1920, 1080],
       "frames": [0, 1, 29, 30, 59],
-      "export": { "format": "mp4", "video": "avc", "bitrate": 8000000, "audio": "aac" },
-      "layers": [{ "media": "h264-1080p30-aac.mp4", "length": 60 }]
+      "export": {
+        "format": "mp4",
+        "video": "avc",
+        "bitrate": 8000000,
+        "audio": "aac"
+      },
+      "layers": [
+        {
+          "media": "h264-1080p30-aac.mp4",
+          "length": 60
+        }
+      ]
     },
     {
       "name": "layers-720p",
       "about": "A 25 fps clip on a 30 fps timeline, cropped, under a scaled, rotated, half-transparent clip and a still.",
       "size": [1280, 720],
       "frames": [0, 17, 45, 59],
-      "export": { "format": "mp4", "video": "avc", "bitrate": 5000000, "audio": "aac" },
+      "export": {
+        "format": "mp4",
+        "video": "avc",
+        "bitrate": 5000000,
+        "audio": "aac"
+      },
       "layers": [
         {
           "media": "vp9-720p25-opus.webm",
           "length": 60,
-          "crop": { "left": 0.05, "top": 0.1, "right": 0.05, "bottom": 0 }
+          "crop": {
+            "left": 0.05,
+            "top": 0.1,
+            "right": 0.05,
+            "bottom": 0
+          }
         },
         {
           "media": "h264-1080p30-aac.mp4",
           "length": 60,
-          "transform": { "x": 200, "y": -80, "scaleX": 0.45, "scaleY": 0.45, "rotation": 20 },
+          "transform": {
+            "x": 200,
+            "y": -80,
+            "scaleX": 0.45,
+            "scaleY": 0.45,
+            "rotation": 20
+          },
           "opacity": 0.75
         },
         {
           "media": "still-1280x720.webp",
           "length": 60,
-          "transform": { "x": -380, "y": 200, "scaleX": 0.25, "scaleY": 0.25 }
+          "transform": {
+            "x": -380,
+            "y": 200,
+            "scaleX": 0.25,
+            "scaleY": 0.25
+          }
         }
       ]
     },
@@ -47,13 +78,25 @@
       "about": "A 9:16 project: a 16:9 clip fitted with bars inside it, and a still over it, as TikTok 1080×1920.",
       "size": [1080, 1920],
       "frames": [0, 40],
-      "export": { "format": "mp4", "video": "avc", "bitrate": 8000000, "audio": "aac" },
+      "export": {
+        "format": "mp4",
+        "video": "avc",
+        "bitrate": 8000000,
+        "audio": "aac"
+      },
       "layers": [
-        { "media": "h264-1080p30-aac.mp4", "length": 45 },
+        {
+          "media": "h264-1080p30-aac.mp4",
+          "length": 45
+        },
         {
           "media": "still-1280x720.jpg",
           "length": 45,
-          "transform": { "y": 600, "scaleX": 0.8, "scaleY": 0.8 }
+          "transform": {
+            "y": 600,
+            "scaleX": 0.8,
+            "scaleY": 0.8
+          }
         }
       ]
     },
@@ -62,15 +105,30 @@
       "about": "Phase 6: a keyframed transform, vignette and saturation on a clip that dissolves into a still, under an adjustment layer warming both.",
       "size": [1280, 720],
       "frames": [3, 14, 24, 30, 36, 50],
-      "export": { "format": "mp4", "video": "avc", "bitrate": 8000000, "audio": "aac" },
+      "export": {
+        "format": "mp4",
+        "video": "avc",
+        "bitrate": 8000000,
+        "audio": "aac"
+      },
       "layers": [
         {
           "media": "h264-1080p30-aac.mp4",
           "length": 30,
           "track": 0,
           "effects": [
-            { "kind": "vignette", "params": { "amount": 0.6 } },
-            { "kind": "saturation", "params": { "saturation": 1.4 } }
+            {
+              "kind": "vignette",
+              "params": {
+                "amount": 0.6
+              }
+            },
+            {
+              "kind": "saturation",
+              "params": {
+                "saturation": 1.4
+              }
+            }
           ],
           "keyframes": {
             "transform.scaleX": [
@@ -91,31 +149,181 @@
             ]
           }
         },
-        { "media": "still-1920x1080.png", "length": 30, "track": 0 },
+        {
+          "media": "still-1920x1080.png",
+          "length": 30,
+          "track": 0
+        },
         {
           "kind": "adjustment",
           "length": 60,
           "track": 1,
           "opacity": 0.8,
-          "effects": [{ "kind": "temperature-tint", "params": { "temperature": 0.5 } }]
+          "effects": [
+            {
+              "kind": "temperature-tint",
+              "params": {
+                "temperature": 0.5
+              }
+            }
+          ]
         }
       ],
-      "transitions": [{ "track": 0, "from": 0, "to": 1, "kind": "cross-dissolve", "frames": 12 }]
+      "transitions": [
+        {
+          "track": 0,
+          "from": 0,
+          "to": 1,
+          "kind": "cross-dissolve",
+          "frames": 12
+        }
+      ]
     },
     {
       "name": "webm-stills",
       "about": "Stills and sound in a 1:1 project, as VP9 and Opus in WebM.",
       "size": [1080, 1080],
       "frames": [0, 44],
-      "export": { "format": "webm", "video": "vp9", "bitrate": 4000000, "audio": "opus" },
+      "export": {
+        "format": "webm",
+        "video": "vp9",
+        "bitrate": 4000000,
+        "audio": "opus"
+      },
       "layers": [
-        { "media": "still-1920x1080.png", "length": 45 },
-        { "media": "tone-48k-stereo.wav", "length": 45 },
+        {
+          "media": "still-1920x1080.png",
+          "length": 45
+        },
+        {
+          "media": "tone-48k-stereo.wav",
+          "length": 45
+        },
         {
           "media": "still-1280x720.jpg",
           "length": 45,
-          "transform": { "rotation": -12, "scaleX": 0.5, "scaleY": 0.5 },
+          "transform": {
+            "rotation": -12,
+            "scaleX": 0.5,
+            "scaleY": 0.5
+          },
           "opacity": 0.6
+        }
+      ]
+    },
+    {
+      "name": "creative-720p",
+      "about": "Phase 9: a ramped clip with a held frame and a reversed one on the main track, a masked still screened over them with its mask moving, a picture-in-picture video with its green keyed out, and a Ken Burns still.",
+      "size": [1280, 720],
+      "frames": [5, 18, 28, 40, 70, 100, 125],
+      "export": {
+        "format": "mp4",
+        "video": "avc",
+        "bitrate": 8000000,
+        "audio": "aac"
+      },
+      "layers": [
+        {
+          "media": "h264-1080p30-aac.mp4",
+          "length": 60,
+          "track": 0,
+          "ramp": [
+            {
+              "at": 0,
+              "speed": 0.5
+            },
+            {
+              "at": 0.4,
+              "speed": 2
+            },
+            {
+              "at": 1,
+              "speed": 1
+            }
+          ],
+          "freeze": [20, 15]
+        },
+        {
+          "media": "h264-1080p30-aac.mp4",
+          "length": 45,
+          "track": 0,
+          "reverse": true
+        },
+        {
+          "media": "still-1280x720.jpg",
+          "length": 140,
+          "track": 1,
+          "opacity": 0.85,
+          "blendMode": "screen",
+          "masks": [
+            {
+              "shape": "ellipse",
+              "mode": "add",
+              "x": 0.3,
+              "y": 0.5,
+              "width": 0.45,
+              "height": 0.6,
+              "rotation": 0,
+              "roundness": 0,
+              "feather": 0.05,
+              "expansion": 0,
+              "opacity": 1
+            }
+          ],
+          "keyframes": {
+            "masks.@0.x": [
+              [0, 0.3, "linear"],
+              [120, 0.7]
+            ]
+          }
+        },
+        {
+          "media": "vp9-720p25-opus.webm",
+          "length": 140,
+          "track": 2,
+          "transform": {
+            "x": 380,
+            "y": -190,
+            "scaleX": 0.3,
+            "scaleY": 0.3
+          },
+          "effects": [
+            {
+              "kind": "chroma-key",
+              "params": {
+                "color": {
+                  "r": 0,
+                  "g": 0.75,
+                  "b": 0,
+                  "a": 1
+                },
+                "tolerance": 0.35
+              }
+            }
+          ]
+        },
+        {
+          "media": "still-1280x720.webp",
+          "length": 140,
+          "track": 3,
+          "keyframes": {
+            "transform.scaleX": [
+              [0, 0.3, "easeInOut"],
+              [140, 0.42]
+            ],
+            "transform.scaleY": [
+              [0, 0.3, "easeInOut"],
+              [140, 0.42]
+            ],
+            "transform.x": [
+              [0, -420, "easeInOut"],
+              [140, -380]
+            ],
+            "transform.y": [
+              [0, 210, "easeInOut"],
+              [140, 180]
+            ]
+          }
         }
       ]
     }
