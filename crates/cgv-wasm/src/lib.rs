@@ -134,37 +134,66 @@ mod bridge {
             height: f64,
             rotation: u32,
         ) -> Result<(), JsValue> {
-            let format = match format {
-                "I420" => cgv_render::PlaneFormat::I420,
-                "NV12" => cgv_render::PlaneFormat::Nv12,
-                "RGBA" | "RGBX" => cgv_render::PlaneFormat::Rgba,
-                other => return Err(js_error(format!("{other} frames are not supported"))),
-            };
-            let plane = |i: usize| {
-                (
-                    layout.get(2 * i).copied().unwrap_or(0),
-                    layout.get(2 * i + 1).copied().unwrap_or(0),
-                )
-            };
-            let color = cgv_render::color::FrameColor::from_names(
-                matrix.as_deref(),
-                full_range,
-                transfer.as_deref(),
-                coded_height,
-            );
-            let planes = cgv_render::Planes {
+            let planes = planes(
                 format,
-                width: coded_width,
-                height: coded_height,
+                coded_width,
+                coded_height,
                 data,
-                layout: [plane(0), plane(1), plane(2)],
-                color,
-            };
+                layout,
+                matrix,
+                full_range,
+                transfer,
+            )?;
             let source = cgv_render::FrameSource::Planes(planes);
             self.inner
                 .set_layer(index, source, width, height, rotation)
                 .map_err(js_error)
         }
+        /// Slow motion with frame blending: the source frame after layer `index`'s
+        /// picture, as a decoder output, mixed in by `weight` (0 to 1).
+        pub fn set_layer_next_frame(
+            &mut self,
+            index: usize,
+            frame: web_sys::VideoFrame,
+            weight: f64,
+        ) -> Result<(), JsValue> {
+            let source =
+                cgv_render::FrameSource::External(wgpu::ExternalImageSource::VideoFrame(frame));
+            self.inner
+                .set_layer_next(index, source, weight)
+                .map_err(js_error)
+        }
+        /// [`Engine::set_layer_next_frame`] from CPU planes, as `set_layer_planes` takes them.
+        #[allow(clippy::too_many_arguments)]
+        pub fn set_layer_next_planes(
+            &mut self,
+            index: usize,
+            format: &str,
+            coded_width: u32,
+            coded_height: u32,
+            data: &[u8],
+            layout: &[u32],
+            matrix: Option<String>,
+            full_range: Option<bool>,
+            transfer: Option<String>,
+            weight: f64,
+        ) -> Result<(), JsValue> {
+            let planes = planes(
+                format,
+                coded_width,
+                coded_height,
+                data,
+                layout,
+                matrix,
+                full_range,
+                transfer,
+            )?;
+            let source = cgv_render::FrameSource::Planes(planes);
+            self.inner
+                .set_layer_next(index, source, weight)
+                .map_err(js_error)
+        }
+
         /// A still uploaded with `upload_still` for layer `index`.
         pub fn set_layer_still(
             &mut self,
@@ -319,6 +348,46 @@ mod bridge {
 
     fn js_error(error: impl std::fmt::Display) -> JsValue {
         JsValue::from_str(&error.to_string())
+    }
+
+    /// CPU frame planes as WebCodecs `copyTo` lays them out, with the frame's colour.
+    #[allow(clippy::too_many_arguments)]
+    fn planes<'a>(
+        format: &str,
+        coded_width: u32,
+        coded_height: u32,
+        data: &'a [u8],
+        layout: &[u32],
+        matrix: Option<String>,
+        full_range: Option<bool>,
+        transfer: Option<String>,
+    ) -> Result<cgv_render::Planes<'a>, JsValue> {
+        let format = match format {
+            "I420" => cgv_render::PlaneFormat::I420,
+            "NV12" => cgv_render::PlaneFormat::Nv12,
+            "RGBA" | "RGBX" => cgv_render::PlaneFormat::Rgba,
+            other => return Err(js_error(format!("{other} frames are not supported"))),
+        };
+        let plane = |i: usize| {
+            (
+                layout.get(2 * i).copied().unwrap_or(0),
+                layout.get(2 * i + 1).copied().unwrap_or(0),
+            )
+        };
+        let color = cgv_render::color::FrameColor::from_names(
+            matrix.as_deref(),
+            full_range,
+            transfer.as_deref(),
+            coded_height,
+        );
+        Ok(cgv_render::Planes {
+            format,
+            width: coded_width,
+            height: coded_height,
+            data,
+            layout: [plane(0), plane(1), plane(2)],
+            color,
+        })
     }
 
     /// The media library. Values cross the boundary as JSON matching

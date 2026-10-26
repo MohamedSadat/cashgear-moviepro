@@ -148,6 +148,68 @@ export interface LutInfo {
   size: number;
 }
 
+/** A point of a speed ramp: at `time` from the clip's start it plays at `speed` times its speed. */
+export interface RampPoint {
+  time: number;
+  speed: number;
+}
+
+/** A ramp point by fraction of the clip's length (0 to 1), as presets give them. */
+export interface RampShape {
+  at: number;
+  speed: number;
+}
+
+/** How a picture mixes with what is below it. */
+export type BlendMode =
+  | 'normal'
+  | 'multiply'
+  | 'screen'
+  | 'overlay'
+  | 'softLight'
+  | 'hardLight'
+  | 'add'
+  | 'darken'
+  | 'lighten'
+  | 'difference'
+  | 'exclusion'
+  | 'colorDodge'
+  | 'colorBurn';
+
+export type MaskShape = 'rectangle' | 'ellipse' | 'path';
+export type MaskMode = 'add' | 'subtract' | 'intersect';
+
+/** A drawn mask's point in its box (-0.5 to 0.5); handles are offsets, zero for a corner. */
+export interface MaskPoint {
+  x: number;
+  y: number;
+  inX?: number;
+  inY?: number;
+  outX?: number;
+  outY?: number;
+}
+
+/**
+ * A shape that cuts a clip's picture, in the picture: positions and sizes are
+ * fractions of its width and height; feather and expansion of its shorter side.
+ */
+export interface Mask {
+  id: number;
+  shape: MaskShape;
+  mode?: MaskMode;
+  invert?: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation?: number;
+  roundness?: number;
+  feather?: number;
+  expansion?: number;
+  opacity: number;
+  points?: MaskPoint[];
+}
+
 export interface Clip {
   id: number;
   /**
@@ -161,12 +223,25 @@ export interface Clip {
   duration: number;
   sourceIn: number;
   speed: Speed;
+  /** A speed ramp, by time from the clip's start; missing plays at `speed` throughout. */
+  ramp?: RampPoint[];
+  /** Plays its source range from the out point back. */
+  reverse?: boolean;
+  /** Shows the frame at `sourceIn` throughout, without sound. */
+  freeze?: boolean;
+  /** Sound at other speeds keeps its pitch (missing means it does). */
+  keepPitch?: boolean;
+  /** Slow motion blends neighbouring frames. */
+  frameBlending?: boolean;
   video: boolean;
   audio: boolean;
   link: number | null;
   transform: Transform;
   crop: Crop;
   opacity: number;
+  blendMode?: BlendMode;
+  /** Shapes that cut the picture, after its effects. */
+  masks?: Mask[];
   volumeDb: number;
   /** Sound fades at the start and end, in flicks; missing means none. */
   fadeIn?: number;
@@ -263,6 +338,9 @@ export interface ClipProperties {
   fadeIn?: number;
   fadeOut?: number;
   denoise?: number;
+  blendMode?: BlendMode;
+  keepPitch?: boolean;
+  frameBlending?: boolean;
 }
 
 /** Track sound settings to change; missing ones stay as they are. */
@@ -292,6 +370,12 @@ export interface ClipSpec {
   keyframes?: Record<string, Keyframe[]>;
   /** What a new title clip draws; its elements get new ids, and keyframes follow them. */
   title?: Title;
+  /** A pasted copy's timing. */
+  ramp?: RampPoint[];
+  reverse?: boolean;
+  freeze?: boolean;
+  /** A pasted copy's masks; they get new ids, and keyframes follow them. */
+  masks?: Mask[];
 }
 
 export type Edge = 'start' | 'end';
@@ -327,6 +411,15 @@ export type Command =
   | { type: 'detachAudio'; clip: number; track?: number | null }
   | { type: 'setSpeed'; clip: number; speed: Speed }
   | { type: 'setClipProperties'; clip: number; properties: ClipProperties }
+  /** Points by fraction of the clip's length; an empty list removes the ramp. */
+  | { type: 'setRamp'; clip: number; points: RampShape[] }
+  | { type: 'setReverse'; clip: number; reverse: boolean }
+  | { type: 'freezeFrame'; clip: number; at: number; duration: number }
+  | { type: 'addMask'; clip: number; mask: Mask; index?: number }
+  | { type: 'setMask'; clip: number; mask: Mask }
+  | { type: 'removeMask'; clip: number; mask: number }
+  | { type: 'moveMask'; clip: number; mask: number; index: number }
+
   /** `audio` adds it to the clip's sound effects. */
   | { type: 'addEffect'; clip: number; effect: EffectSpec; index?: number; audio?: boolean }
   | { type: 'removeEffect'; clip: number; effect: number }

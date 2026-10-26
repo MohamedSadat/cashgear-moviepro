@@ -1,6 +1,6 @@
 // Mirrors the JSON of crates/cgv-engine (plan::FramePlan, stats::StatsSummary).
 import type { Title } from '../project/title';
-import type { Crop, Params, Speed, Transform } from '../project/types';
+import type { BlendMode, Crop, Mask, Params, Speed, Transform } from '../project/types';
 import type { AudioReport } from './audio-player';
 
 export type QualityMode = 'auto' | 'full' | 'half' | 'quarter';
@@ -35,6 +35,13 @@ export interface LayerPlan {
   moving?: boolean;
   /** A title at this frame: the engine draws it, and the layer has no media. */
   title?: Title;
+  /** The clip plays backwards: its source frames come in falling order. */
+  reverse?: boolean;
+  /** Slow motion blends the frame at `sourceTime` with the next, by how far between them it falls. */
+  blendFrames?: boolean;
+  blendMode?: BlendMode;
+  /** Masks at this frame, keyframes applied. */
+  masks?: Mask[];
 }
 
 /** How a frame is drawn, bottom first. */

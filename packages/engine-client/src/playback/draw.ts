@@ -3,11 +3,31 @@ import type { FramePlanes } from '../media/planes';
 import type { Engine, ProjectSession } from '../pkg/cgv_wasm';
 import type { FramePlan } from './types';
 
+/** A decoded video frame: a decoder output, or its planes. */
+export type FramePicture =
+  { kind: 'gpu'; frame: VideoFrame } | { kind: 'planes'; planes: FramePlanes };
+
+/** Slow motion with frame blending: the source frame after a layer's, mixed in by `weight`. */
+export type NextFrame = FramePicture & { weight: number };
+
 /** One layer's picture for a frame. */
 export type LayerSource =
-  | { kind: 'gpu'; frame: VideoFrame; rotation: number }
-  | { kind: 'planes'; planes: FramePlanes; rotation: number }
+  | { kind: 'gpu'; frame: VideoFrame; rotation: number; next?: NextFrame }
+  | { kind: 'planes'; planes: FramePlanes; rotation: number; next?: NextFrame }
   | { kind: 'still'; key: string; width: number; height: number };
+
+function planeArguments(p: FramePlanes) {
+  return [
+    p.format,
+    p.codedWidth,
+    p.codedHeight,
+    p.data,
+    p.layout,
+    p.colorSpace.matrix ?? undefined,
+    p.colorSpace.fullRange ?? undefined,
+    p.colorSpace.transfer ?? undefined,
+  ] as const;
+}
 
 /**
  * Composes `planJson` (from `ProjectSession.plan_frame`, parsed as `plan`) with a
@@ -42,20 +62,17 @@ export function drawFrame(
       const p = source.planes;
       engine.set_layer_planes(
         index,
-        p.format,
-        p.codedWidth,
-        p.codedHeight,
-        p.data,
-        p.layout,
-        p.colorSpace.matrix ?? undefined,
-        p.colorSpace.fullRange ?? undefined,
-        p.colorSpace.transfer ?? undefined,
+        ...planeArguments(p),
         p.displayWidth,
         p.displayHeight,
         source.rotation,
       );
     } else engine.set_layer_still(index, source.key, source.width, source.height);
+    const next = source.kind === 'still' ? undefined : source.next;
+    if (next?.kind === 'gpu') engine.set_layer_next_frame(index, next.frame, next.weight);
+    else if (next) engine.set_layer_next_planes(index, ...planeArguments(next.planes), next.weight);
   });
+
   return engine.compose(scale, present);
 }
 

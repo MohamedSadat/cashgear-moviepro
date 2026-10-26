@@ -310,6 +310,21 @@ export class MediaService {
     return reader.index.frameAt(Math.round(flicks / 705.6) + 1);
   }
 
+  /**
+   * Frame blending: the frame after the one showing at source time `flicks`, and
+   * how far between the two `flicks` falls (0 to 1). Null on a frame's start, at
+   * the last frame, or for media without a frame index.
+   */
+  blendAt(id: string, flicks: number): { next: number; weight: number } | null {
+    const reader = this.media.get(id)?.reader;
+    const frame = this.frameNumber(id, flicks);
+    if (!reader || frame < 0 || frame + 1 >= reader.index.frameCount) return null;
+    const start = reader.index.timestampOf(frame);
+    const end = reader.index.timestampOf(frame + 1);
+    const weight = (flicks / 705.6 - start) / (end - start);
+    return weight > 0.002 && weight < 0.998 ? { next: frame + 1, weight } : null;
+  }
+
   rotation(id: string): number {
     return this.media.get(id)?.rotation ?? 0;
   }

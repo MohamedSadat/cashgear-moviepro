@@ -365,6 +365,8 @@ enum LayerTexture {
 struct FrameBuild {
     encoder: CommandEncoder,
     layers: Vec<Option<LayerTexture>>,
+    /// A slow-motion layer's next source frame, and how much of it to mix in.
+    next: Vec<Option<(LayerTexture, f64)>>,
     /// Titles the engine draws itself, by layer slot.
     titles: Vec<Option<Title>>,
     /// Plane textures to return to the pool after submission.
@@ -474,6 +476,9 @@ pub struct Compositor {
     layer_pipeline: RenderPipeline,
     blend_pipeline: RenderPipeline,
     mask_pipeline: RenderPipeline,
+    /// Copy and constant mix into layer textures: frame blending.
+    frame_copy_pipeline: RenderPipeline,
+    frame_mix_pipeline: RenderPipeline,
     extract_pipeline: RenderPipeline,
     copy_pipeline: RenderPipeline,
     over_pipeline: RenderPipeline,
@@ -681,6 +686,17 @@ impl Compositor {
             None,
             PrimitiveTopology::TriangleList,
         );
+        let frame_copy = |blend| {
+            Self::pipeline(
+                device,
+                &shader,
+                &[&copy_layout],
+                ("vs_full", "fs_copy"),
+                LAYER_FORMAT,
+                blend,
+                PrimitiveTopology::TriangleList,
+            )
+        };
         let layer_pipeline = Self::pipeline(
             device,
             &shader,
@@ -796,6 +812,11 @@ impl Compositor {
             blend_pipeline,
             mask_pipeline,
             mask_layout,
+            frame_copy_pipeline: frame_copy(None),
+            frame_mix_pipeline: frame_copy(Some(BlendState {
+                color: constant,
+                alpha: constant,
+            })),
             extract_pipeline,
             copy_pipeline: copy(None),
             over_pipeline: copy(Some(BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
@@ -918,6 +939,7 @@ impl Compositor {
                 label: Some("Compose"),
             }),
             layers: (0..layers).map(|_| None).collect(),
+            next: (0..layers).map(|_| None).collect(),
             titles: (0..layers).map(|_| None).collect(),
             planes: Vec::new(),
             outputs: Vec::new(),
@@ -974,12 +996,46 @@ impl Compositor {
         index: usize,
         source: FrameSource,
     ) -> Result<(), String> {
+        let texture = self.source_texture(device, queue, index, source)?;
+        let frame = self.frame.as_mut().unwrap();
+        if let Some(LayerTexture::Pooled(old)) = frame.layers[index].replace(texture) {
+            self.pool.release(old);
+        }
+        Ok(())
+    }
+
+    /// Gives slow-motion layer `index` the source frame after its picture, to mix
+    /// in by `weight` (0 shows only its picture, 1 only this one).
+    pub fn set_next_source(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        index: usize,
+        source: FrameSource,
+        weight: f64,
+    ) -> Result<(), String> {
+        let texture = self.source_texture(device, queue, index, source)?;
+        let frame = self.frame.as_mut().unwrap();
+        if let Some((LayerTexture::Pooled(old), _)) = frame.next[index].replace((texture, weight)) {
+            self.pool.release(old);
+        }
+        Ok(())
+    }
+
+    /// A texture holding `source`, for layer `index` of the frame being built.
+    fn source_texture(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        index: usize,
+        source: FrameSource,
+    ) -> Result<LayerTexture, String> {
         let limit = device.limits().max_texture_dimension_2d;
         let frame = self.frame.as_mut().ok_or("No frame is being built")?;
         if index >= frame.layers.len() {
             return Err(format!("Layer {index} is not in this frame"));
         }
-        let texture = match source {
+        Ok(match source {
             FrameSource::Still(key) => {
                 if !self.stills.contains_key(key) {
                     return Err(format!("Still {key} is not loaded"));
@@ -1033,12 +1089,49 @@ impl Compositor {
                 }
                 LayerTexture::Pooled(self.convert_planes(device, queue, &planes)?)
             }
+        })
+    }
+
+    /// Mixes layer `index`'s next source frame into its picture, when it has one:
+    /// frame blending. The two textures are kept until the frame is submitted.
+    fn mix_next(&mut self, device: &Device, frame: &mut FrameBuild, index: usize) {
+        let Some((next, weight)) = frame.next.get_mut(index).and_then(Option::take) else {
+            return;
         };
-        let frame = self.frame.as_mut().unwrap();
-        if let Some(LayerTexture::Pooled(old)) = frame.layers[index].replace(texture) {
-            self.pool.release(old);
+        let (Some(Some(LayerTexture::Pooled(current))), LayerTexture::Pooled(next)) =
+            (frame.layers.get(index), next)
+        else {
+            return;
+        };
+        if current.key != next.key {
+            frame.planes.push(next);
+            return;
         }
-        Ok(())
+        let target = self.pool.acquire(device, current.key);
+        let first = self.copy_binding(device, &current.view);
+        let second = self.copy_binding(device, &next.view);
+        {
+            let mut pass = begin_pass(&mut frame.encoder, "Frame blend", &target.view, true);
+            pass.set_pipeline(&self.frame_copy_pipeline);
+            pass.set_bind_group(0, &first, &[]);
+            pass.draw(0..3, 0..1);
+            pass.set_pipeline(&self.frame_mix_pipeline);
+            let k = weight.clamp(0.0, 1.0);
+            pass.set_blend_constant(Color {
+                r: k,
+                g: k,
+                b: k,
+                a: k,
+            });
+            pass.set_bind_group(0, &second, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        frame.planes.push(next);
+        if let Some(LayerTexture::Pooled(old)) =
+            frame.layers[index].replace(LayerTexture::Pooled(target))
+        {
+            frame.planes.push(old);
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1725,6 +1818,7 @@ impl Compositor {
         if let Some(title) = frame.titles.get_mut(index).and_then(Option::take) {
             return self.prepare_title(device, queue, frame, scene, step, &title);
         }
+        self.mix_next(device, frame, index);
         if !matches!(frame.layers.get(index), Some(Some(_))) {
             return Ok(None);
         }
@@ -2470,11 +2564,13 @@ impl Compositor {
                 self.pool.release(drawn.texture);
             }
         }
-        for texture in frame.layers.into_iter().flatten() {
+        let unused = frame.next.into_iter().flatten().map(|(texture, _)| texture);
+        for texture in frame.layers.into_iter().flatten().chain(unused) {
             if let LayerTexture::Pooled(texture) = texture {
                 self.pool.release(texture);
             }
         }
+
         for texture in frame.planes.into_iter().chain(frame.outputs) {
             self.pool.release(texture);
         }

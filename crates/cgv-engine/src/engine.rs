@@ -182,6 +182,20 @@ impl Engine {
         Ok(())
     }
 
+    /// Gives slow-motion layer `index` the source frame after its picture, mixed
+    /// in by `weight` (the plan's `blend_frames`). Set its picture first.
+    pub fn set_layer_next(
+        &mut self,
+        index: usize,
+        source: FrameSource,
+        weight: f64,
+    ) -> Result<(), String> {
+        if self.pictures.get(index).is_none_or(Option::is_none) {
+            return Err(format!("Layer {index} has no picture to blend with"));
+        }
+        self.renderer.set_next_source(index, source, weight)
+    }
+
     /// Composes the planned frame at `scale` of the project resolution (layers
     /// without a picture are left out) and shows it when `present` is set.
     /// Returns whether the monitor shows it now.

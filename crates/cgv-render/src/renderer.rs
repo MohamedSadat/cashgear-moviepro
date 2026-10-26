@@ -328,6 +328,16 @@ impl Renderer {
             .set_source(&self.device, &self.queue, index, source)
     }
 
+    pub fn set_next_source(
+        &mut self,
+        index: usize,
+        source: FrameSource,
+        weight: f64,
+    ) -> Result<(), String> {
+        self.compositor
+            .set_next_source(&self.device, &self.queue, index, source, weight)
+    }
+
     pub fn compose(
         &mut self,
         project: (u32, u32),

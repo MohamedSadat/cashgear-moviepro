@@ -25,6 +25,35 @@ export interface StreamSource {
 export type StreamFrame =
   { kind: 'gpu'; frame: ManagedFrame } | { kind: 'planes'; planes: FramePlanes };
 
+/**
+ * What playback and export read a clip's frames through: a stream that decodes
+ * ahead of the playhead, forwards ([`VideoStream`]) or backwards
+ * ([`ReverseStream`](./reverse-stream.ts)).
+ */
+export interface LayerStream {
+  error: Error | null;
+  closed: boolean;
+  /** It decodes in hardware. */
+  readonly hardware: boolean;
+  /** Frame `frame`, or null if not decoded yet; it stays valid until the next call. */
+  frameFor(frame: number): StreamFrame | null;
+  /** Export: frame `frame`, waiting for the decoder. */
+  frameWhenReady(frame: number, timeoutMs?: number): Promise<StreamFrame>;
+  /**
+   * Frame `frame` if it is decoded, without moving the stream: the second frame
+   * a blended slow-motion frame mixes in. Valid as long as `frameFor`'s result.
+   */
+  peek(frame: number): StreamFrame | null;
+  /** Export: `peek`, waiting for the decoder. */
+  peekWhenReady(frame: number, timeoutMs?: number): Promise<StreamFrame | null>;
+  has(frame: number): boolean;
+  /** `frame` and the one shown after it are decoded: safe to start playing. */
+  primed(frame: number): boolean;
+  hurry(): void;
+  pump(tick?: boolean): Promise<void> | void;
+  close(): void;
+}
+
 /** Frames held ahead. GPU frames pin decoder surfaces, so hold few. */
 const holdGpu = 4;
 const holdCpu = 6;
@@ -72,7 +101,7 @@ export function streamConfig(source: StreamSource): VideoDecoderConfig {
  * blocks: `frameFor` returns null when a frame is not decoded yet, and playback
  * drops it.
  */
-export class VideoStream {
+export class VideoStream implements LayerStream {
   private pooled: PooledDecoder;
   private ready: Ready[] = [];
   /** The frame handed out last; it stays valid until the next `frameFor`. */
@@ -298,6 +327,29 @@ export class VideoStream {
   /** True when `frame` and the one after it (if any) are decoded: safe to start playing. */
   primed(frame: number) {
     return this.has(frame) && (this.has(frame + 1) || frame + 1 >= this.source.index.frameCount);
+  }
+
+  peek(frame: number): StreamFrame | null {
+    if (this.current?.frame === frame) return this.current.item;
+    return this.ready.find((entry) => entry.frame === frame)?.item ?? null;
+  }
+
+  async peekWhenReady(frame: number, timeoutMs = 15000): Promise<StreamFrame | null> {
+    const until = performance.now() + timeoutMs;
+    while (true) {
+      const item = this.peek(frame);
+      if (item) return item;
+      // Past the end of the track, or beyond what the stream decodes: none.
+      if (frame >= this.source.index.frameCount || this.drained) return null;
+      if (this.error) throw this.error;
+      if (this.closed) throw new Error('The decoder was closed');
+      if (performance.now() > until) return null;
+      void this.pump();
+      await new Promise<void>((resolve) => {
+        this.waiters.push(resolve);
+        setTimeout(resolve, 50);
+      });
+    }
   }
 
   /**

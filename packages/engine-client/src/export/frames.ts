@@ -1,13 +1,20 @@
 import type { ManagedFrame } from '../media/frames';
 import { copyPlanes } from '../media/planes';
+import { ReverseStream } from '../media/reverse-stream';
 import type { MediaService } from '../media/service';
 import { StreamDecoders } from '../media/stream-decoders';
-import { VideoStream } from '../media/video-stream';
+import { VideoStream, type LayerStream, type StreamFrame } from '../media/video-stream';
 import type { Engine } from '../pkg/cgv_wasm';
-import type { LayerSource } from '../playback/draw';
+import type { FramePicture, LayerSource } from '../playback/draw';
 import type { FramePlan, LayerPlan } from '../playback/types';
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+function picture(item: StreamFrame): FramePicture {
+  return item.kind === 'gpu'
+    ? { kind: 'gpu', frame: item.frame.raw }
+    : { kind: 'planes', planes: item.planes };
+}
 
 /**
  * The sources of export frames. Each clip on screen gets a decoder stream, as
@@ -15,7 +22,7 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
  * to start get their streams early, so their first frames are decoded by then.
  */
 export class ExportFrames {
-  private streams = new Map<number, { media: string; stream: VideoStream }>();
+  private streams = new Map<number, { media: string; stream: LayerStream; reverse: boolean }>();
   private decoders = new StreamDecoders();
   private stills = new Map<string, Promise<{ width: number; height: number }>>();
   /** Frames read through the seek path, closed once the frame is composed. */
@@ -63,9 +70,10 @@ export class ExportFrames {
     this.decoders.clear();
   }
 
-  private stream(layer: LayerPlan): VideoStream | null {
+  private stream(layer: LayerPlan): LayerStream | null {
     let entry = this.streams.get(layer.clip);
-    if (entry && (entry.stream.error || entry.media !== layer.media)) {
+    const reverse = !!layer.reverse;
+    if (entry && (entry.stream.error || entry.media !== layer.media || entry.reverse !== reverse)) {
       entry.stream.close();
       this.streams.delete(layer.clip);
       entry = undefined;
@@ -74,8 +82,10 @@ export class ExportFrames {
     const source = this.media.streamSource(layer.media);
     if (!source) return null;
     const start = Math.max(0, this.media.frameNumber(layer.media, layer.sourceTime));
-    const stream = new VideoStream(source, start, this.decoders, this.planes);
-    this.streams.set(layer.clip, { media: layer.media, stream });
+    const stream = reverse
+      ? new ReverseStream(source, start)
+      : new VideoStream(source, start, this.decoders, this.planes);
+    this.streams.set(layer.clip, { media: layer.media, stream, reverse });
     return stream;
   }
 
@@ -107,13 +117,19 @@ export class ExportFrames {
     const number = media.frameNumber(layer.media, layer.sourceTime);
     if (number < 0) return null;
     const rotation = media.rotation(layer.media);
+    const blend = layer.blendFrames ? media.blendAt(layer.media, layer.sourceTime) : null;
     const stream = this.stream(layer);
     if (stream) {
       try {
-        const item = await stream.frameWhenReady(number);
-        return item.kind === 'gpu'
-          ? { kind: 'gpu', frame: item.frame.raw, rotation }
-          : { kind: 'planes', planes: item.planes, rotation };
+        const item = picture(await stream.frameWhenReady(number));
+        const other = blend ? await stream.peekWhenReady(blend.next) : null;
+        const next =
+          blend && other
+            ? { ...picture(other), weight: blend.weight }
+            : blend
+              ? { ...(await this.read(layer, blend.next)), weight: blend.weight }
+              : undefined;
+        return { ...item, rotation, next };
       } catch (error) {
         console.warn(`Clip ${layer.clip}: ${message(error)}; reading frame ${number} directly`);
         stream.close();
@@ -121,13 +137,22 @@ export class ExportFrames {
       }
     }
     // The seek path: slower, but it finds any frame the file has.
-    const { frame, gpu } = await media.readFrame(layer.media, number);
+    const shown = await this.read(layer, number);
+    const next = blend
+      ? { ...(await this.read(layer, blend.next)), weight: blend.weight }
+      : undefined;
+    return { ...shown, rotation, next };
+  }
+
+  /** Frame `number` of a layer's media through the seek path. */
+  private async read(layer: LayerPlan, number: number): Promise<FramePicture> {
+    const { frame, gpu } = await this.media.readFrame(layer.media, number);
     if (gpu && !this.planes) {
       this.opened.push(frame);
-      return { kind: 'gpu', frame: frame.raw, rotation };
+      return { kind: 'gpu', frame: frame.raw };
     }
     try {
-      return { kind: 'planes', planes: await copyPlanes(frame.raw), rotation };
+      return { kind: 'planes', planes: await copyPlanes(frame.raw) };
     } finally {
       frame.close();
     }

@@ -2,13 +2,19 @@ import type { FontLoader } from '../fonts/loader';
 import type { MediaService } from '../media/service';
 import type { ManagedFrame } from '../media/frames';
 import { copyPlanes } from '../media/planes';
+import { ReverseStream } from '../media/reverse-stream';
 import { StreamDecoders } from '../media/stream-decoders';
-import { streamConfig, VideoStream } from '../media/video-stream';
+import {
+  streamConfig,
+  VideoStream,
+  type LayerStream,
+  type StreamFrame,
+} from '../media/video-stream';
 import { Playback, type Engine, type ProjectSession } from '../pkg/cgv_wasm';
 import { FLICKS_PER_SECOND } from '../project/types';
 import type { MeterReading } from '../audio/meters';
 import type { AudioPlayer } from './audio-player';
-import { drawFrame, drawsGpuFrames, type LayerSource } from './draw';
+import { drawFrame, drawsGpuFrames, type FramePicture, type LayerSource } from './draw';
 import type {
   FramePlan,
   LayerPlan,
@@ -50,6 +56,13 @@ export interface PlaybackDeps {
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+/** A stream's frame as the engine takes it. */
+function picture(item: StreamFrame): FramePicture {
+  return item.kind === 'gpu'
+    ? { kind: 'gpu', frame: item.frame.raw }
+    : { kind: 'planes', planes: item.planes };
+}
+
 /**
  * Playback in the engine worker. Every frame goes through one path: plan the
  * frame (Rust), gather a source per layer, compose (Rust, GPU). While playing,
@@ -65,7 +78,7 @@ export class PlaybackController {
   private clock: Clock | null = null;
   /** Why the latest playback left the audio clock, if it did. */
   private fallback: string | null = null;
-  private streams = new Map<number, { media: string; stream: VideoStream }>();
+  private streams = new Map<number, { media: string; stream: LayerStream; reverse: boolean }>();
   private stillSizes = new Map<string, { width: number; height: number }>();
   private stillLoads = new Map<string, Promise<void>>();
   /** The frame the monitor shows (it became visible on the refresh after it was drawn). */
@@ -543,12 +556,13 @@ export class PlaybackController {
 
   // ---- Sources ----
 
-  private stream(layer: LayerPlan): VideoStream | null {
+  private stream(layer: LayerPlan): LayerStream | null {
     const media = this.deps.media();
     let entry = this.streams.get(layer.clip);
+    const reverse = !!layer.reverse;
     // A hardware decoder that fails is not used for this medium again.
     if (entry?.stream.error && entry.stream.hardware) media?.noHardware(entry.media);
-    if (entry && (entry.stream.error || entry.media !== layer.media)) {
+    if (entry && (entry.stream.error || entry.media !== layer.media || entry.reverse !== reverse)) {
       entry.stream.close();
       this.streams.delete(layer.clip);
       entry = undefined;
@@ -557,9 +571,11 @@ export class PlaybackController {
     const source = media?.streamSource(layer.media);
     if (!media || !source) return null;
     const start = Math.max(0, media.frameNumber(layer.media, layer.sourceTime));
-    const stream = new VideoStream(source, start, this.decoders, !this.gpuFrames);
+    const stream = reverse
+      ? new ReverseStream(source, start)
+      : new VideoStream(source, start, this.decoders, !this.gpuFrames);
     this.created++;
-    this.streams.set(layer.clip, { media: layer.media, stream });
+    this.streams.set(layer.clip, { media: layer.media, stream, reverse });
     return stream;
   }
 
@@ -643,11 +659,11 @@ export class PlaybackController {
       const item = stream.frameFor(media.frameNumber(layer.media, layer.sourceTime));
       if (!item) return null;
       const rotation = media.rotation(layer.media);
-      sources.push(
-        item.kind === 'gpu'
-          ? { kind: 'gpu', frame: item.frame.raw, rotation }
-          : { kind: 'planes', planes: item.planes, rotation },
-      );
+      // A blended slow-motion frame mixes in the next one when it is decoded.
+      const blend = layer.blendFrames ? media.blendAt(layer.media, layer.sourceTime) : null;
+      const other = blend ? stream.peek(blend.next) : null;
+      const next = other && blend ? { ...picture(other), weight: blend.weight } : undefined;
+      sources.push({ ...picture(item), rotation, next });
     }
     return sources;
   }
@@ -674,17 +690,23 @@ export class PlaybackController {
           }
           const number = media.frameNumber(layer.media, layer.sourceTime);
           if (number < 0) return null;
-          const { frame, gpu } = await media.readFrame(layer.media, number);
+          const read = async (number: number): Promise<FramePicture> => {
+            const { frame, gpu } = await media.readFrame(layer.media, number);
+            if (gpu && this.gpuFrames) {
+              opened.push(frame);
+              return { kind: 'gpu', frame: frame.raw };
+            }
+            try {
+              return { kind: 'planes', planes: await copyPlanes(frame.raw) };
+            } finally {
+              frame.close();
+            }
+          };
           const rotation = media.rotation(layer.media);
-          if (gpu && this.gpuFrames) {
-            opened.push(frame);
-            return { kind: 'gpu', frame: frame.raw, rotation };
-          }
-          try {
-            return { kind: 'planes', planes: await copyPlanes(frame.raw), rotation };
-          } finally {
-            frame.close();
-          }
+          const shown = await read(number);
+          const blend = layer.blendFrames ? media.blendAt(layer.media, layer.sourceTime) : null;
+          const next = blend ? { ...(await read(blend.next)), weight: blend.weight } : undefined;
+          return { ...shown, rotation, next };
         } catch (error) {
           console.warn(`Layer ${layer.clip} could not be drawn: ${message(error)}`);
           return null;
