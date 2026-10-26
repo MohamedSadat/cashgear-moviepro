@@ -2,7 +2,19 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
-import { compare, passes, render, scenePng, tolerance, type Comparison } from './golden-tools';
+import {
+  clear,
+  compare,
+  FRAME,
+  passes,
+  render,
+  run,
+  setUp,
+  still,
+  tolerance,
+  type Comparison,
+  type Hooks,
+} from './golden-tools';
 
 // Golden renders of every built-in effect and transition, and of adjustment layers,
 // keyframes and effect stacks, on both GPU backends. References come from the
@@ -10,7 +22,6 @@ import { compare, passes, render, scenePng, tolerance, type Comparison } from '.
 // item must have a fixture, and every effect must visibly change the picture.
 const root = process.cwd();
 const goldenDir = join(root, 'tests/golden/effects');
-const FRAME = 23_520_000;
 const update = process.env.UPDATE_GOLDEN === '1';
 
 interface EffectFixture {
@@ -24,51 +35,10 @@ const { media, effects, transitions } = JSON.parse(
   readFileSync(join(root, 'tests/fixtures/effects.json'), 'utf8'),
 ) as { media: string[]; effects: EffectFixture[]; transitions: TransitionFixture[] };
 
-type Hooks = {
-  client: { api: Record<string, (...args: unknown[]) => Promise<unknown>> };
-  project: {
-    execute(command: unknown): Promise<{ created: number[] } | null>;
-    importLook(id: string): Promise<number | null>;
-  };
-};
-
 interface Catalogued {
   id: string;
   type: 'effect' | 'transition' | 'audio';
   variants?: { id: string }[];
-}
-
-async function run(page: Page, command: unknown): Promise<number[]> {
-  const outcome = await page.evaluate(
-    (command) => (Reflect.get(window, '__cgv') as Hooks).project.execute(command),
-    command,
-  );
-  expect(outcome, JSON.stringify(command)).not.toBeNull();
-  return outcome!.created;
-}
-
-async function tracks(page: Page) {
-  const snapshot = (await page.evaluate(() =>
-    (Reflect.get(window, '__cgv') as Hooks).client.api.projectSnapshot(),
-  )) as { project: { tracks: { id: number; clips: { id: number }[] }[] } };
-  return snapshot.project.tracks;
-}
-
-/** An empty 480×270 project with two tracks. */
-async function clear(page: Page) {
-  const clips = (await tracks(page)).flatMap((track) => track.clips.map((clip) => clip.id));
-  if (clips.length) await run(page, { type: 'delete', clips });
-  await run(page, {
-    type: 'setSettings',
-    settings: {
-      width: 480,
-      height: 270,
-      frameRate: { num: 30, den: 1 },
-      sampleRate: 48000,
-      channels: 2,
-    },
-  });
-  return (await tracks(page)).map((track) => track.id);
 }
 
 /** `params` with `$look:<id>` replaced by a project LUT of that built-in look. */
@@ -86,38 +56,6 @@ async function resolve(page: Page, params: Record<string, unknown>) {
   }
   return out;
 }
-
-async function setUp(page: Page, query: string) {
-  await page.goto('/?diagnostic=1' + query);
-  await page.waitForFunction(
-    () =>
-      !!Reflect.get(window, '__cgv')?.client &&
-      document.querySelector<HTMLElement>('[data-testid="project-bar"]')?.dataset.busy === 'false',
-  );
-  // Synthetic pictures, made by the test (see golden-tools).
-  await page.getByTestId('media-file-input').setInputFiles(
-    media.map((name) => ({
-      name,
-      mimeType: 'image/png',
-      buffer: scenePng(name.startsWith('city') ? 'city' : 'sunset'),
-    })),
-  );
-  for (const file of media)
-    await expect(page.locator(`[data-testid="media-item"][data-name="${file}"]`)).toHaveAttribute(
-      'data-status',
-      'ready',
-      { timeout: 60000 },
-    );
-  const snapshot = (await page.evaluate(() =>
-    (Reflect.get(window, '__cgv') as Hooks).client.api.projectSnapshot(),
-  )) as { project: { media: { id: string; name: string }[] } };
-  return new Map(snapshot.project.media.map((item) => [item.name, item.id]));
-}
-
-const still = (ids: Map<string, string>, name: string, frames: number) => ({
-  media: ids.get(name),
-  duration: frames * FRAME,
-});
 
 /** What each fixture builds, and the frame it is shown at. */
 type Build = (page: Page, ids: Map<string, string>) => Promise<number>;
@@ -283,7 +221,7 @@ for (const backend of ['WebGPU', 'WebGL2'] as const) {
     page,
   }, testInfo) => {
     test.setTimeout(600000);
-    const ids = await setUp(page, backend === 'WebGL2' ? '&gpu=webgl2' : '');
+    const ids = await setUp(page, backend === 'WebGL2' ? '&gpu=webgl2' : '', media);
     await expect(page.getByTestId('gpu-backend')).toHaveText(backend);
     const writing = update && backend === 'WebGPU' && testInfo.project.name === 'chrome';
     const all = fixtures();

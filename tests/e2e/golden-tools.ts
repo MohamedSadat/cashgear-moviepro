@@ -1,8 +1,8 @@
 import { expect, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
 
-// What golden render specs share: the comparison, its tolerance and rendering a
-// frame through the engine's diagnostics.
+// What golden render specs share: the comparison, its tolerance, rendering a
+// frame through the engine's diagnostics, and building small test projects.
 
 /**
  * What a render may differ by. GPUs pick mip levels and smooth edges a little
@@ -160,3 +160,87 @@ export function scenePng(kind: 'sunset' | 'city', width = 480, height = 270): Bu
     }
   return PNG.sync.write(png);
 }
+
+/** One frame at 30 fps, in flicks. */
+export const FRAME = 23_520_000;
+
+export type Hooks = {
+  client: { api: Record<string, (...args: unknown[]) => Promise<unknown>> };
+  project: {
+    execute(command: unknown): Promise<{ created: number[] } | null>;
+    importLook(id: string): Promise<number | null>;
+  };
+};
+
+/** Runs a command; returns what it created. */
+export async function run(page: Page, command: unknown): Promise<number[]> {
+  const outcome = await page.evaluate(
+    (command) => (Reflect.get(window, '__cgv') as Hooks).project.execute(command),
+    command,
+  );
+  expect(outcome, JSON.stringify(command)).not.toBeNull();
+  return outcome!.created;
+}
+
+export async function tracks(page: Page) {
+  const snapshot = (await page.evaluate(() =>
+    (Reflect.get(window, '__cgv') as Hooks).client.api.projectSnapshot(),
+  )) as { project: { tracks: { id: number; clips: { id: number }[] }[] } };
+  return snapshot.project.tracks;
+}
+
+/** An empty 480×270 project with its tracks (two, or `count`); returns their ids. */
+export async function clear(page: Page, count = 2) {
+  const before = await tracks(page);
+  const clips = before.flatMap((track) => track.clips.map((clip) => clip.id));
+  if (clips.length) await run(page, { type: 'delete', clips });
+  for (let index = before.length; index < count; index++)
+    await run(page, { type: 'addTrack', index });
+  await run(page, {
+    type: 'setSettings',
+    settings: {
+      width: 480,
+      height: 270,
+      frameRate: { num: 30, den: 1 },
+      sampleRate: 48000,
+      channels: 2,
+    },
+  });
+  return (await tracks(page)).map((track) => track.id);
+}
+
+/**
+ * Opens the app (`query` picks the backend) and imports synthetic pictures named
+ * in `media` ("city…" or a sunset). Returns media ids by name.
+ */
+export async function setUp(page: Page, query: string, media: string[]) {
+  await page.goto('/?diagnostic=1' + query);
+  await page.waitForFunction(
+    () =>
+      !!Reflect.get(window, '__cgv')?.client &&
+      document.querySelector<HTMLElement>('[data-testid="project-bar"]')?.dataset.busy === 'false',
+  );
+  await page.getByTestId('media-file-input').setInputFiles(
+    media.map((name) => ({
+      name,
+      mimeType: 'image/png',
+      buffer: scenePng(name.startsWith('city') ? 'city' : 'sunset'),
+    })),
+  );
+  for (const file of media)
+    await expect(page.locator(`[data-testid="media-item"][data-name="${file}"]`)).toHaveAttribute(
+      'data-status',
+      'ready',
+      { timeout: 60000 },
+    );
+  const snapshot = (await page.evaluate(() =>
+    (Reflect.get(window, '__cgv') as Hooks).client.api.projectSnapshot(),
+  )) as { project: { media: { id: string; name: string }[] } };
+  return new Map(snapshot.project.media.map((item) => [item.name, item.id]));
+}
+
+/** A clip of still `name`, `frames` long. */
+export const still = (ids: Map<string, string>, name: string, frames: number) => ({
+  media: ids.get(name),
+  duration: frames * FRAME,
+});
