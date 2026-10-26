@@ -125,6 +125,10 @@ fn hard_light(b: f32, s: f32) -> f32 {
     return 1.0 - 2.0 * (1.0 - b) * (1.0 - s);
 }
 
+// Within half an 8-bit level of black or white: colour dodge and burn treat
+// these as exactly 0 or 1, so every GPU's rounding of a pure channel agrees.
+const BLEND_EDGE: f32 = 0.002;
+
 // Modes in the order BlendMode lists them: 1 multiply, 2 screen, 3 overlay,
 // 4 soft light, 5 hard light, 6 add, 7 darken, 8 lighten, 9 difference,
 // 10 exclusion, 11 colour dodge, 12 colour burn.
@@ -146,19 +150,19 @@ fn blend_channel(mode: u32, b: f32, s: f32) -> f32 {
         case 9u: { return abs(b - s); }
         case 10u: { return b + s - 2.0 * b * s; }
         case 11u: {
-            if (b <= 0.0) {
+            if (b <= BLEND_EDGE) {
                 return 0.0;
             }
-            if (s >= 1.0) {
+            if (s >= 1.0 - BLEND_EDGE) {
                 return 1.0;
             }
             return min(1.0, b / (1.0 - s));
         }
         case 12u: {
-            if (b >= 1.0) {
+            if (b >= 1.0 - BLEND_EDGE) {
                 return 1.0;
             }
-            if (s <= 0.0) {
+            if (s <= BLEND_EDGE) {
                 return 0.0;
             }
             return 1.0 - min(1.0, (1.0 - b) / s);
