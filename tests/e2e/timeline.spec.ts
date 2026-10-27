@@ -453,6 +453,8 @@ test('the inspector changes picture, sound and speed as undoable steps', async (
 
   // Dragging a label scrubs the value: one undo step for the whole drag.
   const label = inspector.getByTestId('field-opacity').locator('.cgv-field-label');
+  // Typing in the fields below scrolled the inspector.
+  await label.scrollIntoViewIfNeeded();
   const box = (await label.boundingBox())!;
   await drag(page, [box.x + 10, box.y + box.height / 2], [box.x - 50, box.y + box.height / 2]);
   clip = (await snapshot(page)).project.tracks[0].clips[0];
