@@ -127,6 +127,8 @@ fn check_sync(before: &Project, after: &Project, command: &Command) {
         Command::Insert { track, .. } => before.track_index(*track) != Some(main),
         Command::RippleDelete { clips } => !named(clips),
         Command::Trim { clip, ripple, .. } => *ripple && !main_driven(before, *clip),
+        // A held frame off the main track pushes the later clips of its tracks along.
+        Command::FreezeFrame { clip, .. } => !main_driven(before, *clip),
         _ => false,
     };
     if exempt {
