@@ -23,6 +23,7 @@ Dated entries, newest first. Every answer to a phase question is recorded here, 
   - Filled slots keep the template's sound: the clip brings its picture only.
   - An intro's or outro's slots are numbered after the project's own, so filling never touches slots already filled.
   - Intros and outros go onto the main track at the cut nearest the playhead, as any insert there does; their other tracks are new tracks on top.
+  - A fill reads the newest project snapshot, not the one React last drew: on CI's software rendering, a fill straight after placing a template missed its slots.
 - **Green-screen set (changes a proposed default):** drawn by the test (`tests/e2e/greenscreen.ts`) and encoded with the pinned FFmpeg (OpenH264, 4:2:0) while it runs, instead of being added to the test-media release. It needs no upload, and its truth is exact.
 - **Tests:** the sync property exempts a freeze frame off the main track, as it does inserts there: the held frame pushes later clips on its own tracks, and one of them may be linked to the main track.
 - **WASM size:** 2,022,081 bytes gzipped at the end of the phase (start: 1,955,197), within the new 2,250,000 budget.
