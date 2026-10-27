@@ -2,6 +2,31 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-27: Phase 9 findings and defaults
+
+- **Reverse plays without a copy (changes a proposed default):** a reversed clip decodes its source a GOP at a time, from the key frame before the frames it needs, and keeps two stretches of decoded frames (up to 96 MB each) ahead of the playhead (`media/reverse-stream.ts`).
+  - On the 1 s GOP test file, 1080p30 reverse plays with no frame dropped. On a 10 s GOP file, 22 of 239 frames dropped.
+  - The short-GOP copy proposed at the start is not made. It stays a known gap for long-GOP footage and is the next step if users bring such files. Exports read the original file, frame-exact.
+- **Speed:**
+  - Ramps are straight lines between points (held outside them), as speed by fraction of the clip. Changing a ramp keeps the clip's media and changes its length, rounded down to whole frames.
+  - Frame blending mixes the next source frame by how far between frames the source time falls.
+  - Sound: WSOLA with 20 ms Hann windows and a 10 ms hop. Without kept pitch, a windowed sinc resamples. Above 4× the clip is silent.
+- **Chroma key:**
+  - Partial edges are unmixed in linear light (the key colour's share taken out), so edges keep the subject's colour instead of a green or grey fringe.
+  - Spill holds the key's strongest channel to the average of the other two. Holding it to their maximum turned green on skin yellow.
+  - Spill suppression defaults to 80%.
+- **Blend modes:** colour dodge and burn take a channel within half an 8-bit level of 0 or 1 as exact (`BLEND_EDGE`). Software GPUs otherwise rounded pure channels the other way and flipped pixels from black to white.
+- **Templates:**
+  - Each card shows the template's headline title, drawn by the preview worker over a sample picture, and a storyboard of its main track (slots numbered, by length).
+  - A slot's placeholder is a title clip: a dark frame with "Clip n" and its length.
+  - "Fill" puts the picked clips into the empty slots in order (every slot when none is empty). "Fill with all media" uses the library's pictures in order. Dropping a picture or video on a slot fills that one.
+  - Filled slots keep the template's sound: the clip brings its picture only.
+  - An intro's or outro's slots are numbered after the project's own, so filling never touches slots already filled.
+  - Intros and outros go onto the main track at the cut nearest the playhead, as any insert there does; their other tracks are new tracks on top.
+- **Green-screen set (changes a proposed default):** drawn by the test (`tests/e2e/greenscreen.ts`) and encoded with the pinned FFmpeg (OpenH264, 4:2:0) while it runs, instead of being added to the test-media release. It needs no upload, and its truth is exact.
+- **Tests:** the sync property exempts a freeze frame off the main track, as it does inserts there: the held frame pushes later clips on its own tracks, and one of them may be linked to the main track.
+- **WASM size:** 2,022,081 bytes gzipped at the end of the phase (start: 1,955,197), within the new 2,250,000 budget.
+
 ## 2026-10-26: Phase 9 answers
 
 - **Scope:** the plan's seven tools: speed (ramps, reverse, freeze frame, time-stretch), chroma key, masks, blend modes, picture-in-picture and split screen, Ken Burns, and templates.
