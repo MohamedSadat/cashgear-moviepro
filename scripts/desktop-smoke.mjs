@@ -3,7 +3,8 @@
 // GPU backends, cross-origin isolation, shared memory and the native command.
 // Then media (native streaming, ffprobe, a ProRes proxy), projects (a saved
 // .cgvproj that reopens, and an autosave that recovers after the app is killed),
-// playback, and exports: MP4 written natively, GIF and MP3 converted by FFmpeg.
+// playback, exports (MP4 written natively, GIF and MP3 converted by FFmpeg),
+// sound, installed fonts, and a template filled from the project's media.
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -315,7 +316,7 @@ try {
     return (await hooks.client.api.projectSnapshot()).project;
   }, projectPath);
   const file = JSON.parse(await readFile(projectPath, 'utf8'));
-  if (file.format !== 'cashgear-video-project' || file.version !== 5)
+  if (file.format !== 'cashgear-video-project' || file.version !== 6)
     throw new Error('Unexpected project file: ' + JSON.stringify(file).slice(0, 200));
   // The file leaves out an empty LUT list; the snapshot lists LUTs without their data.
   expect({ ...file.project, luts: file.project.luts ?? [] }).toEqual(saved);
@@ -627,6 +628,48 @@ try {
   if (installedFonts.differing < 500)
     throw new Error('Arial drew like the fallback: ' + JSON.stringify(installedFonts));
   results.push({ installedFonts });
+
+  // Templates: an intro goes in at the playhead with its pack sounds (through the
+  // desktop's asset server), and its slot fills from the project's video.
+  await page.getByTestId('library-tab-templates').click();
+  await page
+    .locator('[data-testid="template-item"][data-key="bold-intro"]')
+    .getByTestId('template-use')
+    .click();
+  const template = await page.evaluate(async () => {
+    const hooks = window.__cgv;
+    const project = async () => (await hooks.client.api.projectSnapshot()).project;
+    const deadline = performance.now() + 30_000;
+    let slot = null;
+    while (!slot && performance.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      slot = (await project()).tracks
+        .flatMap((track) => track.clips)
+        .find((clip) => clip.slot !== undefined && !clip.media);
+    }
+    if (!slot) throw new Error('The intro did not reach the timeline');
+    const { media } = await project();
+    const video = media.find((item) => item.name.endsWith('.mp4'));
+    await hooks.editor.fillSlots([video.id]);
+    const filled = (await project()).tracks
+      .flatMap((track) => track.clips)
+      .find((clip) => clip.id === slot.id);
+    if (filled?.media !== video.id) throw new Error('The intro’s slot did not fill');
+    const pixels = (await hooks.client.api.renderPixels(filled.start + 352_800_000)).data;
+    let lit = 0;
+    for (let i = 0; i < pixels.length; i += 4)
+      if (pixels[i] + pixels[i + 1] + pixels[i + 2] > 60) lit++;
+    return {
+      slot: filled.slot,
+      sounds: media.filter((item) => item.id.startsWith('sound-')).map((item) => item.id),
+      lit: Number((lit / (pixels.length / 4)).toFixed(3)),
+    };
+  });
+  if (!['sound-riser', 'sound-impact'].every((id) => template.sounds.includes(id)))
+    throw new Error('The intro’s sounds did not come in: ' + JSON.stringify(template));
+  if (template.lit < 0.2)
+    throw new Error('The filled slot drew nothing: ' + JSON.stringify(template));
+  results.push({ template });
 
   await page.screenshot({ path: join(root, 'bench/results/desktop.png') });
   await writeFile(
