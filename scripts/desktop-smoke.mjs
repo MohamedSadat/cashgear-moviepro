@@ -636,17 +636,17 @@ try {
     .locator('[data-testid="template-item"][data-key="bold-intro"]')
     .getByTestId('template-use')
     .click();
+  // The Templates panel lists the slot once the intro has landed.
+  await page
+    .locator('[data-testid="template-slot"][data-filled="false"]')
+    .first()
+    .waitFor({ timeout: 30_000 });
   const template = await page.evaluate(async () => {
     const hooks = window.__cgv;
     const project = async () => (await hooks.client.api.projectSnapshot()).project;
-    const deadline = performance.now() + 30_000;
-    let slot = null;
-    while (!slot && performance.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      slot = (await project()).tracks
-        .flatMap((track) => track.clips)
-        .find((clip) => clip.slot !== undefined && !clip.media);
-    }
+    const slot = (await project()).tracks
+      .flatMap((track) => track.clips)
+      .find((clip) => clip.slot !== undefined && !clip.media);
     if (!slot) throw new Error('The intro did not reach the timeline');
     const { media } = await project();
     const video = media.find((item) => item.name.endsWith('.mp4'));

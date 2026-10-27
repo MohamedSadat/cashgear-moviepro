@@ -376,8 +376,10 @@ export function useEditor(
 
   const fillSlots = useCallback(async (media: string[]) => {
     const { project, current } = state.current;
-    if (!current) return;
-    const commands = fillCommands(current, media);
+    // The newest project: a template placed just before may not have drawn yet.
+    const latest = project.latest()?.project ?? current;
+    if (!latest) return;
+    const commands = fillCommands(latest, media);
     if (commands.length)
       await project.executeGroup(commands.length === 1 ? 'Fill slot' : 'Fill template', commands);
   }, []);
