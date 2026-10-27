@@ -3,7 +3,7 @@ import type { Clip, Command, Project, ProjectSettings } from '@cgv/engine-client
 import { sounds } from '../sounds/catalog';
 import { stickers } from '../stickers/catalog';
 import { templates as titleTemplates } from '../titles/templates';
-import { clipSpec, fillCommands, packRequests, placeTemplate, slotsOf } from './apply';
+import { clipSpec, fillCommands, headline, packRequests, placeTemplate, slotsOf } from './apply';
 import { projectTemplates, templateSettings, templateSummary } from './templates';
 
 // The sound and sticker catalogues make absolute URLs against the page.
@@ -118,6 +118,8 @@ describe('project templates', () => {
         expect(spec.duration % frame).toBe(0);
       }
       expect(templateSummary(template)).toMatch(/^\d+ slots? · [\d.]+ s · /);
+      // Its card previews its headline.
+      expect(headline(template)?.elements.some((e) => e.type === 'text')).toBe(true);
     },
   );
 

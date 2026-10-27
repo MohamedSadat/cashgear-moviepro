@@ -1955,7 +1955,7 @@ body,
 
 .cgv-template {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 80px minmax(0, 1fr);
   gap: 4px 8px;
   align-items: center;
   padding: 6px;
@@ -1963,10 +1963,31 @@ body,
   border-radius: 6px;
 }
 
+.cgv-template-thumb {
+  display: block;
+  width: 80px;
+  height: 45px;
+  border-radius: 4px;
+  background: var(--cg-surface-subtle);
+  object-fit: cover;
+}
+
+.cgv-template-description,
+.cgv-template-foot {
+  grid-column: 1 / -1;
+}
+
+.cgv-template-foot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .cgv-storyboard {
   display: flex;
-  grid-column: 1 / -1;
+  flex: 1;
   gap: 2px;
+  min-width: 0;
   height: 18px;
 }
 

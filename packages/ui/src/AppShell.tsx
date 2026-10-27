@@ -17,6 +17,7 @@ import { usePreviews } from './effects/usePreviews';
 import { SoundsBrowser } from './sounds/SoundsBrowser';
 import { StickersBrowser } from './stickers/StickersBrowser';
 import { TemplatesBrowser } from './templates/TemplatesBrowser';
+import { useTemplatePreviews } from './templates/useTemplatePreviews';
 import { TitlesBrowser } from './titles/TitlesBrowser';
 import { useTitlePreviews } from './titles/useTitlePreviews';
 import { useEditor, type EditorState } from './editing/useEditor';
@@ -127,6 +128,8 @@ export function AppShell({ platform }: Props) {
   const previews = usePreviews(browsing ? catalog : null);
   const [titling, setTitling] = useState(false);
   const titlePreviews = useTitlePreviews(titling);
+  const [templating, setTemplating] = useState(false);
+  const templatePreviews = useTemplatePreviews(templating);
   const keymap = useMemo(() => effectiveKeymap(settings.shortcuts), [settings.shortcuts]);
   // How each video shows upright, for the monitor's handles.
   const rotations = useMemo(
@@ -320,7 +323,9 @@ export function AppShell({ platform }: Props) {
             onSelect={(id) =>
               id === 'titles'
                 ? setTitling(true)
-                : ['effects', 'transitions'].includes(id) && setBrowsing(true)
+                : id === 'templates'
+                  ? setTemplating(true)
+                  : ['effects', 'transitions'].includes(id) && setBrowsing(true)
             }
             tabs={[
               {
@@ -331,7 +336,7 @@ export function AppShell({ platform }: Props) {
               {
                 id: 'templates',
                 label: 'Templates',
-                render: () => <TemplatesBrowser editor={editor} />,
+                render: () => <TemplatesBrowser editor={editor} previews={templatePreviews} />,
               },
               {
                 id: 'titles',

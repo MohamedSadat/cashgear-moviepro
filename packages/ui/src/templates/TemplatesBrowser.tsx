@@ -117,10 +117,17 @@ function SlotFiller({ editor, project }: { editor: EditorState; project: Project
 }
 
 /**
- * Project templates by category: start a new project from one, or put an intro
- * or outro at the playhead. Then fill its slots with your own clips.
+ * Project templates by category, each previewed by its headline over a sample
+ * picture: start a new project from one, or put an intro or outro at the
+ * playhead. Then fill its slots with your own clips.
  */
-export function TemplatesBrowser({ editor }: { editor: EditorState }) {
+export function TemplatesBrowser({
+  editor,
+  previews,
+}: {
+  editor: EditorState;
+  previews: Record<string, string>;
+}) {
   const [query, setQuery] = useState('');
   const project = editor.project.snapshot?.project ?? null;
   const hasSlots = !!project && slotsOf(project).size > 0;
@@ -161,27 +168,34 @@ export function TemplatesBrowser({ editor }: { editor: EditorState }) {
                 data-testid="template-item"
                 data-key={template.id}
               >
-                <Storyboard template={template} />
+                {previews[template.id] ? (
+                  <img className="cgv-template-thumb" src={previews[template.id]} alt="" />
+                ) : (
+                  <span className="cgv-template-thumb" aria-hidden />
+                )}
                 <span className="cgv-template-text">
                   <span className="cgv-template-name">{template.name}</span>
                   <span className="cgv-muted cgv-template-summary">
                     {templateSummary(template)}
                   </span>
-                  <span className="cgv-muted cgv-template-description">{template.description}</span>
                 </span>
-                <CgButton
-                  size="small"
-                  appearance={template.kind === 'project' ? 'solid' : 'outline'}
-                  data-testid="template-use"
-                  title={
-                    template.kind === 'project'
-                      ? 'Start a new project from this template'
-                      : 'Add it at the playhead'
-                  }
-                  onClick={() => void editor.applyTemplate(template)}
-                >
-                  {template.kind === 'project' ? 'Use' : 'Add'}
-                </CgButton>
+                <span className="cgv-muted cgv-template-description">{template.description}</span>
+                <span className="cgv-template-foot">
+                  <Storyboard template={template} />
+                  <CgButton
+                    size="small"
+                    appearance={template.kind === 'project' ? 'solid' : 'outline'}
+                    data-testid="template-use"
+                    title={
+                      template.kind === 'project'
+                        ? 'Start a new project from this template'
+                        : 'Add it at the playhead'
+                    }
+                    onClick={() => void editor.applyTemplate(template)}
+                  >
+                    {template.kind === 'project' ? 'Use' : 'Add'}
+                  </CgButton>
+                </span>
               </li>
             ))}
           </ul>

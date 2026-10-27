@@ -25,7 +25,7 @@ const templates = readdirSync(templateDir)
     ...(JSON.parse(readFileSync(join(templateDir, file), 'utf8')) as TemplateFile),
   }));
 
-/** Eight clips, as a user brings them: two videos and stills, some twice under other names. */
+/** Eight clips, as a user brings them: three videos and five stills, some twice under other names. */
 const clips: { name: string; file: string; mimeType: string }[] = [
   { name: 'beach.mp4', file: 'h264-1080p30-aac.mp4', mimeType: 'video/mp4' },
   { name: 'sunset.png', file: 'still-1920x1080.png', mimeType: 'image/png' },

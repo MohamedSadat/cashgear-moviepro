@@ -91,13 +91,8 @@ export function motionKeyframes(
   return { keyframes: { 'transform.x': keys(from, to) }, scale: drift };
 }
 
-/** A title template with its texts replaced in order, `seconds` long. */
-function titleSpec(
-  id: string,
-  texts: string[] | undefined,
-  seconds: number,
-  settings: ProjectSettings,
-): ClipSpec {
+/** Title template `id` with its texts replaced in order. */
+function titleOf(id: string, texts: string[] | undefined) {
   const template = titleTemplates.find((item) => item.id === id);
   if (!template) throw new Error(`The template uses a title it does not have: ${id}`);
   let index = 0;
@@ -108,7 +103,28 @@ function titleSpec(
         : element,
     ),
   };
+  return { template, title };
+}
+
+/** A title template with its texts replaced in order, `seconds` long. */
+function titleSpec(
+  id: string,
+  texts: string[] | undefined,
+  seconds: number,
+  settings: ProjectSettings,
+): ClipSpec {
+  const { template, title } = titleOf(id, texts);
   return templateSpec({ ...template, title, seconds }, settings);
+}
+
+/** A project template's first title, as its title template designs it: what its card shows. */
+export function headline(template: ProjectTemplate): Title | null {
+  const titles = template.tracks
+    .flatMap((track) => track.clips)
+    .filter((clip) => clip.type === 'title')
+    .sort((a, b) => a.at - b.at);
+  const first = titles[0];
+  return first?.type === 'title' ? titleOf(first.template, first.texts).title : null;
 }
 
 /**
