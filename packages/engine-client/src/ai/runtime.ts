@@ -22,10 +22,15 @@ function configure() {
   ort.env.logLevel = 'error';
 }
 
-/** Whether this worker can reach a WebGPU adapter. */
+/**
+ * Whether this worker can reach a hardware WebGPU adapter. A fallback one
+ * (SwiftShader) runs models far slower than the CPU path does.
+ */
 export async function hasWebGpu(): Promise<boolean> {
   try {
-    return !!(await navigator.gpu?.requestAdapter());
+    const adapter = await navigator.gpu?.requestAdapter();
+    const info = adapter?.info as (GPUAdapterInfo & { isFallbackAdapter?: boolean }) | undefined;
+    return !!adapter && !info?.isFallbackAdapter;
   } catch {
     return false;
   }
