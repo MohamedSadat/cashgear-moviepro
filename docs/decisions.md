@@ -2,6 +2,43 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-28: Phase 10 answers
+
+- **Runtime (changes the plan):** one browser runtime, onnxruntime-web (MIT), in a worker on the web and in the desktop's WebView2. It uses WebGPU and falls back to WASM.
+  - The plan put `ort` on the desktop's native side. Raw frames never cross to native code, so background removal could not run there. Captions could, with FFmpeg decoding the sound natively, but a second runtime would double what is built and tested.
+  - The web and the desktop give the same results, and the desktop gains no native AI dependencies.
+- **Caption languages:** English and Modern Standard Arabic must caption well, measured on test clips. Whisper's other languages and the Arabic dialects work, best-effort.
+- **Model size:** the caption model may be up to about 560 MB: Whisper large-v3-turbo with 4-bit weights (`q4f16`: encoder 370 MB, merged decoder 194 MB).
+  - Whisper small (about 300 MB at 4 or 8 bits) is much weaker on Arabic. At 16 bits, turbo is 1.6 GB.
+- **Cloud:** local now, ready for the cloud later.
+  - Every AI job runs on the user's machine in this phase.
+  - The job interface can take a remote provider later (text-to-speech, generative video), once a CashGear backend exists.
+
+## 2026-10-28: Phase 10 defaults
+
+These were proposed alongside the questions, and the user raised no objection.
+
+- **Jobs:** AI runs in a worker of its own, with progress and cancel, so it never blocks playback or editing.
+  - Results are cached per source file (OPFS on the web, the cache folder on the desktop), so exports reuse them.
+  - The runtime and the models load the first time a job runs, outside the engine's 2.25 MB WASM budget.
+- **Model downloads:** from pinned Hugging Face revisions, each file checked by SHA-256, with its size shown before the download starts. A CashGear mirror can follow in Phase 11.
+- **Captions:** Whisper (MIT weights) with word timestamps.
+  - Caption clips go on a caption track, drawn by `cgv-text`, so Arabic shapes and runs right to left.
+  - A caption list fixes text and timing. Captions have style presets and burn-in, and export as SRT and VTT files.
+  - The project file moves to `.cgvproj` format 7, with a migration from format 6.
+- **Background removal:** MODNet (Apache-2.0, about 13 MB at 16 bits).
+  - Masks are worked out at 720p ahead of the playhead and cached per clip; exports read the cache.
+  - If MODNet cannot reach 720p preview speed on the GTX 1650, MediaPipe Selfie Segmentation (Apache-2.0, 0.5 MB) takes its place. BiRefNet-lite (MIT, 115 MB) has the best edges but is too slow for preview.
+  - Before a model is added, its original licence and the terms of its training data are checked.
+- **Scene, silence and beat detection:** our own code, with no model.
+  - Scenes: frame differences on the jobs worker's small frames. "Auto split" makes every cut in one undo step.
+  - Silences: a level threshold with a minimum length and padding. "Remove silences" ripple-deletes them in one undo step.
+  - Beats: spectral flux and beat tracking in `cgv-dsp`, added as markers that cuts snap to.
+- **Test clips:** English and Arabic read speech from FLEURS (CC BY 4.0) with its reference transcripts, added to the test-media release with attribution.
+  - A dialect would need speech of its own: the user's recordings, kept out of the public repository, or a licensed set.
+- **Word error rate:** at most 10% for English and 20% for Arabic, after Arabic spelling is normalised (diacritics, alef forms, ta marbuta).
+- **Pushing:** one push near the end of the phase, after the user's go-ahead.
+
 ## 2026-10-27: Phase 9 findings and defaults
 
 - **Reverse plays without a copy (changes a proposed default):** a reversed clip decodes its source a GOP at a time, from the key frame before the frames it needs, and keeps two stretches of decoded frames (up to 96 MB each) ahead of the playhead (`media/reverse-stream.ts`).
