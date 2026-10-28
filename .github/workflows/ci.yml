@@ -79,8 +79,14 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: tests/media
-          key: test-media-${{ hashFiles('tests/media/manifest.json') }}
+          key: test-media-${{ hashFiles('tests/media/manifest.json', 'tests/media/speech.json', 'tests/media/ai.json') }}
       - run: pnpm fetch-test-media
+      # The small models the AI tests run; the 560 MB caption model is measured locally.
+      - uses: actions/cache@v4
+        with:
+          path: tests/models
+          key: models-${{ hashFiles('packages/engine-client/src/ai/models.json') }}
+      - run: pnpm fetch-models whisper-tiny selfie selfie-landscape
       - run: cargo fmt --all --check
       # The generated engine bindings and apps/web/dist are untracked; build them
       # before clippy (Tauri embeds dist), typecheck and the browser tests.
