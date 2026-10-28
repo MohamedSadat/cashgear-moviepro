@@ -114,6 +114,47 @@ pub async fn project_save(
     .map(Some)
 }
 
+/// Asks where to save a text file (subtitles) named `name` with `extension`, and
+/// writes it. Returns where it went, or None when the user cancels.
+#[tauri::command]
+pub async fn text_file_save(
+    app: AppHandle,
+    name: String,
+    extension: String,
+    label: String,
+    contents: String,
+) -> Result<Option<String>, String> {
+    if extension.is_empty() || !extension.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(format!("{extension:?} is not a file extension"));
+    }
+    let stem = file_name(&name);
+    let stem = stem
+        .strip_suffix(&format!(".{}", project::EXTENSION))
+        .unwrap_or(&stem);
+    let picked = app
+        .dialog()
+        .file()
+        .set_title(format!("Save {label}"))
+        .add_filter(&label, &[extension.as_str()])
+        .set_file_name(format!("{stem}.{extension}"))
+        .blocking_save_file();
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let mut path = picked.into_path().map_err(|error| error.to_string())?;
+    if path.extension().is_none() {
+        path.set_extension(&extension);
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        std::fs::write(&path, contents)
+            .map(|()| path.display().to_string())
+            .map_err(|error| format!("Could not write {}: {error}", path.display()))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map(Some)
+}
+
 /// Asks for a project file and reads it. None when the user cancels.
 #[tauri::command]
 pub async fn project_open(app: AppHandle) -> Result<Option<OpenedProject>, String> {

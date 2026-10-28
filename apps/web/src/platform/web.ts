@@ -296,6 +296,15 @@ export const webPlatform: MediaPlatform = {
   },
 
   chooseExport,
+  async saveTextFile(name, extension, _label, text) {
+    const file = `${name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'Untitled'}.${extension}`;
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    link.download = file;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
+    return file;
+  },
   cache,
   nativeInfo: async () => undefined,
 };

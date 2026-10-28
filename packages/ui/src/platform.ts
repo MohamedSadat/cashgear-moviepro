@@ -141,6 +141,16 @@ export interface MediaPlatform {
     bytes: Uint8Array,
     projectPath: string | null,
   ): Promise<ImportRequest>;
+  /**
+   * Saves a text file (subtitles): the browser downloads it; the desktop asks
+   * where. Resolves with the file's name or path, or null when the user cancels.
+   */
+  saveTextFile(
+    name: string,
+    extension: string,
+    label: string,
+    text: string,
+  ): Promise<string | null>;
   cache: CacheStore;
   nativeInfo(): Promise<NativeInfo | undefined>;
   /** Desktop: the fonts installed on this computer, for titles. */

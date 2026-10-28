@@ -56,6 +56,7 @@ fn main() {
             project::project_save,
             project::project_open,
             project::project_read,
+            project::text_file_save,
             project::autosave_read,
             project::autosave_write,
             project::autosave_remove,

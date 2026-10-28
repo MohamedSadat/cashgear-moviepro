@@ -298,6 +298,8 @@ export const desktopPlatform: MediaPlatform = {
   },
 
   chooseExport,
+  saveTextFile: (name, extension, label, text) =>
+    invoke<string | null>('text_file_save', { name, extension, label, contents: text }),
   cache: nativeCache,
   nativeInfo: () => invoke<NativeInfo>('native_info'),
   installedFonts,
