@@ -76,6 +76,7 @@ export interface ModelState {
 }
 
 export interface TranscriptWord {
+  /** With its leading space; without one it joins the word before ("100", "%"). */
   text: string;
   /** Source seconds. */
   start: number;

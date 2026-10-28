@@ -565,6 +565,14 @@ export class Whisper {
     const lastWord = kept.at(-1)?.words.at(-1);
     if (!singleEnding && cuts.length && lastWord)
       consumed = Math.max(1, Math.min(size, Math.round(lastWord.end * FRAMES_PER_SECOND)));
+    // OpenAI skips the rest of a window the model ended early, taking it for
+    // silence; small models end windows mid-speech, so resume where it stopped
+    // (a silent rest then reads as silence). Not for the window's last second.
+    const stamps = tokens.filter(isStamp);
+    const stopped = stamps.length ? (stamps[stamps.length - 1] - begin) * INPUT_STRIDE : 0;
+    const early = singleEnding || !cuts.length;
+    if (early && stopped >= FRAMES_PER_SECOND && size - stopped >= FRAMES_PER_SECOND)
+      consumed = stopped;
     return { segments: kept, consumed };
   }
 
@@ -635,10 +643,8 @@ export class Whisper {
       else word.end = word.start + longest;
     });
     const merged = mergePunctuation(words.map(({ word, first }) => ({ ...word, first })));
-    words = merged.map(({ first, ...word }) => ({
-      word: { ...word, text: word.text.trim() },
-      first,
-    }));
+    // Words keep their leading space: one without follows the last directly ("100%").
+    words = merged.map(({ first, ...word }) => ({ word, first }));
     return words;
   }
 }
