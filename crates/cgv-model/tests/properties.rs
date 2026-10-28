@@ -156,10 +156,14 @@ fn check_sync(before: &Project, after: &Project, command: &Command) {
                 continue;
             };
             // Clips at different speeds or directions drift apart under a slip by
-            // design; a ramp is not a straight line to measure along.
+            // design; a ramp is not a straight line to measure along, and a held
+            // frame has no line at all (a roll lengthens it without moving it).
             let clips = [leader, partner, now, partner_now];
             let differ = clips.iter().any(|c| {
-                c.speed != leader.speed || c.reverse != leader.reverse || !c.ramp.is_empty()
+                c.speed != leader.speed
+                    || c.reverse != leader.reverse
+                    || !c.ramp.is_empty()
+                    || c.freeze
             });
             if partner_index == main_now || partner_now.link != now.link || differ {
                 continue;

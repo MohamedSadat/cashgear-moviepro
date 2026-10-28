@@ -10,3 +10,4 @@ cc ef4960c200e7162cd44cb337ba152dfaddd1ef4492397daa7688208efb43645d # a split co
 cc baee70ebc946017025da3b7268bcbcb6bdc8df934d50086856f7a70cd3c21ae4 # a frame rate change fitted transitions with the old frame
 cc edfb85a7fc6b65cc6a7a2fac364f054f65798184ba121dc36f1db4c2634568b8 # shrinks to seed = 14138944237009366154, steps = 14, magnetic = false
 cc 03a1c2580044e429bb7e7d7ad93b2c840025c5ed4c1fa5ae373da7c0bf2b0322 # a freeze off the main track pushed a clip linked to it
+cc 55ee9099297b015048c2b739e4a9355fdf7ef35b8cfbe650218d7feef69e50c6 # shrinks to seed = 9478325281634927498, steps = 15, magnetic = true
