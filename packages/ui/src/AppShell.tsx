@@ -4,12 +4,15 @@ import {
   evaluateCapabilities,
   probeCapabilities,
   type BackendPreference,
+  type CaptionModel,
   type CapabilityProbe,
   type EngineClient,
   type EngineGpu,
   type GpuFault,
 } from '@cgv/engine-client';
 import { useAiTools, type AiToolsState } from './ai/useAiTools';
+import { CaptionsPanel } from './captions/CaptionsPanel';
+import { useCaptions, type CaptionsState } from './captions/useCaptions';
 import { BlockedScreen, CapabilityNotice, CapabilityStrip } from './CapabilityReport';
 import { DevOverlay } from './DevOverlay';
 import { useCatalog } from './effects/catalog';
@@ -72,6 +75,7 @@ export interface DiagnosticHooks {
   meters: MeterStore;
   voiceover: VoiceoverState;
   ai: AiToolsState;
+  captions: CaptionsState;
 }
 
 const defaultAutosaveMs = 30_000;
@@ -97,6 +101,11 @@ function readOptions(search: string) {
       : 'auto') as 'auto' | 'software' | 'hardware',
     gpuFault:
       diagnostic && (fault === 'adapter' || fault === 'device') ? (fault as GpuFault) : undefined,
+    // Tests use the small speech model, fetched from local copies.
+    captionModel: (diagnostic && params.get('captionModel') === 'whisper-tiny'
+      ? 'whisper-tiny'
+      : undefined) as CaptionModel | undefined,
+    modelBase: diagnostic ? params.get('models') : null,
   };
 }
 
@@ -121,7 +130,8 @@ export function AppShell({ platform }: Props) {
     onSnapping: (snapping) => update({ snapping }),
     catalog,
   });
-  const ai = useAiTools(project, platform.cache);
+  const ai = useAiTools(project, platform.cache, { modelBase: options.modelBase });
+  const captions = useCaptions(editor, ai, platform, { model: options.captionModel });
   const exporter = useExport(client, project, platform, {
     backend: options.backend,
     decode: options.decode,
@@ -203,6 +213,7 @@ export function AppShell({ platform }: Props) {
       meters,
       voiceover,
       ai,
+      captions,
     };
     Reflect.set(window, '__cgv', hooks);
   }, [
@@ -217,6 +228,7 @@ export function AppShell({ platform }: Props) {
     meters,
     voiceover,
     ai,
+    captions,
   ]);
 
   const gpu: EngineGpu =
@@ -393,6 +405,11 @@ export function AppShell({ platform }: Props) {
                 id: 'mixer',
                 label: 'Mixer',
                 render: () => <MixerPanel editor={editor} meters={meters} />,
+              },
+              {
+                id: 'captions',
+                label: 'Captions',
+                render: () => <CaptionsPanel editor={editor} ai={ai} captions={captions} />,
               },
             ]}
           />

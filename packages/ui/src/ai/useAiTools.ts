@@ -38,6 +38,13 @@ export interface AiToolsState {
   clearBeats(id: number): Promise<void>;
   /** Splits clip `id` (and its partners) where its picture cuts to a new scene, as one undo step. */
   splitScenes(id: number): Promise<void>;
+  /** The AI worker, started on first use. */
+  client(): AiClient;
+  /** Runs `work` as a job the user sees and can cancel; null when cancelled. */
+  run<T>(
+    label: string,
+    work: (signal: AbortSignal, progress: (fraction: number) => void) => Promise<T>,
+  ): Promise<T | null>;
 }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -78,7 +85,11 @@ const scenes: Kind<SceneAnalysis> = {
  * The AI tools: jobs in the AI worker, each one cancellable, whose results are
  * cached per media file and turned into ordinary undoable commands.
  */
-export function useAiTools(project: ProjectState, cache: CacheStore): AiToolsState {
+export function useAiTools(
+  project: ProjectState,
+  cache: CacheStore,
+  options: { modelBase?: string | null } = {},
+): AiToolsState {
   const client = useRef<AiClient | null>(null);
   const [jobs, setJobs] = useState<AiJob[]>([]);
   const [silenceSettings, setSilenceSettings] = useState(defaultSilenceSettings);
@@ -95,7 +106,15 @@ export function useAiTools(project: ProjectState, cache: CacheStore): AiToolsSta
     },
     [],
   );
-  const ai = () => (client.current ??= createAiClient());
+  const modelBase = options.modelBase ?? null;
+  const ai = useCallback(() => {
+    if (!client.current) {
+      client.current = createAiClient();
+      // Tests point model downloads at local copies.
+      if (modelBase) void client.current.setModelBase(modelBase);
+    }
+    return client.current;
+  }, [modelBase]);
 
   /** Runs `work` as a job the user sees and can cancel; null when cancelled. */
   const job = useCallback(
@@ -267,5 +286,7 @@ export function useAiTools(project: ProjectState, cache: CacheStore): AiToolsSta
     detectBeats,
     clearBeats,
     splitScenes,
+    client: ai,
+    run: job,
   };
 }
