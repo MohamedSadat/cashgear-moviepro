@@ -4,7 +4,8 @@
 // Then media (native streaming, ffprobe, a ProRes proxy), projects (a saved
 // .cgvproj that reopens, and an autosave that recovers after the app is killed),
 // playback, exports (MP4 written natively, GIF and MP3 converted by FFmpeg),
-// sound, installed fonts, and a template filled from the project's media.
+// sound, installed fonts, a template filled from the project's media, and the AI
+// tools and noise reduction, which start workers from workers.
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -86,6 +87,8 @@ if (hostedRunner) {
 
 /** What the app's CSP refused, from the console of every launch. The smoke fails on any. */
 const policyViolations = [];
+/** Noise reduction falling back to the recorded sound, which it does when its worker fails. */
+const denoiseFailures = [];
 
 /** Starts the desktop app and attaches to its WebView2. Launches share the profile and data folder. */
 async function launch() {
@@ -128,6 +131,8 @@ async function launch() {
   // Page errors show in the smoke's output, so a failure says what went wrong inside.
   page.on('pageerror', (error) => console.error('Page error: ' + error.message));
   page.on('console', (message) => {
+    if (message.text().startsWith('Noise reduction is unavailable'))
+      denoiseFailures.push(message.text());
     if (message.type() !== 'error') return;
     const { url, lineNumber } = message.location();
     console.error('Console error: ' + message.text() + (url ? ` (${url}:${lineNumber})` : ''));
@@ -316,7 +321,7 @@ try {
     return (await hooks.client.api.projectSnapshot()).project;
   }, projectPath);
   const file = JSON.parse(await readFile(projectPath, 'utf8'));
-  if (file.format !== 'cashgear-video-project' || file.version !== 6)
+  if (file.format !== 'cashgear-video-project' || file.version !== 7)
     throw new Error('Unexpected project file: ' + JSON.stringify(file).slice(0, 200));
   // The file leaves out an empty LUT list; the snapshot lists LUTs without their data.
   expect({ ...file.project, luts: file.project.luts ?? [] }).toEqual(saved);
@@ -670,6 +675,76 @@ try {
   if (template.lit < 0.2)
     throw new Error('The filled slot drew nothing: ' + JSON.stringify(template));
   results.push({ template });
+
+  // AI tools and noise reduction: the AI worker and its own WASM run in WebView2,
+  // and ONNX Runtime's threads and the noise reduction worker are workers started
+  // by workers. Beats are marked on a music bed from the pack, the bed plays
+  // noise-reduced, and background removal downloads its model from Hugging Face
+  // (which the CSP must allow) and writes mattes to OPFS.
+  await page.getByTestId('library-tab-music').click();
+  await page.locator('[data-testid="sound-item"][data-key="sunny-steps"]').dblclick();
+  const ai = await page.evaluate(async () => {
+    const hooks = window.__cgv;
+    const clips = async () =>
+      (await hooks.client.api.projectSnapshot()).project.tracks.flatMap((track) => track.clips);
+    const deadline = performance.now() + 30_000;
+    let bed = null;
+    while (!bed && performance.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      bed = (await clips()).find((clip) => clip.media === 'sound-sunny-steps');
+    }
+    if (!bed) throw new Error('The music bed did not reach the timeline');
+    await hooks.ai.detectBeats(bed.id);
+    const beats = (await clips()).find((clip) => clip.id === bed.id).beats?.length ?? 0;
+    await hooks.project.execute({
+      type: 'setClipProperties',
+      clip: bed.id,
+      properties: { denoise: 1 },
+    });
+    await hooks.client.api.seek(bed.start + 1);
+    hooks.meters.take();
+    await hooks.client.play();
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await hooks.client.togglePlay();
+    const track = (await hooks.client.api.projectSnapshot()).project.tracks.find((t) =>
+      t.clips.some((c) => c.id === bed.id),
+    ).id;
+    const denoisedPeak = Math.max(
+      0,
+      ...hooks.meters
+        .take()
+        .flatMap((r) => r.tracks.filter((t) => t.id === track).map((t) => t.level.peak[0])),
+    );
+    const { media } = (await hooks.client.api.projectSnapshot()).project;
+    const video = media.find((item) => item.name === 'h264-1080p30-aac.mp4');
+    const clip = (await clips()).find((c) => c.media === video.id && c.video);
+    const started = performance.now();
+    await Promise.race([
+      hooks.ai.setRemoveBackground(clip.id, true),
+      new Promise((resolve, reject) =>
+        setTimeout(() => reject(new Error('Background removal did not finish in 120 s')), 120_000),
+      ),
+    ]);
+    return {
+      beats,
+      denoisedPeak,
+      mattesSeconds: Number(((performance.now() - started) / 1000).toFixed(1)),
+      clipSeconds: clip.duration / 705_600_000,
+      removeBackground: (await clips()).find((c) => c.id === clip.id).removeBackground,
+      unfinished: (await hooks.ai.unfinishedCutouts()).length,
+      notices: hooks.project.notices.slice(-2),
+    };
+  });
+  // The 34 s bed is 16 bars at 120 BPM.
+  if (ai.beats < 60 || ai.beats > 68)
+    throw new Error('Beats were not marked: ' + JSON.stringify(ai));
+  if (denoiseFailures.length || ai.denoisedPeak < 0.01)
+    throw new Error(
+      'Noise reduction did not play: ' + JSON.stringify({ ai, failures: denoiseFailures }),
+    );
+  if (!ai.removeBackground || ai.unfinished)
+    throw new Error('Background removal did not make its mattes: ' + JSON.stringify(ai));
+  results.push({ ai });
 
   await page.screenshot({ path: join(root, 'bench/results/desktop.png') });
   await writeFile(
