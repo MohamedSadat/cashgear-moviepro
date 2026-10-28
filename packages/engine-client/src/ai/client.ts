@@ -4,6 +4,8 @@ import type {
   AiApi,
   BeatAnalysis,
   CaptionModel,
+  CutoutRequest,
+  CutoutResult,
   ModelState,
   TranscribeRequest,
   Transcript,
@@ -85,6 +87,14 @@ export function createAiClient() {
       signal?: AbortSignal,
     ): Promise<Transcript & { provider: 'webgpu' | 'wasm' }> {
       return run(signal, (job) => api.transcribe(job, source, request, proxy(onProgress)));
+    },
+    cutout(
+      source: MediaSourceRef,
+      request: CutoutRequest,
+      onProgress: (fraction: number) => void,
+      signal?: AbortSignal,
+    ): Promise<CutoutResult> {
+      return run(signal, (job) => api.cutout(job, source, request, proxy(onProgress)));
     },
     dispose() {
       api[releaseProxy]();

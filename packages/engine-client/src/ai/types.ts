@@ -108,6 +108,21 @@ export interface TranscribeRequest {
   end: number;
 }
 
+/** A range of a medium's frames to work out mattes for. */
+export interface CutoutRequest {
+  media: string;
+  /** Source seconds. */
+  start: number;
+  end: number;
+}
+
+export interface CutoutResult {
+  provider: 'webgpu' | 'wasm';
+  /** Frames given mattes, and how many a second the job managed. */
+  frames: number;
+  rate: number;
+}
+
 export interface BeatAnalysis {
   /** Beats per minute, or null without a steady pulse. */
   tempo: number | null;
@@ -154,5 +169,16 @@ export interface AiApi {
     request: TranscribeRequest,
     onProgress: (fraction: number) => void,
   ): Promise<Transcript & { provider: 'webgpu' | 'wasm' }>;
+  /**
+   * Works out the mattes of a range of a medium's frames (background removal),
+   * downloading the segmentation model (under 1 MB) first when needed. They are
+   * written where the engine reads them, a chunk at a time.
+   */
+  cutout(
+    job: number,
+    source: MediaSourceRef,
+    request: CutoutRequest,
+    onProgress: (fraction: number) => void,
+  ): Promise<CutoutResult>;
   cancel(job: number): void;
 }

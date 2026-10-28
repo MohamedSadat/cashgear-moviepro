@@ -17,6 +17,7 @@ export {
   type GpuAdapterInfo,
 } from './capabilities';
 export { createAiClient, isCancelled, type AiClient } from './ai/client';
+export { covers, readIndex as readMatteIndex, type MatteIndex } from './ai/mattes';
 export {
   defaultSceneSettings,
   defaultSilenceSettings,
@@ -25,6 +26,8 @@ export {
   soundAnalysisVersion,
   type BeatAnalysis,
   type CaptionModel,
+  type CutoutRequest,
+  type CutoutResult,
   type ModelState,
   type TranscribeRequest,
   type Transcript,

@@ -42,6 +42,8 @@ export interface LayerPlan {
   blendMode?: BlendMode;
   /** Masks at this frame, keyframes applied. */
   masks?: Mask[];
+  /** The picture keeps only its people, by its frame's matte. */
+  removeBackground?: boolean;
 }
 
 /** How a frame is drawn, bottom first. */

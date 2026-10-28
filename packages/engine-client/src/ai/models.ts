@@ -6,7 +6,7 @@ import registry from './models.json';
 // is checked by size and SHA-256 as it streams in; a model counts as installed
 // once `ready.json` names its revision and files, which is written last.
 
-export type ModelId = 'whisper-large-v3-turbo' | 'whisper-tiny';
+export type ModelId = 'whisper-large-v3-turbo' | 'whisper-tiny' | 'selfie' | 'selfie-landscape';
 
 export interface ModelFile {
   role: string;
@@ -18,7 +18,7 @@ export interface ModelFile {
 export interface ModelInfo {
   id: ModelId;
   /** The model's answer to a fixed input on the CPU, which a GPU must match. */
-  check?: { samples: number[]; top: number[] };
+  check?: { samples: number[]; top?: number[] };
   name: string;
   use: string;
   license: string;

@@ -171,7 +171,7 @@ export class Whisper {
         (sum, value, i) => sum + Math.abs(value - found.samples[i]),
         0,
       );
-      if (off > 0.06 * scale || found.top[0] !== expected.top[0]) {
+      if (off > 0.06 * scale || found.top[0] !== expected.top?.[0]) {
         await whisper.release();
         const error = new Error(
           `This GPU computes ${model.name} wrongly (off by ${((100 * off) / scale).toFixed(1)}%).`,

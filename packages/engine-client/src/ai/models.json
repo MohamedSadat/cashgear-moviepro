@@ -120,6 +120,40 @@
         ],
         "top": [50363, 50364, 50464, 50514, 50257]
       }
+    },
+    {
+      "id": "selfie",
+      "name": "MediaPipe Selfie Segmentation",
+      "use": "background",
+      "license": "Apache-2.0",
+      "origin": "https://ai.google.dev/edge/mediapipe/solutions/vision/image_segmenter",
+      "repo": "onnx-community/mediapipe_selfie_segmentation",
+      "revision": "be49485c8e027524be38591817fc5cd31bd9d00e",
+      "files": [
+        {
+          "role": "square",
+          "path": "onnx/model.onnx",
+          "size": 462352,
+          "sha256": "3241ac4ad8aa35bdaf33946776db29f7c283a413aa0b0dacb9483594b4531aad"
+        }
+      ]
+    },
+    {
+      "id": "selfie-landscape",
+      "name": "MediaPipe Selfie Segmentation (landscape)",
+      "use": "background",
+      "license": "Apache-2.0",
+      "origin": "https://ai.google.dev/edge/mediapipe/solutions/vision/image_segmenter",
+      "repo": "onnx-community/mediapipe_selfie_segmentation_landscape",
+      "revision": "2497d5bec26c626c7b3c4edc6e1fefc21b64f6c3",
+      "files": [
+        {
+          "role": "landscape",
+          "path": "onnx/model.onnx",
+          "size": 462338,
+          "sha256": "7a0adcfdb1715d3b0ff0f61486d8a181c33f4a208343a5abfccbc6540e872d24"
+        }
+      ]
     }
   ]
 }

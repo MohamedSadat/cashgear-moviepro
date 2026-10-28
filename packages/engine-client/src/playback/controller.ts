@@ -14,6 +14,7 @@ import { Playback, type Engine, type ProjectSession } from '../pkg/cgv_wasm';
 import { FLICKS_PER_SECOND } from '../project/types';
 import type { MeterReading } from '../audio/meters';
 import type { AudioPlayer } from './audio-player';
+import { MatteReader } from '../ai/mattes';
 import { drawFrame, drawsGpuFrames, type FramePicture, type LayerSource } from './draw';
 import type { Color } from '../project/types';
 import type {
@@ -81,6 +82,8 @@ export class PlaybackController {
   private fallback: string | null = null;
   private streams = new Map<number, { media: string; stream: LayerStream; reverse: boolean }>();
   private stillSizes = new Map<string, { width: number; height: number }>();
+  /** Background removal's mattes, loaded ahead of the playhead. */
+  private mattes = new MatteReader();
   private stillLoads = new Map<string, Promise<void>>();
   /** The frame the monitor shows (it became visible on the refresh after it was drawn). */
   private onScreen: { frame: number; time: number } | null = null;
@@ -185,6 +188,12 @@ export class PlaybackController {
     this.playback.set_quality(mode);
     if (!this.playing) this.invalidate();
     this.publish(true);
+  }
+
+  /** Mattes of `media` were made: read them again and show the frame with them. */
+  mattesChanged(media: string) {
+    this.mattes.forget(media);
+    this.invalidate();
   }
 
   /** The project changed: show the playhead's frame again. */
@@ -709,7 +718,15 @@ export class PlaybackController {
       const blend = layer.blendFrames ? media.blendAt(layer.media, layer.sourceTime) : null;
       const other = blend ? stream.peek(blend.next) : null;
       const next = other && blend ? { ...picture(other), weight: blend.weight } : undefined;
-      sources.push({ ...picture(item), rotation, next });
+      let matte;
+      if (layer.removeBackground) {
+        const seconds = layer.sourceTime / FLICKS_PER_SECOND;
+        void this.mattes.ensure(layer.media, seconds, 3);
+        matte = this.mattes.at(layer.media, seconds) ?? undefined;
+        // A matte that is made but not loaded yet is waited for, as a frame is.
+        if (!matte && this.mattes.made(layer.media, seconds)) return null;
+      }
+      sources.push({ ...picture(item), rotation, next, matte });
     }
     return sources;
   }
@@ -752,7 +769,13 @@ export class PlaybackController {
           const shown = await read(number);
           const blend = layer.blendFrames ? media.blendAt(layer.media, layer.sourceTime) : null;
           const next = blend ? { ...(await read(blend.next)), weight: blend.weight } : undefined;
-          return { ...shown, rotation, next };
+          let matte;
+          if (layer.removeBackground) {
+            const seconds = layer.sourceTime / FLICKS_PER_SECOND;
+            await this.mattes.ensure(layer.media, seconds, 3);
+            matte = this.mattes.at(layer.media, seconds) ?? undefined;
+          }
+          return { ...shown, rotation, next, matte };
         } catch (error) {
           console.warn(`Layer ${layer.clip} could not be drawn: ${message(error)}`);
           return null;

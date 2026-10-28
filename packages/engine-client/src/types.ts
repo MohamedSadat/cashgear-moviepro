@@ -137,6 +137,8 @@ export interface EngineApi {
   playbackState(): PlaybackState;
   playbackStats(): PlaybackStatsReport;
   resetPlaybackStats(): void;
+  /** Background removal made mattes for `media`: the monitor shows them. */
+  mattesChanged(media: string): void;
   /**
    * The timeline sample the sound ring rendered (or will render) at context
    * frame `frame`, while sound plays; null otherwise. Voiceovers line up by it.

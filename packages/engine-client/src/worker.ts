@@ -246,6 +246,7 @@ const api: EngineApi = {
   playbackState: () => requirePlayback().state(),
   playbackStats: () => requirePlayback().stats(),
   resetPlaybackStats: () => requirePlayback().resetStats(),
+  mattesChanged: (media) => requirePlayback().mattesChanged(media),
   sampleAtContextFrame: (frame) => audio?.sampleAtContextFrame(frame) ?? null,
   async seekAndWait(time) {
     const controller = requireDiagnostics();

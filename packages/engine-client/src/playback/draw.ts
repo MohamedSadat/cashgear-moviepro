@@ -10,11 +10,19 @@ export type FramePicture =
 /** Slow motion with frame blending: the source frame after a layer's, mixed in by `weight`. */
 export type NextFrame = FramePicture & { weight: number };
 
-/** One layer's picture for a frame. */
-export type LayerSource =
+/** A frame's matte: one byte of coverage a texel over its upright picture. */
+export interface LayerMatte {
+  width: number;
+  height: number;
+  data: Uint8Array;
+}
+
+/** One layer's picture for a frame, with its matte when its background goes. */
+export type LayerSource = (
   | { kind: 'gpu'; frame: VideoFrame; rotation: number; next?: NextFrame }
   | { kind: 'planes'; planes: FramePlanes; rotation: number; next?: NextFrame }
-  | { kind: 'still'; key: string; width: number; height: number };
+  | { kind: 'still'; key: string; width: number; height: number }
+) & { matte?: LayerMatte };
 
 function planeArguments(p: FramePlanes) {
   return [
@@ -71,6 +79,8 @@ export function drawFrame(
     const next = source.kind === 'still' ? undefined : source.next;
     if (next?.kind === 'gpu') engine.set_layer_next_frame(index, next.frame, next.weight);
     else if (next) engine.set_layer_next_planes(index, ...planeArguments(next.planes), next.weight);
+    const matte = source.matte;
+    if (matte) engine.set_layer_matte(index, matte.width, matte.height, matte.data);
   });
 
   return engine.compose(scale, present);

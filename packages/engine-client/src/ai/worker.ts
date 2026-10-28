@@ -14,11 +14,14 @@ import init, {
 } from '../pkg/ai/cgv_ai';
 import { openInput } from '../media/sources';
 import type { MediaSourceRef } from '../media/types';
+import { Cutout, cutoutSize } from './cutout';
+import { MatteWriter } from './mattes';
 import { install, isInstalled, modelInfo, modelSize, removeModel, setModelBase } from './models';
 import { hasWebGpu } from './runtime';
 import type {
   AiApi,
   CaptionModel,
+  CutoutRequest,
   SceneAnalysis,
   SceneSettings,
   SilenceSettings,
@@ -34,6 +37,8 @@ const ready = init();
 const cancelled = new Set<number>();
 /** The speech model last used, kept loaded for the next job. */
 let whisper: Whisper | null = null;
+/** The segmentation models loaded, by id. */
+const cutouts = new Map<string, Promise<Cutout>>();
 
 async function loadWhisper(id: CaptionModel, provider?: 'webgpu' | 'wasm'): Promise<Whisper> {
   const wanted = provider ?? ((await hasWebGpu()) ? 'webgpu' : 'wasm');
@@ -337,6 +342,63 @@ const api: AiApi = {
       };
     } finally {
       cancelled.delete(job);
+    }
+  },
+
+  async cutout(
+    job: number,
+    source: MediaSourceRef,
+    request: CutoutRequest,
+    onProgress: (fraction: number) => void,
+  ) {
+    await ready;
+    const progress = throttle(onProgress);
+    const input = await openInput(source);
+    try {
+      const track = await input.getPrimaryVideoTrack();
+      if (!track) throw new Error('This clip has no picture to cut out.');
+      // Frames are drawn upright, as the monitor shows them, at the model's size.
+      const size = cutoutSize(await track.getDisplayWidth(), await track.getDisplayHeight());
+      let loading = cutouts.get(size.model);
+      if (!loading) {
+        loading = Cutout.load(size.model, () => check(job));
+        loading.catch(() => cutouts.delete(size.model));
+        cutouts.set(size.model, loading);
+      }
+      const runner = await loading;
+      const canvas = new OffscreenCanvas(size.width, size.height);
+      const context = canvas.getContext('2d', { willReadFrequently: true })!;
+      const writer = await MatteWriter.open(request.media, 'selfie', size.width, size.height);
+      const span = Math.max(1e-3, request.end - request.start);
+      const started = performance.now();
+      let frames = 0;
+      let first: number | null = null;
+      // Software decoding, as for scenes: playback shares the GPU process.
+      const sink = new VideoSampleSink(track, { hardwareAcceleration: 'prefer-software' });
+      for await (const sample of sink.samples(request.start, request.end)) {
+        try {
+          check(job);
+          first ??= sample.timestamp;
+          sample.draw(context, 0, 0, size.width, size.height);
+          const pixels = context.getImageData(0, 0, size.width, size.height).data;
+          await writer.add(sample.timestamp, await runner.matte(pixels, size.width, size.height));
+          frames++;
+          progress((sample.timestamp - request.start) / span);
+        } finally {
+          sample.close();
+        }
+      }
+      // Done from the first frame decoded (which may start before the range) to its end.
+      await writer.flush([Math.min(first ?? request.start, request.start), request.end]);
+      progress(1);
+      return {
+        provider: 'wasm' as const,
+        frames,
+        rate: frames / Math.max(1e-3, (performance.now() - started) / 1000),
+      };
+    } finally {
+      cancelled.delete(job);
+      input.dispose();
     }
   },
 

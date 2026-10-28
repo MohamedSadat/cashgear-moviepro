@@ -4,7 +4,9 @@ import { ReverseStream } from '../media/reverse-stream';
 import type { MediaService } from '../media/service';
 import { StreamDecoders } from '../media/stream-decoders';
 import { VideoStream, type LayerStream, type StreamFrame } from '../media/video-stream';
+import { MatteReader } from '../ai/mattes';
 import type { Engine } from '../pkg/cgv_wasm';
+import { FLICKS_PER_SECOND } from '../project/types';
 import type { FramePicture, LayerSource } from '../playback/draw';
 import type { FramePlan, LayerPlan } from '../playback/types';
 
@@ -27,6 +29,7 @@ export class ExportFrames {
   private stills = new Map<string, Promise<{ width: number; height: number }>>();
   /** Frames read through the seek path, closed once the frame is composed. */
   private opened: ManagedFrame[] = [];
+  private mattes = new MatteReader();
 
   constructor(
     private readonly engine: Engine,
@@ -38,7 +41,19 @@ export class ExportFrames {
   /** The sources of `plan`, bottom layer first; starts decoding the clips in `upcoming`. */
   async gather(plan: FramePlan, upcoming: LayerPlan[]): Promise<(LayerSource | null)[]> {
     this.release();
-    const sources = await Promise.all(plan.layers.map((layer) => this.source(layer)));
+    const sources = await Promise.all(
+      plan.layers.map(async (layer) => {
+        const source = await this.source(layer);
+        // Exports start only once every matte is made: wait for each one to load.
+        if (source && layer.removeBackground) {
+          const seconds = layer.sourceTime / FLICKS_PER_SECOND;
+          await this.mattes.ensure(layer.media, seconds, 2);
+          const matte = this.mattes.at(layer.media, seconds);
+          if (matte) source.matte = matte;
+        }
+        return source;
+      }),
+    );
     const keep = new Set<number>();
     for (const layer of [...plan.layers, ...upcoming]) {
       if (layer.still) {
