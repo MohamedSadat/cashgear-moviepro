@@ -2,6 +2,7 @@
 // and waveforms, the ruler, markers and gesture feedback. Only what is in view is
 // drawn, so the cost follows the canvas size, not the clip count. The playhead is
 // an element over the canvas, so playback never redraws it.
+import { beatTimes } from '../ai/timing';
 import { sourceAt } from '../speed/timing';
 import { titleName } from '../titles/templates';
 import {
@@ -62,6 +63,7 @@ export interface Palette {
   waveform: string;
   waveformMuted: string;
   volume: string;
+  beat: string;
   guide: string;
   drop: string;
   markers: Record<MarkerColor, string>;
@@ -88,6 +90,7 @@ const defaults: Palette = {
   selection: '#f2b84b',
   invalid: '#ef5a5a',
   volume: '#ffd166',
+  beat: 'rgba(255, 255, 255, 0.85)',
   waveform: 'rgba(214, 255, 232, 0.75)',
   waveformMuted: 'rgba(200, 200, 200, 0.35)',
   guide: '#f2d24b',
@@ -123,6 +126,7 @@ const tokenNames: Record<Exclude<keyof Palette, 'markers'>, string> = {
   selection: '--cgv-clip-selected',
   invalid: '--cgv-danger',
   volume: '--cgv-volume-line',
+  beat: '--cgv-beat',
   waveform: '--cgv-waveform',
   waveformMuted: '--cgv-waveform-muted',
   guide: '--cgv-snap-guide',
@@ -432,6 +436,7 @@ function drawClip(
     }
     if (sound && ((clip.fadeIn ?? 0) > 0 || (clip.fadeOut ?? 0) > 0))
       drawFades(ctx, input, clip, sound);
+    if (clip.beats?.length && !generated) drawBeats(ctx, input, clip, y, h);
     if (w >= 24) {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
       ctx.fillRect(x, y, w, nameBar);
@@ -470,6 +475,25 @@ function drawClip(
   if (selected && w >= 8) drawKeyframes(ctx, input, clip, y);
   const sound = selected ? soundBox(view, row, clip) : null;
   if (sound && !row.track.locked) drawSoundHandles(ctx, input, clip, sound);
+}
+
+/** A clip's beats: ticks along its bottom edge, where cuts snap. */
+function drawBeats(
+  ctx: CanvasRenderingContext2D,
+  input: DrawInput,
+  clip: Clip,
+  y: number,
+  h: number,
+) {
+  ctx.fillStyle = input.palette.beat;
+  let last = -Infinity;
+  for (const time of beatTimes(clip)) {
+    const bx = Math.round(timeToX(input.view, time));
+    // Ticks closer than 3 pixels would merge into a bar.
+    if (bx < -2 || bx > input.view.width + 2 || bx - last < 3) continue;
+    last = bx;
+    ctx.fillRect(bx, y + h - 8, 1, 7);
+  }
 }
 
 /** A selected clip's keyframes, as diamonds along its name bar. */

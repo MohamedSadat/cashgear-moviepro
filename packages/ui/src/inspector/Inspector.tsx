@@ -6,8 +6,10 @@ import {
   type ClipProperties,
   type Command,
 } from '@cgv/engine-client';
+import type { AiToolsState } from '../ai/useAiTools';
 import type { EditorState } from '../editing/useEditor';
 import { frameDuration } from '../timeline/geometry';
+import { AiSection } from './AiSection';
 import { AnimatedField, Section, type PropertyField } from './AnimatedField';
 import { EffectStack } from './EffectStack';
 import { ScrubField, keyContext, usePausedTime } from './fields';
@@ -40,7 +42,7 @@ export const blendModes: { mode: BlendMode; label: string }[] = [
  * transition. Every change is an undoable command; animated properties take
  * keyframes at the playhead.
  */
-export function Inspector({ editor }: { editor: EditorState }) {
+export function Inspector({ editor, ai }: { editor: EditorState; ai: AiToolsState }) {
   const playhead = usePausedTime(editor.playback);
   const clip: Clip | null = editor.focused;
   const snapshot = editor.project.snapshot;
@@ -330,6 +332,7 @@ export function Inspector({ editor }: { editor: EditorState }) {
       {clip.video && !adjustment && (
         <MaskSection editor={editor} context={context} disabled={locked} />
       )}
+      {!adjustment && !title && <AiSection editor={editor} ai={ai} clip={clip} disabled={locked} />}
     </aside>
   );
 }

@@ -9,6 +9,7 @@ import {
   type Track,
   type Transition,
 } from '@cgv/engine-client';
+import { beatTimes } from '../ai/timing';
 import { transitionCut, transitionWindow } from '../editing/transitions';
 import { isAnimated, keyTimes, numberAt } from '../effects/animation';
 
@@ -300,14 +301,20 @@ export function hitTest(
   return { kind: 'clip', clip, row, edge };
 }
 
-/** Times worth snapping to: 0, the playhead, markers and clip edges other than `exclude`. */
+/**
+ * Times worth snapping to: 0, the playhead, markers, and the edges and beats of
+ * clips other than `exclude`.
+ */
 export function snapTargets(project: Project, playhead: number | null, exclude: Set<number>) {
   const points = [0];
   if (playhead !== null) points.push(playhead);
   for (const marker of project.markers) points.push(marker.time);
   for (const track of project.tracks)
     for (const clip of track.clips)
-      if (!exclude.has(clip.id)) points.push(clip.start, clip.start + clip.duration);
+      if (!exclude.has(clip.id)) {
+        points.push(clip.start, clip.start + clip.duration);
+        if (clip.beats?.length) points.push(...beatTimes(clip));
+      }
   points.sort((a, b) => a - b);
   return points.filter((point, i) => i === 0 || point !== points[i - 1]);
 }

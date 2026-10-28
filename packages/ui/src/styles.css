@@ -32,6 +32,7 @@
   --cgv-waveform: rgb(214 255 232 / 0.75);
   --cgv-waveform-muted: rgb(200 200 200 / 0.35);
   --cgv-volume-line: #ffd166;
+  --cgv-beat: rgba(255, 255, 255, 0.85);
   --cgv-playhead: #ff5252;
   --cgv-snap-guide: #f2d24b;
   --cgv-marker-red: #ef5a5a;
@@ -1147,6 +1148,30 @@ body,
   gap: 6px;
   padding-top: 8px;
   border-top: 1px solid var(--cgv-border);
+}
+
+.cgv-inspector-section h4.cgv-subhead {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cgv-ai-job {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2px 8px;
+  font-size: 12px;
+}
+
+.cgv-ai-job .cgv-progress {
+  grid-column: 1;
+  margin: 0;
+}
+
+.cgv-ai-job button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
 }
 
 .cgv-inspector-section h3 {

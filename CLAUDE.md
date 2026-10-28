@@ -32,7 +32,8 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `cgv-native`: desktop-only native side.
   - `cgv-effects`: the effect and transition catalogue: JSON schema, registry, shader assembly (`prelude.wgsl`) and settings packing.
   - `cgv-text`: fonts, shaping (rustybuzz), bidi and line breaks, and drawing titles on the CPU (`paint.rs`). No GPU code.
-  - `cgv-dsp`: sound effects (filters, dynamics, echo, reverb), level meters, loudness (`ebur128`), ducking curves and time-stretching that keeps pitch (`stretch.rs`, WSOLA). It knows nothing of projects, so it can be shared with CashGear Audio.
+  - `cgv-dsp`: sound effects (filters, dynamics, echo, reverb), level meters, loudness (`ebur128`), ducking curves, time-stretching that keeps pitch (`stretch.rs`, WSOLA), silence detection (`silence.rs`) and beat tracking (`beat.rs`). It knows nothing of projects, so it can be shared with CashGear Audio.
+  - `cgv-ai`: the AI tools' arithmetic as a WASM module of its own (`src/pkg/ai/`), run in the AI worker: sound analysis for silences and beats. Its results are in media time, cached per file.
   - `cgv-denoise`: noise reduction (`nnnoiseless`) as a WASM module of its own (`src/pkg/denoise/`), run in a worker that starts when a clip first asks for it. It is too big for the engine's budget.
   - `cgv-time`, `cgv-model`, `cgv-media`, `cgv-audio`.
 - `assets/`: the built-in pack, embedded at build time. One folder per effect or transition (`effect.json` and `effect.wgsl`, plus any images) in `effects/` and `transitions/`; looks in `luts/`. `assets/README.md` is the authoring guide; `scripts/make-effect-assets.mjs` makes the looks and gradients.
@@ -84,7 +85,7 @@ Checks run in CI (`.github/workflows/ci.yml`). Run them in this order:
 cargo fmt --all --check
 pnpm build
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p cgv-wasm -p cgv-denoise --target wasm32-unknown-unknown -- -D warnings
+cargo clippy -p cgv-wasm -p cgv-denoise -p cgv-ai --target wasm32-unknown-unknown -- -D warnings
 cargo test --workspace
 pnpm typecheck && pnpm lint && pnpm format:check && pnpm test
 pnpm test:e2e                     # Chrome + Edge on the real GPU; CI uses software GPUs (GPU_TEST_SOFTWARE=1)

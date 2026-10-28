@@ -9,6 +9,7 @@ import {
   type EngineGpu,
   type GpuFault,
 } from '@cgv/engine-client';
+import { useAiTools, type AiToolsState } from './ai/useAiTools';
 import { BlockedScreen, CapabilityNotice, CapabilityStrip } from './CapabilityReport';
 import { DevOverlay } from './DevOverlay';
 import { useCatalog } from './effects/catalog';
@@ -70,6 +71,7 @@ export interface DiagnosticHooks {
   platform: MediaPlatform;
   meters: MeterStore;
   voiceover: VoiceoverState;
+  ai: AiToolsState;
 }
 
 const defaultAutosaveMs = 30_000;
@@ -119,6 +121,7 @@ export function AppShell({ platform }: Props) {
     onSnapping: (snapping) => update({ snapping }),
     catalog,
   });
+  const ai = useAiTools(project, platform.cache);
   const exporter = useExport(client, project, platform, {
     backend: options.backend,
     decode: options.decode,
@@ -199,6 +202,7 @@ export function AppShell({ platform }: Props) {
       platform,
       meters,
       voiceover,
+      ai,
     };
     Reflect.set(window, '__cgv', hooks);
   }, [
@@ -212,6 +216,7 @@ export function AppShell({ platform }: Props) {
     platform,
     meters,
     voiceover,
+    ai,
   ]);
 
   const gpu: EngineGpu =
@@ -379,7 +384,11 @@ export function AppShell({ platform }: Props) {
             label="Inspector and mixer"
             name="side"
             tabs={[
-              { id: 'inspector', label: 'Inspector', render: () => <Inspector editor={editor} /> },
+              {
+                id: 'inspector',
+                label: 'Inspector',
+                render: () => <Inspector editor={editor} ai={ai} />,
+              },
               {
                 id: 'mixer',
                 label: 'Mixer',
