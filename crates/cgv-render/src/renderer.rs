@@ -328,6 +328,16 @@ impl Renderer {
             .set_source(&self.device, &self.queue, index, source)
     }
 
+    pub fn set_matte(
+        &mut self,
+        index: usize,
+        size: (u32, u32),
+        coverage: &[u8],
+    ) -> Result<(), String> {
+        self.compositor
+            .set_matte(&self.device, &self.queue, index, size, coverage)
+    }
+
     pub fn set_next_source(
         &mut self,
         index: usize,

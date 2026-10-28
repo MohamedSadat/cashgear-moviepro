@@ -182,6 +182,20 @@ impl Engine {
         Ok(())
     }
 
+    /// Gives layer `index` (a plan layer with `remove_background`) the matte of
+    /// its picture: one byte of coverage a texel over the upright picture.
+    pub fn set_layer_matte(
+        &mut self,
+        index: usize,
+        size: (u32, u32),
+        coverage: &[u8],
+    ) -> Result<(), String> {
+        if index >= self.pictures.len() {
+            return Err(format!("Layer {index} is not in the planned frame"));
+        }
+        self.renderer.set_matte(index, size, coverage)
+    }
+
     /// Gives slow-motion layer `index` the source frame after its picture, mixed
     /// in by `weight` (the plan's `blend_frames`). Set its picture first.
     pub fn set_layer_next(

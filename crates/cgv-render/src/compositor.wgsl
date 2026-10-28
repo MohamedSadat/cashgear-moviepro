@@ -228,6 +228,8 @@ struct Masks {
 @group(0) @binding(50) var<uniform> masks: Masks;
 @group(0) @binding(51) var mask_input: texture_2d<f32>;
 @group(0) @binding(52) var mask_sampler: sampler;
+// A matte's coverage of the whole upright picture, when info.zw holds its size.
+@group(0) @binding(53) var mask_matte: texture_2d<f32>;
 
 fn mask_point(index: u32) -> vec2<f32> {
     let pair = masks.points[index / 2u];
@@ -308,8 +310,9 @@ fn fs_mask(in: FullOut) -> @location(0) vec4<f32> {
     let color = textureSampleLevel(mask_input, mask_sampler, in.uv, 0.0);
     let p = masks.area.xy + in.uv * masks.area.zw;
     let count = u32(masks.info.x + 0.5);
-    // A first mask that subtracts or intersects starts from the whole picture.
-    var shown = select(1.0, 0.0, masks.list[0].kind.y < 0.5);
+    // A first mask that subtracts or intersects starts from the whole picture,
+    // and so does a matte alone.
+    var shown = select(1.0, 0.0, masks.list[0].kind.y < 0.5 && count > 0u);
     for (var i = 0u; i < count; i = i + 1u) {
         let m = masks.list[i];
         let c = mask_coverage(p, m);
@@ -321,6 +324,9 @@ fn fs_mask(in: FullOut) -> @location(0) vec4<f32> {
         } else {
             shown = shown * c;
         }
+    }
+    if (masks.info.z > 0.0) {
+        shown = shown * textureSampleLevel(mask_matte, mask_sampler, p / masks.info.zw, 0.0).r;
     }
     return color * shown;
 }

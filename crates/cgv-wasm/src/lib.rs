@@ -194,6 +194,20 @@ mod bridge {
                 .map_err(js_error)
         }
 
+        /// Layer `index`'s matte for this frame: `width` by `height` bytes of
+        /// coverage over its upright picture, row after row.
+        pub fn set_layer_matte(
+            &mut self,
+            index: usize,
+            width: u32,
+            height: u32,
+            coverage: &[u8],
+        ) -> Result<(), JsValue> {
+            self.inner
+                .set_layer_matte(index, (width, height), coverage)
+                .map_err(js_error)
+        }
+
         /// A still uploaded with `upload_still` for layer `index`.
         pub fn set_layer_still(
             &mut self,

@@ -1,6 +1,6 @@
 //! The GPU side of the compositor (browser only). A frame is built in steps:
 //! each layer's source becomes a linear, premultiplied texture; layers run their
-//! effects, then their masks; transitions blend their two sides; then the layers
+//! effects, then their masks and matte; transitions blend their two sides; then the layers
 //! draw bottom first into the composition target, which adjustment layers and
 //! layers with blend modes read a copy of. The target is presented on the
 //! monitor or read back. Preview and export share all of it.
@@ -38,6 +38,8 @@ const MASK_UNIFORM_SIZE: u64 = (MASK_FLOATS * 4) as u64;
 const UNIFORM_SLOTS: u64 = 2048;
 /// Pack images and LUTs hold data, not colour: no sRGB decoding.
 const DATA_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
+/// Mattes are coverage, one byte a texel.
+const MATTE_FORMAT: TextureFormat = TextureFormat::R8Unorm;
 /// Free textures kept per size and format.
 const POOL_KEEP: usize = 6;
 /// Free textures unused for this many frames are destroyed: a layer whose size
@@ -371,6 +373,8 @@ struct FrameBuild {
     titles: Vec<Option<Title>>,
     /// Plane textures to return to the pool after submission.
     planes: Vec<Pooled>,
+    /// Each layer's matte (its upright picture's coverage), when it has one.
+    mattes: Vec<Option<Pooled>>,
     /// What effects and transitions left, drawn in the composition.
     outputs: Vec<Pooled>,
     uniforms: Vec<u8>,
@@ -664,6 +668,7 @@ impl Compositor {
                 uniform_entry(50, true, MASK_UNIFORM_SIZE),
                 texture_entry(51),
                 sampler_entry(52),
+                texture_entry(53),
             ],
         });
         // A layer with a blend mode replaces what is under it with the mix of
@@ -942,6 +947,7 @@ impl Compositor {
             next: (0..layers).map(|_| None).collect(),
             titles: (0..layers).map(|_| None).collect(),
             planes: Vec::new(),
+            mattes: (0..layers).map(|_| None).collect(),
             outputs: Vec::new(),
             uniforms: Vec::new(),
             slots: 0,
@@ -999,6 +1005,61 @@ impl Compositor {
         let texture = self.source_texture(device, queue, index, source)?;
         let frame = self.frame.as_mut().unwrap();
         if let Some(LayerTexture::Pooled(old)) = frame.layers[index].replace(texture) {
+            self.pool.release(old);
+        }
+        Ok(())
+    }
+
+    /// Gives layer `index` a matte for this frame: the coverage of its upright
+    /// picture, `size` texels of one byte, row after row. It cuts the picture
+    /// after its effects, as masks do, and stretches over the whole picture.
+    pub fn set_matte(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        index: usize,
+        (width, height): (u32, u32),
+        coverage: &[u8],
+    ) -> Result<(), String> {
+        let limit = device.limits().max_texture_dimension_2d;
+        if width == 0 || height == 0 || width > limit || height > limit {
+            return Err(format!("A {width}×{height} matte does not fit on the GPU"));
+        }
+        if coverage.len() as u64 != width as u64 * height as u64 {
+            return Err(format!(
+                "The {width}×{height} matte's bytes do not match its size"
+            ));
+        }
+        let frame = self.frame.as_mut().ok_or("No frame is being built")?;
+        if index >= frame.mattes.len() {
+            return Err(format!("Layer {index} is not in this frame"));
+        }
+        let key = TextureKey {
+            width,
+            height,
+            format: MATTE_FORMAT,
+        };
+        let texture = self.pool.acquire(device, key);
+        queue.write_texture(
+            TexelCopyTextureInfo {
+                texture: &texture.texture,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            coverage,
+            TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width),
+                rows_per_image: Some(height),
+            },
+            Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        if let Some(old) = frame.mattes[index].replace(texture) {
             self.pool.release(old);
         }
         Ok(())
@@ -1719,8 +1780,9 @@ impl Compositor {
         frame.outputs.push(backdrop);
     }
 
-    /// Runs a layer's masks over `input`, which covers `area` of its picture (x, y,
-    /// width, height in the picture's pixels), and returns the masked texture.
+    /// Runs a layer's masks and matte over `input`, which covers `area` of its
+    /// picture (x, y, width, height in the picture's pixels), and returns the
+    /// masked texture.
     #[allow(clippy::too_many_arguments)]
     fn run_masks(
         &mut self,
@@ -1728,11 +1790,17 @@ impl Compositor {
         frame: &mut FrameBuild,
         input: Pooled,
         masks: &[Mask],
+        matte: Option<&TextureView>,
         picture: (f64, f64),
         area: [f64; 4],
     ) -> Result<Pooled, String> {
         let texel = (area[2] / input.key.width as f64).max(area[3] / input.key.height as f64);
-        let values = mask_uniforms(masks, picture, area, texel);
+        let mut values = mask_uniforms(masks, picture, area, texel);
+        // The picture's size marks a matte; the shader samples it across the picture.
+        if matte.is_some() {
+            values[2] = picture.0 as f32;
+            values[3] = picture.1 as f32;
+        }
         let offset = Self::slot(frame, self.align, &floats(&values))?;
         let target = self.pool.acquire(device, input.key);
         let binding = device.create_bind_group(&BindGroupDescriptor {
@@ -1754,6 +1822,11 @@ impl Compositor {
                 BindGroupEntry {
                     binding: 52,
                     resource: BindingResource::Sampler(&self.sampler),
+                },
+                // Without a matte the shader never reads this binding.
+                BindGroupEntry {
+                    binding: 53,
+                    resource: BindingResource::TextureView(matte.unwrap_or(&input.view)),
                 },
             ],
         });
@@ -1841,7 +1914,12 @@ impl Compositor {
                 pooled.binding = Some(self.texture_binding(device, &pooled.view));
             }
         }
-        if step.effects.is_empty() && step.masks.is_empty() {
+        let matte = frame
+            .mattes
+            .get(index)
+            .and_then(Option::as_ref)
+            .map(|matte| matte.view.clone());
+        if step.effects.is_empty() && step.masks.is_empty() && matte.is_none() {
             let values = layer_values(&geometry, &geometry.to_texture, opacity, step.blend);
             let offset = Self::slot(frame, self.align, &values)?;
             return Ok(Some(Drawable {
@@ -1865,7 +1943,7 @@ impl Compositor {
         }
         let aspect = size.0 as f64 / size.1 as f64;
         let mut result = self.run_effects(device, frame, input, aspect, &step.effects)?;
-        if !step.masks.is_empty() {
+        if !step.masks.is_empty() || matte.is_some() {
             let (width, height) = draw.picture.upright();
             let [u0, v0, u1, v1] = geometry.visible;
             let area = [
@@ -1874,7 +1952,15 @@ impl Compositor {
                 (u1 - u0) * width,
                 (v1 - v0) * height,
             ];
-            result = self.run_masks(device, frame, result, &step.masks, (width, height), area)?;
+            result = self.run_masks(
+                device,
+                frame,
+                result,
+                &step.masks,
+                matte.as_ref(),
+                (width, height),
+                area,
+            )?;
         }
         if result.binding.is_none() {
             result.binding = Some(self.texture_binding(device, &result.view));
@@ -2046,7 +2132,15 @@ impl Compositor {
                 (u1 - u0) * width,
                 (v1 - v0) * height,
             ];
-            result = self.run_masks(device, frame, result, &step.masks, (width, height), area)?;
+            result = self.run_masks(
+                device,
+                frame,
+                result,
+                &step.masks,
+                None,
+                (width, height),
+                area,
+            )?;
         }
         if result.binding.is_none() {
             result.binding = Some(self.texture_binding(device, &result.view));
@@ -2571,7 +2665,8 @@ impl Compositor {
             }
         }
 
-        for texture in frame.planes.into_iter().chain(frame.outputs) {
+        let mattes = frame.mattes.into_iter().flatten();
+        for texture in frame.planes.into_iter().chain(frame.outputs).chain(mattes) {
             self.pool.release(texture);
         }
         self.pool.trim();

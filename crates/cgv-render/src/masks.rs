@@ -9,8 +9,8 @@ use cgv_model::{BlendMode, Mask, MaskMode, MaskShape};
 /// Masks the shader reads, and the points of all their paths.
 pub const MAX_MASKS: usize = 8;
 pub const MAX_POINTS: usize = 256;
-/// Floats in the `Masks` uniform struct: info, area, 8 masks of 5 vectors and
-/// 128 vectors of points.
+/// Floats in the `Masks` uniform struct: info (masks, edge, and a matte's
+/// picture size), area, 8 masks of 5 vectors and 128 vectors of points.
 pub const MASK_FLOATS: usize = 4 + 4 + MAX_MASKS * 20 + MAX_POINTS * 2;
 
 /// The shader's number for a blend mode (0 is normal).

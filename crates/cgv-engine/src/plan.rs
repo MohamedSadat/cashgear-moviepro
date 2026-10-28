@@ -65,6 +65,10 @@ pub struct LayerPlan {
     /// Masks at this frame, keyframes applied.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub masks: Vec<Mask>,
+    /// The picture keeps only its people, by the matte of its frame at
+    /// `source_time` (which the reader supplies with the frame).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remove_background: bool,
 }
 
 /// How a frame is drawn, bottom track first.
@@ -180,6 +184,7 @@ fn visual_layer(project: &Project, track: TrackId, clip: &Clip, time: Flicks) ->
             blend_frames: false,
             blend_mode: clip.blend_mode,
             masks: clip.masks_at(offset),
+            remove_background: false,
         });
     }
     let media = project.media(&clip.media)?;
@@ -226,6 +231,7 @@ fn visual_layer(project: &Project, track: TrackId, clip: &Clip, time: Flicks) ->
         blend_frames,
         blend_mode: clip.blend_mode,
         masks: clip.masks_at(offset),
+        remove_background: clip.remove_background,
     })
 }
 
