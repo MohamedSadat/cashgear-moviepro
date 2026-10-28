@@ -33,7 +33,7 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `cgv-effects`: the effect and transition catalogue: JSON schema, registry, shader assembly (`prelude.wgsl`) and settings packing.
   - `cgv-text`: fonts, shaping (rustybuzz), bidi and line breaks, and drawing titles on the CPU (`paint.rs`). No GPU code.
   - `cgv-dsp`: sound effects (filters, dynamics, echo, reverb), level meters, loudness (`ebur128`), ducking curves, time-stretching that keeps pitch (`stretch.rs`, WSOLA), silence detection (`silence.rs`) and beat tracking (`beat.rs`). It knows nothing of projects, so it can be shared with CashGear Audio.
-  - `cgv-ai`: the AI tools' arithmetic as a WASM module of its own (`src/pkg/ai/`), run in the AI worker: sound analysis for silences and beats. Its results are in media time, cached per file.
+  - `cgv-ai`: the AI tools' arithmetic as a WASM module of its own (`src/pkg/ai/`), run in the AI worker: sound analysis for silences and beats, scene scores and cuts (`scene.rs`), Whisper's 16 kHz resampling and log-mel features (`whisper.rs`), word times from cross-attention (`align.rs`) and the SHA-256 of model downloads. Its results are in media time, cached per file.
   - `cgv-denoise`: noise reduction (`nnnoiseless`) as a WASM module of its own (`src/pkg/denoise/`), run in a worker that starts when a clip first asks for it. It is too big for the engine's budget.
   - `cgv-time`, `cgv-model`, `cgv-media`, `cgv-audio`.
 - `assets/`: the built-in pack, embedded at build time. One folder per effect or transition (`effect.json` and `effect.wgsl`, plus any images) in `effects/` and `transitions/`; looks in `luts/`. `assets/README.md` is the authoring guide; `scripts/make-effect-assets.mjs` makes the looks and gradients.
@@ -48,7 +48,8 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `export/`: the export worker (its own engine and copy of the project), encoders, Mediabunny muxing, targets, and pure settings (formats, presets, codec levels, bitrates).
   - `effects/`: catalogue types, pack images and the worker that draws the browser's previews (effects, transitions and titles).
   - `fonts/`: the font catalogue (bundled, imported, installed), the loader that gives each engine the files its titles need, and imported fonts in OPFS.
-- `crates/cgv-model`: the project, every edit command, undo/redo and the `.cgvproj` format, with effects, keyframes (`animation.rs`), transitions, LUTs (`lut.rs`), titles (`title.rs`), speed ramps, reverse and freeze frames (`timing.rs`), masks and blend modes (`masks.rs`) and template slots (`FillSlot`). `packages/ui/src/project`: opening, saving, autosave, recovery and relinking.
+  - `ai/`: the AI worker (onnxruntime-web: WebGPU, else WASM), the model registry (`models.json`, pinned revisions and hashes) and downloads into OPFS, Whisper (`whisper.ts`, `tokenizer.ts`), background removal (`cutout.ts`, MediaPipe Selfie Segmentation) and its mattes in OPFS (`mattes.ts`), read by the engine and export workers.
+- `crates/cgv-model`: the project, every edit command, undo/redo and the `.cgvproj` format, with effects, keyframes (`animation.rs`), transitions, LUTs (`lut.rs`), titles and captions (`title.rs`), speed ramps, reverse and freeze frames (`timing.rs`), masks and blend modes (`masks.rs`), template slots (`FillSlot`), beats, background removal and cutting ranges out (`RemoveRanges`). `packages/ui/src/project`: opening, saving, autosave, recovery and relinking.
 - `crates/cgv-engine`: `plan_frame` (what a frame shows), the audio clip plan, transport, Auto quality and playback stats. `crates/cgv-audio`: the block mixer. `crates/cgv-render`: the compositor and WGSL.
 - `crates/cgv-media`: the media library model (Rust, via WASM). `crates/cgv-native`: the cgv-media protocol registry, byte ranges, ffprobe, proxies, export files and their GIF and MP3 conversions, the cache folder and installed fonts (`fonts.rs`, fontdb).
 - `packages/ui`: React components, on the CG component library (`@cashgear/ui`).
@@ -63,6 +64,7 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `speed/` (ramp maths and presets; `inspector/SpeedSection.tsx`), `masks/` (mask shapes; `inspector/MaskSection.tsx`) and `layouts/` (picture in picture and split screens; `inspector/LayoutSection.tsx`).
   - `monitor/`: the transport, and `MonitorOverlay.tsx`, the handles over the picture (move, scale, rotate, crop, masks, Ken Burns) and the eyedropper; `geometry.ts` is pure.
   - `templates/`: project templates (loading, placing them, filling slots) and their browser.
+  - `ai/` (`useAiTools`: jobs with progress and cancel, silences, beats, scenes, background removal; source-to-timeline timing), `inspector/AiSection.tsx` and `captions/` (the Captions tab, cues from transcripts, SRT and VTT).
 - `apps/web`: Vite app.
 - `apps/desktop/src-tauri`: Tauri 2 shell.
 
@@ -74,6 +76,7 @@ Browser-only Rust dependencies sit under `cfg(target_arch = "wasm32")`, so nativ
 pnpm install && pnpm setup:wasm   # first time: wasm32 target + wasm-bindgen-cli 0.2.129 in .tools/
 pnpm setup:ffmpeg                 # pinned LGPL FFmpeg into .tools/ffmpeg (hash and license checked)
 pnpm fetch-test-media             # test clips into tests/media (CI sets CGV_REQUIRE_FFMPEG=1)
+pnpm fetch-models [ids]           # AI models into tests/models (CI: whisper-tiny selfie selfie-landscape)
 pnpm dev:web                      # engine (debug) + Vite on http://127.0.0.1:5173, rebuilds on .rs/.wgsl changes
 pnpm dev:desktop                  # the same UI in Tauri
 pnpm build                        # release WASM + web build (run before typecheck, clippy, e2e, desktop)
@@ -135,3 +138,9 @@ Gotchas:
 - Masks cut a clip after its effects. Feather and expansion are fractions of the picture's shorter side.
 - Template slots are placeholder titles with `slot`. `FillSlot` swaps in media and keeps the clip's place and look; a video shorter than its slot holds its last frame in a freeze clip of the same slot.
 - The green-screen set (`tests/e2e/greenscreen.ts`) is drawn and encoded with the pinned FFmpeg during the test. It is not test media.
+- onnxruntime-web on WebGPU computes fp16 and int8 models wrongly on the reference GPU's driver (457.51). Every WebGPU load gives the model's known answer first (`check` in `models.json`, recorded on the CPU) and falls back to WASM when it is off. A new model or file needs its check recorded.
+- Whisper tiny's int8 build hallucinates whole windows (59% WER against 23%): the tests use the full-precision one. Long-form decoding prompts each window with the text before it (without the prompt, turbo skipped whole sentences after a speaker change), skips pauses at a window's start, and keeps the likeliest try when every temperature fails, as faster-whisper does, not OpenAI's last one.
+- AI tests serve `tests/models` over HTTP and pass it as `?models=` (with `?diagnostic=1`); `?captionModel=whisper-tiny` swaps the caption model. A test whose model is missing skips: turbo's WER runs only where it has been fetched.
+- Mattes live in OPFS (`ai-mattes/<media>/selfie/`) on the web and the desktop alike, in two-second chunks. The index's `done` ranges decide whether an export may start; the reader never evicts a chunk playback wants.
+- Measure long AI runs against a production build (Playwright's preview): the dev server reloads the page when Rust changes.
+- WebView2 never asks Tauri for the script of a worker started by a worker, so such a worker never loads on the desktop (the browser has no such gap). Start one with `startNestedWorker` (`engine-client/src/nested-worker.ts`), from a `?worker&url` import; `shimNestedWorkers` does the same for a library's own threads (ONNX Runtime's). The desktop smoke covers both.
