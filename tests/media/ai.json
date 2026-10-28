@@ -1,0 +1,14 @@
+{
+  "comment": "Clips for the AI tools' tests, fetched from their own public sources by pnpm fetch-test-media. Edit with care: the hash pins each file.",
+  "release": "ai-sources-v1",
+  "files": [
+    {
+      "file": "iss-message.webm",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/4/43/A_Message_of_Resilience_from_the_International_Space_Station.webm",
+      "sha256": "3a98e99395266365f0858339a968c095310270a1976cfad500ecad4cf9f80e0c",
+      "size": 13901204,
+      "source": "https://commons.wikimedia.org/wiki/File:A_Message_of_Resilience_from_the_International_Space_Station.webm",
+      "license": "Public domain (NASA Johnson)"
+    }
+  ]
+}
