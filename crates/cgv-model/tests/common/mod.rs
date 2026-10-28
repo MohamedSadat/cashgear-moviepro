@@ -663,7 +663,25 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
     let transition = rng.pick(&transitions).unwrap_or(TransitionId(0));
     let mask = rng.pick(&masks(project));
     let (mask_clip, mask_id) = mask.unwrap_or((any_clip, MaskId(0)));
-    match rng.below(140) {
+    match rng.below(144) {
+        140..=141 => {
+            let ranges = (0..rng.range(1, 4))
+                .map(|_| {
+                    let from = time(project, rng);
+                    [from, from + Flicks(rng.range(0, 60) * frame(project))]
+                })
+                .collect();
+            Command::RemoveRanges {
+                clip: any_clip,
+                ranges,
+            }
+        }
+        142..=143 => Command::SetBeats {
+            clip: any_clip,
+            beats: (0..rng.below(6))
+                .map(|_| Flicks(rng.range(0, 600) * FRAME))
+                .collect(),
+        },
         127..=129 => Command::SetRamp {
             clip: any_clip,
             points: random_shape(rng),

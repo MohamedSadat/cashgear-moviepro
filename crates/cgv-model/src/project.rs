@@ -14,6 +14,8 @@ use crate::title::Title;
 /// The latest time the model accepts: 2^53 − 1 flicks (about 147 days), so every
 /// time stays an exact integer in JavaScript.
 pub const MAX_TIME: Flicks = Flicks((1 << 53) - 1);
+/// The most beats a clip keeps: three hours at 250 BPM.
+pub const MAX_BEATS: usize = 50_000;
 
 macro_rules! id_type {
     ($(#[$doc:meta])* $name:ident) => {
@@ -751,6 +753,11 @@ pub struct Clip {
     /// fills it, which [`crate::Command::FillSlot`] replaces.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot: Option<u32>,
+    /// Beats of the clip's sound as source times, in order, for cuts to snap to
+    /// ([`crate::Command::SetBeats`]). Splits and trims keep them all; only those
+    /// inside the clip show.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub beats: Vec<Flicks>,
 }
 
 impl Clip {

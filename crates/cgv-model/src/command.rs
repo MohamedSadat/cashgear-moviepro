@@ -74,6 +74,9 @@ pub struct ClipSpec {
     /// The template slot the new clip is (a placeholder title) or fills.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot: Option<u32>,
+    /// Beats of a pasted copy, as source times.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub beats: Vec<Flicks>,
 }
 
 /// Transform values to change; missing ones stay as they are, so edits of
@@ -388,6 +391,19 @@ pub enum Command {
         #[serde(default)]
         source_in: Flicks,
     },
+    /// Cuts timeline ranges (`[start, end]` pairs) out of a clip and its linked
+    /// partners and closes the gaps, as ripple deletes do: jump cuts, in one step.
+    /// Ranges are limited to the clip; what is left keeps its place in the media.
+    RemoveRanges {
+        clip: ClipId,
+        ranges: Vec<[Flicks; 2]>,
+    },
+    /// Gives a media clip the beats of its sound, as source times (an empty list
+    /// clears them).
+    SetBeats {
+        clip: ClipId,
+        beats: Vec<Flicks>,
+    },
     /// Holds the frame showing at `at` for `duration`: the clip splits there and a
     /// freeze frame goes in between, pushing the later clips of its track, and of
     /// its linked partners' tracks, along.
@@ -637,6 +653,9 @@ impl Command {
             Command::SetReverse { .. } => "Play forwards",
             Command::FreezeFrame { .. } => "Freeze frame",
             Command::FillSlot { .. } => "Fill slot",
+            Command::RemoveRanges { .. } => "Cut out ranges",
+            Command::SetBeats { beats, .. } if beats.is_empty() => "Clear beats",
+            Command::SetBeats { .. } => "Detect beats",
 
             Command::AddMask { .. } => "Add mask",
             Command::SetMask { .. } => "Change mask",

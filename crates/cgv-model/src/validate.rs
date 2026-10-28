@@ -8,7 +8,7 @@ use crate::command::Edge;
 use crate::edit::{check_crop, check_opacity, check_pan, check_transform, check_volume};
 use crate::effects::MAX_EFFECTS;
 use crate::masks::{mask_value_ok, MAX_MASKS};
-use crate::project::{Clip, ClipKind, Project, Speed, Track, MAX_TIME};
+use crate::project::{Clip, ClipKind, Project, Speed, Track, MAX_BEATS, MAX_TIME};
 use crate::timing::check_ramp;
 use crate::title::{element_value_ok, Content};
 
@@ -374,6 +374,14 @@ pub fn validate(project: &Project) -> Result<(), String> {
             }
             if clip.slot.is_some_and(|slot| !(1..=999).contains(&slot)) {
                 return Err(format!("Clip {} has an invalid template slot", clip.id));
+            }
+            let beats_ok = clip.beats.is_empty()
+                || (!clip.is_generated()
+                    && clip.beats.len() <= MAX_BEATS
+                    && clip.beats[0] >= Flicks::ZERO
+                    && clip.beats.windows(2).all(|pair| pair[0] < pair[1]));
+            if !beats_ok {
+                return Err(format!("Clip {} has invalid beats", clip.id));
             }
             check_masks(clip)?;
             for mask in &clip.masks {

@@ -72,6 +72,7 @@ export function copyClips(project: Project, ids: number[]): ClipboardItem[] {
         reverse: clip.reverse,
         freeze: clip.freeze,
         masks: clip.masks,
+        beats: clip.beats,
       },
       group: clip.link !== null && (groups.get(clip.link) ?? 0) > 1 ? clip.link : null,
     }));

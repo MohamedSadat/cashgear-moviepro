@@ -15,7 +15,7 @@ use crate::effects::{
 use crate::masks::{Mask, MAX_MASKS};
 use crate::project::{
     Clip, ClipId, ClipKind, Crop, EffectId, ElementId, LinkId, LutId, Marker, MarkerId, MaskId,
-    Project, Speed, Track, TrackId, Transform, TransitionId, MAX_TIME,
+    Project, Speed, Track, TrackId, Transform, TransitionId, MAX_BEATS, MAX_TIME,
 };
 use crate::timing::{check_shape, shape_mean, RampPoint, RampShape};
 use crate::title::Content;
@@ -190,6 +190,24 @@ impl Edit {
                 media,
                 source_in,
             } => self.fill_slot(*clip, media, *source_in)?,
+            Command::RemoveRanges { clip, ranges } => self.remove_ranges(*clip, ranges)?,
+            Command::SetBeats { clip, beats } => {
+                let (index, mut changed) = self.editable(*clip)?;
+                if changed.is_generated() {
+                    return Err("Only media clips have beats".into());
+                }
+                if beats.len() > MAX_BEATS {
+                    return Err(format!("A clip has at most {MAX_BEATS} beats"));
+                }
+                let mut beats = beats.clone();
+                beats.sort();
+                beats.dedup();
+                if beats.first().is_some_and(|&beat| beat < Flicks::ZERO) {
+                    return Err("Beats are times in the media, from 0".into());
+                }
+                changed.beats = beats;
+                *self.clip_mut(index, *clip) = changed;
+            }
             Command::AddMask { clip, mask, index } => self.add_mask(*clip, mask, *index)?,
             Command::SetMask { clip, mask } => self.set_mask(*clip, mask)?,
             Command::RemoveMask { clip, mask } => {
@@ -922,6 +940,9 @@ impl Edit {
         if spec.slot.is_some_and(|slot| !(1..=999).contains(&slot)) {
             return Err("Template slots are numbered from 1 to 999".into());
         }
+        if !spec.beats.is_empty() && spec.kind != ClipKind::Media {
+            return Err("Only media clips have beats".into());
+        }
         let (media, video, audio) = match spec.kind {
             ClipKind::Adjustment | ClipKind::Title => {
                 let what = if spec.kind == ClipKind::Title {
@@ -993,6 +1014,7 @@ impl Edit {
             keyframes: BTreeMap::new(),
             title: None,
             slot: spec.slot,
+            beats: spec.beats.clone(),
         };
         if let Some(properties) = &spec.properties {
             apply_properties(&mut clip, properties)?;
@@ -1162,6 +1184,60 @@ impl Edit {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Cuts the timeline ranges out of clip `id` and its partners, latest first so
+    /// each cut leaves the earlier ones where they are.
+    fn remove_ranges(&mut self, id: ClipId, ranges: &[[Flicks; 2]]) -> Result<(), String> {
+        let (index, clip) = self.editable(id)?;
+        let mut cuts: Vec<(Flicks, Flicks)> = Vec::new();
+        for &[from, to] in ranges {
+            let from = self.position(from)?.max(clip.start);
+            let to = self.position(to)?.min(clip.end());
+            if to > from {
+                cuts.push((from, to));
+            }
+        }
+        cuts.sort();
+        let mut merged: Vec<(Flicks, Flicks)> = Vec::new();
+        for (from, to) in cuts {
+            match merged.last_mut() {
+                Some(last) if from <= last.1 => last.1 = last.1.max(to),
+                _ => merged.push((from, to)),
+            }
+        }
+        if merged.is_empty() {
+            return Err("There is nothing of the clip to cut out there".into());
+        }
+        let first_new = self.created.len();
+        for (from, to) in merged.into_iter().rev() {
+            // `id` is still the piece from the clip's start to past this cut.
+            if to < self.find(id)?.1.end() {
+                self.split(to, &[id])?;
+            }
+            let piece = if from > clip.start {
+                self.split(from, &[id])?;
+                self.project.tracks[index]
+                    .clips
+                    .iter()
+                    .find(|c| c.start == from)
+                    .map(|c| c.id)
+                    .ok_or("The cut piece went missing")?
+            } else {
+                id
+            };
+            self.delete(&[piece], true)?;
+        }
+        // What the splits made and the cuts kept: the pieces between the gaps.
+        let project = &self.project;
+        let kept: Vec<u64> = self.created[first_new..]
+            .iter()
+            .copied()
+            .filter(|&made| project.clip(ClipId(made)).is_some())
+            .collect();
+        self.created.truncate(first_new);
+        self.created.extend(kept);
         Ok(())
     }
 
@@ -1827,6 +1903,7 @@ impl Edit {
             keyframes: Keyframes::new(),
             title: None,
             slot: None,
+            beats: Vec::new(),
         };
         if clip.spans(at) {
             self.split(at, &[id])?;

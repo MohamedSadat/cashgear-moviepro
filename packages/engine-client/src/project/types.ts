@@ -260,6 +260,8 @@ export interface Clip {
   title?: Title;
   /** The template slot (1 and up) this clip is, as a placeholder or filled. */
   slot?: number;
+  /** Beats of the clip's sound as source times (flicks), in order. */
+  beats?: number[];
 }
 
 /** What a track carries, so music can dip under dialogue. */
@@ -380,6 +382,8 @@ export interface ClipSpec {
   masks?: Mask[];
   /** The template slot the new clip is (a placeholder title) or fills. */
   slot?: number;
+  /** A pasted copy's beats, as source times. */
+  beats?: number[];
 }
 
 export type Edge = 'start' | 'end';
@@ -421,6 +425,10 @@ export type Command =
   | { type: 'freezeFrame'; clip: number; at: number; duration: number }
   /** Fills a template slot with media's picture; a short video holds its last frame. */
   | { type: 'fillSlot'; clip: number; media: string; sourceIn?: number }
+  /** Cuts timeline `[start, end]` ranges out of a clip and its partners, closing the gaps. */
+  | { type: 'removeRanges'; clip: number; ranges: [number, number][] }
+  /** Beats of a media clip's sound, as source times; an empty list clears them. */
+  | { type: 'setBeats'; clip: number; beats: number[] }
   | { type: 'addMask'; clip: number; mask: Mask; index?: number }
   | { type: 'setMask'; clip: number; mask: Mask }
   | { type: 'removeMask'; clip: number; mask: number }
