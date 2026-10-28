@@ -1,9 +1,9 @@
 // Background removal's mattes, kept per media file in the origin-private file
 // system under `ai-mattes/<media>/<model>/`, on the web and on the desktop
 // alike: the engine and export workers read them while they draw. The AI
-// worker writes a chunk file every two seconds of frames, each frame one byte
-// of coverage a texel (deflated), then the index naming it, so a chunk the
-// index names is complete.
+// worker writes a chunk file every two seconds of frames (120 at most), each
+// frame one byte of coverage a texel (deflated), then the index naming it, so
+// a chunk the index names is complete.
 
 /** What the index records. */
 export interface MatteIndex {
@@ -26,8 +26,9 @@ export interface Matte {
 /** Bumped when mattes change, so those made before are made again. */
 export const matteVersion = 2;
 const magic = 0x4d564743; // "CGVM", little-endian.
-/** Frames a chunk holds at most. */
-export const chunkFrames = 60;
+/** Source seconds a chunk covers, and the frames it holds at most. */
+const chunkSeconds = 2;
+const chunkFrames = 120;
 
 async function folder(media: string, model: string, create: boolean) {
   let directory = await navigator.storage.getDirectory();
@@ -104,8 +105,10 @@ export class MatteWriter {
   }
 
   async add(time: number, data: Uint8Array) {
+    const first = this.frames[0]?.time;
+    if (first !== undefined && (this.frames.length >= chunkFrames || time - first >= chunkSeconds))
+      await this.flush();
     this.frames.push({ time, data });
-    if (this.frames.length >= chunkFrames) await this.flush();
   }
 
   /** Writes what is held, then the index, marking `range` done when given. */
@@ -156,6 +159,8 @@ export class MatteReader {
   private chunks = new Map<string, Promise<Matte[]>>();
   private ready = new Map<string, Matte[]>();
   private order: string[] = [];
+  /** The chunks each medium's latest `ensure` wants: they stay inflated. */
+  private wanted = new Map<string, Set<string>>();
 
   constructor(private readonly model = 'selfie') {}
 
@@ -191,6 +196,7 @@ export class MatteReader {
     const wanted = new Set<string>();
     for (const chunk of index.chunks)
       if (chunk.last >= time - 0.1 && chunk.first <= time + ahead) wanted.add(chunk.file);
+    this.wanted.set(media, new Set([...wanted].map((file) => `${media}/${file}`)));
     await Promise.all([...wanted].map((file) => this.load(media, file)));
   }
 
@@ -229,12 +235,14 @@ export class MatteReader {
         );
         this.ready.set(key, mattes);
         this.order = [...this.order.filter((k) => k !== key), key];
-        // Four chunks (eight seconds) stay inflated.
-        while (this.order.length > 4) {
-          const old = this.order.shift()!;
+        // Besides those playback wants, the two chunks used last stay inflated.
+        const kept = new Set([...this.wanted.values()].flatMap((keys) => [...keys]));
+        const spare = this.order.filter((k) => !kept.has(k));
+        for (const old of spare.slice(0, -2)) {
           this.ready.delete(old);
           this.chunks.delete(old);
         }
+        this.order = this.order.filter((k) => this.ready.has(k) || k === key);
         return mattes;
       })();
       loading.catch(() => this.chunks.delete(key));
@@ -265,8 +273,13 @@ export class MatteReader {
         this.ready.delete(key);
         this.chunks.delete(key);
       }
-    if (media) this.indexes.delete(media);
-    else this.indexes.clear();
+    if (media) {
+      this.indexes.delete(media);
+      this.wanted.delete(media);
+    } else {
+      this.indexes.clear();
+      this.wanted.clear();
+    }
     this.order = this.order.filter((key) => this.ready.has(key));
   }
 }
