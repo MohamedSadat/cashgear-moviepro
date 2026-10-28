@@ -5,6 +5,9 @@
  * those blocks without holding up the thread that asked.
  */
 
+import { startNestedWorker } from '../nested-worker';
+import denoiseWorkerUrl from './denoise-worker.ts?worker&url';
+
 /** Media keys ending with this are a medium's noise-reduced sound. */
 const suffix = '#nr';
 /** Seconds of sound the denoiser hears before a block, so blocks join closely. */
@@ -21,10 +24,7 @@ const waiting = new Map<
 
 function start(): Worker {
   if (worker) return worker;
-  const started = new Worker(new URL('./denoise-worker.ts', import.meta.url), {
-    type: 'module',
-    name: 'cgv-denoise',
-  });
+  const started = startNestedWorker(denoiseWorkerUrl, { name: 'cgv-denoise' });
   started.onmessage = (event: MessageEvent<Reply>) => {
     const reply = event.data;
     const request = waiting.get(reply.id);
