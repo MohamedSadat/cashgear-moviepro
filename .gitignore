@@ -8,7 +8,9 @@ playwright-report/
 .tools/
 bench/results/
 tests/media/*
+tests/models/
 !tests/media/manifest.json
+!tests/media/speech.json
 apps/desktop/src-tauri/gen/
 *.log
 .env

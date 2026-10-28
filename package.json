@@ -26,6 +26,7 @@
     "licenses:check": "node scripts/check-licenses.mjs",
     "licenses:selftest": "node scripts/license-selftest.mjs",
     "fetch-test-media": "node scripts/fetch-test-media.mjs",
+    "fetch-models": "node scripts/fetch-models.mjs",
     "make-test-media": "node scripts/make-test-media.mjs",
     "fetch-fonts": "node scripts/fetch-fonts.mjs",
     "format": "prettier --write .",
