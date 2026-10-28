@@ -191,6 +191,17 @@ impl Edit {
                 source_in,
             } => self.fill_slot(*clip, media, *source_in)?,
             Command::RemoveRanges { clip, ranges } => self.remove_ranges(*clip, ranges)?,
+            Command::SetCaption { clip, caption } => {
+                let (index, mut changed) = self.editable(*clip)?;
+                if !changed.is_title() {
+                    return Err(format!("Clip {clip} is not a title"));
+                }
+                if let Some(caption) = caption {
+                    caption.check()?;
+                }
+                changed.caption = caption.clone();
+                *self.clip_mut(index, *clip) = changed;
+            }
             Command::SetBeats { clip, beats } => {
                 let (index, mut changed) = self.editable(*clip)?;
                 if changed.is_generated() {
@@ -528,6 +539,7 @@ impl Edit {
                             | Command::ClearKeyframes { .. }
                             | Command::SetTransition { .. }
                             | Command::SetTitle { .. }
+                            | Command::SetCaption { .. }
                             | Command::SetMask { .. }
                     );
                     if !batchable {
@@ -818,11 +830,15 @@ impl Edit {
         right.start = at;
         right.cut_start(offset, still);
         right.link = right_link;
-        // Keyframes are relative to the clip's start: keep the animation where it was.
+        // Keyframes and caption words are relative to the clip's start: keep them
+        // where they were.
         for keys in right.keyframes.values_mut() {
             for key in keys.iter_mut() {
                 key.time -= offset;
             }
+        }
+        if let Some(caption) = &mut right.caption {
+            shift_words(caption, -offset);
         }
         // The right half's effects are its own, and its keyframes follow them.
         let renamed: BTreeMap<EffectId, EffectId> = right
@@ -943,6 +959,12 @@ impl Edit {
         if !spec.beats.is_empty() && spec.kind != ClipKind::Media {
             return Err("Only media clips have beats".into());
         }
+        if let Some(caption) = &spec.caption {
+            if spec.kind != ClipKind::Title {
+                return Err("Only titles are captions".into());
+            }
+            caption.check()?;
+        }
         let (media, video, audio) = match spec.kind {
             ClipKind::Adjustment | ClipKind::Title => {
                 let what = if spec.kind == ClipKind::Title {
@@ -1015,6 +1037,7 @@ impl Edit {
             title: None,
             slot: spec.slot,
             beats: spec.beats.clone(),
+            caption: spec.caption.clone(),
         };
         if let Some(properties) = &spec.properties {
             apply_properties(&mut clip, properties)?;
@@ -1904,6 +1927,7 @@ impl Edit {
             title: None,
             slot: None,
             beats: Vec::new(),
+            caption: None,
         };
         if clip.spans(at) {
             self.split(at, &[id])?;
@@ -1961,6 +1985,7 @@ impl Edit {
             kind: ClipKind::Media,
             media: media.id.clone(),
             title: None,
+            caption: None,
             source_in: if still {
                 Flicks::ZERO
             } else {
@@ -2551,6 +2576,17 @@ fn shift_keys(clip: &mut Clip, delta: Flicks) {
         for key in keys.iter_mut() {
             key.time += delta;
         }
+    }
+    if let Some(caption) = &mut clip.caption {
+        shift_words(caption, delta);
+    }
+}
+
+/// Moves a caption's word times by `delta`; words before the clip's start keep
+/// to it, so the times stay in order.
+fn shift_words(caption: &mut crate::title::Caption, delta: Flicks) {
+    for word in &mut caption.words {
+        *word = (*word + delta).max(Flicks::ZERO);
     }
 }
 

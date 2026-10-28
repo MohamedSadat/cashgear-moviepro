@@ -663,7 +663,16 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
     let transition = rng.pick(&transitions).unwrap_or(TransitionId(0));
     let mask = rng.pick(&masks(project));
     let (mask_clip, mask_id) = mask.unwrap_or((any_clip, MaskId(0)));
-    match rng.below(144) {
+    match rng.below(146) {
+        144..=145 => Command::SetCaption {
+            clip: any_clip,
+            caption: rng.percent(70).then(|| Caption {
+                language: ["en", "ar", "EN"][rng.below(3) as usize].into(),
+                words: (0..rng.below(4))
+                    .map(|i| Flicks(i as i64 * 3 * FRAME))
+                    .collect(),
+            }),
+        },
         140..=141 => {
             let ranges = (0..rng.range(1, 4))
                 .map(|_| {

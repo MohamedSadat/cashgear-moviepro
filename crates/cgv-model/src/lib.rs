@@ -39,5 +39,5 @@ pub use masks::{mask_property, BlendMode, Mask, MaskMode, MaskPoint, MaskShape};
 pub use project::*;
 pub use session::{Session, Snapshot, HISTORY_LIMIT};
 pub use timing::{RampPoint, RampShape};
-pub use title::{element_property, Content, Element, Font, Title};
+pub use title::{element_property, Caption, Content, Element, Font, Title};
 pub use validate::{valid_project_id, validate};

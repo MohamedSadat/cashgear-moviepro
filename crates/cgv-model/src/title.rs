@@ -6,6 +6,8 @@
 //! `title.<element id>.<setting>` animate. The engine lays text out and draws it.
 use serde::{Deserialize, Serialize};
 
+use cgv_time::Flicks;
+
 use crate::animation::{value_at, KeyValue, Keyframes};
 use crate::effects::Color;
 use crate::project::ElementId;
@@ -218,6 +220,39 @@ pub const ELEMENT_SETTINGS: [&str; 7] =
     ["x", "y", "scale", "rotation", "opacity", "reveal", "fill"];
 
 /// The keyframe property name of setting `name` of element `id`.
+/// Most words a caption keeps times for.
+pub const MAX_CAPTION_WORDS: usize = 2_000;
+
+/// What makes a title clip a caption: the speech its text shows, for subtitle
+/// files and for showing words as they are said. Its text is the title's.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Caption {
+    /// The speech's language code, such as `en` or `ar`.
+    pub language: String,
+    /// When each word of the text is said, from the clip's start, in order.
+    /// Splits and trims keep them where they were said.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<Flicks>,
+}
+
+impl Caption {
+    pub fn check(&self) -> Result<(), String> {
+        let code = &self.language;
+        let language_ok = (2..=12).contains(&code.len())
+            && code.chars().all(|c| c.is_ascii_lowercase() || c == '-');
+        if !language_ok {
+            return Err(format!("{code:?} is not a language code"));
+        }
+        if self.words.len() > MAX_CAPTION_WORDS
+            || !self.words.windows(2).all(|pair| pair[0] <= pair[1])
+        {
+            return Err("A caption's word times are out of order".into());
+        }
+        Ok(())
+    }
+}
+
 pub fn element_property(id: ElementId, name: &str) -> String {
     format!("title.{id}.{name}")
 }

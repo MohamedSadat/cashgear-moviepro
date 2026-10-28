@@ -262,6 +262,16 @@ export interface Clip {
   slot?: number;
   /** Beats of the clip's sound as source times (flicks), in order. */
   beats?: number[];
+  /** A title clip that shows speech as a caption. */
+  caption?: Caption;
+}
+
+/** What makes a title clip a caption: the speech its text shows. */
+export interface Caption {
+  /** The speech's language code, such as `en` or `ar`. */
+  language: string;
+  /** When each word of the text is said, in flicks from the clip's start. */
+  words?: number[];
 }
 
 /** What a track carries, so music can dip under dialogue. */
@@ -384,6 +394,8 @@ export interface ClipSpec {
   slot?: number;
   /** A pasted copy's beats, as source times. */
   beats?: number[];
+  /** Makes the new title clip a caption. */
+  caption?: Caption;
 }
 
 export type Edge = 'start' | 'end';
@@ -427,6 +439,8 @@ export type Command =
   | { type: 'fillSlot'; clip: number; media: string; sourceIn?: number }
   /** Cuts timeline `[start, end]` ranges out of a clip and its partners, closing the gaps. */
   | { type: 'removeRanges'; clip: number; ranges: [number, number][] }
+  /** Makes a title clip a caption, changes its word times, or (null) makes it a title again. */
+  | { type: 'setCaption'; clip: number; caption: Caption | null }
   /** Beats of a media clip's sound, as source times; an empty list clears them. */
   | { type: 'setBeats'; clip: number; beats: number[] }
   | { type: 'addMask'; clip: number; mask: Mask; index?: number }

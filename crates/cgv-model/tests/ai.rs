@@ -1,4 +1,5 @@
-//! What the AI tools change: jump cuts from detected silences, and beats on clips.
+//! What the AI tools change: jump cuts from detected silences, beats on clips and
+//! captions on titles.
 mod common;
 
 use cgv_model::*;
@@ -141,4 +142,122 @@ fn beats_are_media_times_that_splits_and_copies_keep() {
             beats: vec![f(1)],
         })
         .is_err());
+}
+
+fn caption_spec(words: &[i64], frames: i64) -> ClipSpec {
+    let mut rng = Rng(5);
+    ClipSpec {
+        kind: ClipKind::Title,
+        duration: f(frames),
+        title: Some(random_title(&mut rng)),
+        caption: Some(Caption {
+            language: "ar".into(),
+            words: words.iter().map(|&w| f(w)).collect(),
+        }),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn caption_words_stay_where_they_were_said_through_splits_and_trims() {
+    let mut s = session();
+    let track = track_id(&s, 1);
+    let id = ClipId(
+        s.execute(&Command::Append {
+            track,
+            clip: caption_spec(&[0, 10, 25, 40], 60),
+        })
+        .unwrap()
+        .created[0],
+    );
+    let words = |s: &Session, id: ClipId| -> Vec<i64> {
+        clip(s, id)
+            .caption
+            .unwrap()
+            .words
+            .iter()
+            .map(|w| w.0 / FRAME)
+            .collect()
+    };
+    let right = ClipId(
+        s.execute(&Command::Split {
+            at: f(20),
+            clips: vec![id],
+        })
+        .unwrap()
+        .created[0],
+    );
+    // The right half's words count from its own start; those before it hold at 0.
+    assert_eq!(words(&s, right), [0, 0, 5, 20]);
+    assert_eq!(words(&s, id), [0, 10, 25, 40]);
+    s.execute(&Command::Trim {
+        clip: right,
+        edge: Edge::Start,
+        delta: f(5),
+        ripple: false,
+    })
+    .unwrap();
+    assert_eq!(words(&s, right), [0, 0, 0, 15]);
+    let text = file::to_json(s.project());
+    assert!(text.contains("\"caption\": {"));
+    assert_eq!(&file::from_json(&text).unwrap(), s.project());
+}
+
+#[test]
+fn captions_belong_to_titles_and_check_their_words() {
+    let mut s = session();
+    let track = track_id(&s, 1);
+    let id = ClipId(
+        s.execute(&Command::Append {
+            track,
+            clip: caption_spec(&[], 30),
+        })
+        .unwrap()
+        .created[0],
+    );
+    let set = |caption: Option<Caption>| Command::SetCaption { clip: id, caption };
+    assert!(s
+        .execute(&set(Some(Caption {
+            language: "EN".into(),
+            words: vec![],
+        })))
+        .is_err());
+    assert!(s
+        .execute(&set(Some(Caption {
+            language: "en".into(),
+            words: vec![f(5), f(2)],
+        })))
+        .is_err());
+    s.execute(&set(Some(Caption {
+        language: "en".into(),
+        words: vec![f(2), f(5)],
+    })))
+    .unwrap();
+    assert_eq!(clip(&s, id).caption.unwrap().language, "en");
+    s.execute(&set(None)).unwrap();
+    assert!(clip(&s, id).caption.is_none());
+    let media = append(&mut s, 0, "v", 0, 30);
+    assert!(s
+        .execute(&Command::SetCaption {
+            clip: media,
+            caption: Some(Caption {
+                language: "en".into(),
+                words: vec![],
+            }),
+        })
+        .is_err());
+    // A caption and its text change together in a batch, as one step.
+    let mut title = clip(&s, id).title.unwrap();
+    title.elements.truncate(1);
+    s.execute(&Command::Batch {
+        commands: vec![
+            Command::SetTitle { clip: id, title },
+            set(Some(Caption {
+                language: "en".into(),
+                words: vec![f(1)],
+            })),
+        ],
+    })
+    .unwrap();
+    assert_eq!(clip(&s, id).caption.unwrap().words, [f(1)]);
 }

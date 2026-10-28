@@ -9,7 +9,7 @@ use crate::animation::Keyframes;
 use crate::effects::{Effect, Lut, LutInfo, Transition};
 use crate::masks::{BlendMode, Mask};
 use crate::timing::RampPoint;
-use crate::title::Title;
+use crate::title::{Caption, Title};
 
 /// The latest time the model accepts: 2^53 − 1 flicks (about 147 days), so every
 /// time stays an exact integer in JavaScript.
@@ -758,6 +758,9 @@ pub struct Clip {
     /// inside the clip show.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub beats: Vec<Flicks>,
+    /// A title clip that shows speech as a caption ([`crate::Command::SetCaption`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caption: Option<Caption>,
 }
 
 impl Clip {

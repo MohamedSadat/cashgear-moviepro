@@ -9,7 +9,7 @@ use crate::project::{
     ProjectSettings, Speed, TrackId, TrackRole, Transform, TransitionId,
 };
 use crate::timing::{RampPoint, RampShape};
-use crate::title::Title;
+use crate::title::{Caption, Title};
 
 /// Which edge of a clip an edit acts on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,6 +77,9 @@ pub struct ClipSpec {
     /// Beats of a pasted copy, as source times.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub beats: Vec<Flicks>,
+    /// Makes the new title clip a caption.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caption: Option<Caption>,
 }
 
 /// Transform values to change; missing ones stay as they are, so edits of
@@ -398,6 +401,13 @@ pub enum Command {
         clip: ClipId,
         ranges: Vec<[Flicks; 2]>,
     },
+    /// Makes a title clip a caption of speech, changes its word times, or (with
+    /// none) makes it an ordinary title again.
+    SetCaption {
+        clip: ClipId,
+        #[serde(default)]
+        caption: Option<Caption>,
+    },
     /// Gives a media clip the beats of its sound, as source times (an empty list
     /// clears them).
     SetBeats {
@@ -654,6 +664,7 @@ impl Command {
             Command::FreezeFrame { .. } => "Freeze frame",
             Command::FillSlot { .. } => "Fill slot",
             Command::RemoveRanges { .. } => "Cut out ranges",
+            Command::SetCaption { .. } => "Edit caption",
             Command::SetBeats { beats, .. } if beats.is_empty() => "Clear beats",
             Command::SetBeats { .. } => "Detect beats",
 

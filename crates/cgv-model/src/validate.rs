@@ -383,6 +383,12 @@ pub fn validate(project: &Project) -> Result<(), String> {
             if !beats_ok {
                 return Err(format!("Clip {} has invalid beats", clip.id));
             }
+            if let Some(caption) = &clip.caption {
+                if !clip.is_title() {
+                    return Err(format!("Clip {} is a caption but not a title", clip.id));
+                }
+                caption.check()?;
+            }
             check_masks(clip)?;
             for mask in &clip.masks {
                 unique(mask.id.0, "Mask")?;
