@@ -57,7 +57,12 @@ export function useExport(
   client: EngineClient | null,
   project: ProjectState,
   platform: MediaPlatform,
-  options: { backend: BackendPreference; decode?: ExportJob['decode'] },
+  options: {
+    backend: BackendPreference;
+    decode?: ExportJob['decode'];
+    /** Why the project cannot export yet (mattes still being made), or null. */
+    blocked?: () => Promise<string | null>;
+  },
 ): ExportState {
   const [status, setStatus] = useState<ExportStatus>({ state: 'idle' });
   const running = useRef<{
@@ -92,6 +97,11 @@ export function useExport(
       if (running.current) throw new Error('An export is already running');
       const snapshot = project.snapshot;
       if (!client || !snapshot) throw new Error('No project is open');
+      const blocked = await options.blocked?.();
+      if (blocked) {
+        project.notice(blocked);
+        return false;
+      }
       const format = formatInfo(settings.format);
       const fileName = exportFileName(snapshot.project.name, settings.format);
       // Taken now: edits made while the export runs do not change it.

@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   FLICKS_PER_SECOND,
+  covers,
   createAiClient,
+  readMatteIndex,
+  type EngineClient,
   defaultSceneSettings,
   defaultSilenceSettings,
   isCancelled,
@@ -15,6 +18,7 @@ import {
   type SoundAnalysis,
 } from '@cgv/engine-client';
 import type { ProjectState } from '../project/useProject';
+import { sourceAt } from '../speed/timing';
 import { readScenes, readSound, writeScenes, writeSound } from './cache';
 import { soundClipOf, timelineAt, timelineRanges } from './timing';
 
@@ -38,6 +42,15 @@ export interface AiToolsState {
   clearBeats(id: number): Promise<void>;
   /** Splits clip `id` (and its partners) where its picture cuts to a new scene, as one undo step. */
   splitScenes(id: number): Promise<void>;
+  /**
+   * Turns background removal on or off for clip `id`; on, the mattes of the
+   * media it shows are worked out first where they are missing, as a job.
+   */
+  setRemoveBackground(id: number, on: boolean): Promise<void>;
+  /** Clips whose background goes but whose mattes are not all made: exports wait for them. */
+  unfinishedCutouts(): Promise<Clip[]>;
+  /** Works out the mattes clip `id` still needs, as a job. */
+  makeMattes(id: number): Promise<void>;
   /** The AI worker, started on first use. */
   client(): AiClient;
   /** Runs `work` as a job the user sees and can cancel; null when cancelled. */
@@ -88,7 +101,7 @@ const scenes: Kind<SceneAnalysis> = {
 export function useAiTools(
   project: ProjectState,
   cache: CacheStore,
-  options: { modelBase?: string | null } = {},
+  options: { modelBase?: string | null; engine?: EngineClient | null } = {},
 ): AiToolsState {
   const client = useRef<AiClient | null>(null);
   const [jobs, setJobs] = useState<AiJob[]>([]);
@@ -278,6 +291,68 @@ export function useAiTools(
     [prepare],
   );
 
+  const engine = options.engine ?? null;
+
+  /** The source seconds a clip shows. */
+  const shownRange = (clip: Clip): [number, number] => {
+    const ends = [sourceAt(clip, 0), sourceAt(clip, clip.duration)];
+    return [Math.min(...ends) / FLICKS_PER_SECOND, Math.max(...ends) / FLICKS_PER_SECOND];
+  };
+
+  /** Works out the mattes clip `clip` needs, unless they are made already. */
+  const cutOut = useCallback(
+    async (clip: Clip) => {
+      const { project } = state.current;
+      const [start, end] = shownRange(clip);
+      if (covers(await readMatteIndex(clip.media, 'selfie'), start, end)) return;
+      const library = project.library;
+      const item = library.items.find((entry) => entry.id === clip.media);
+      const source = item?.video?.decodable
+        ? library.source(clip.media)
+        : library.proxy(clip.media);
+      const name = project.latest()?.project.media.find((m) => m.id === clip.media)?.name;
+      if (!source) return project.notice(`${name ?? 'This clip'} can't be decoded here.`);
+      try {
+        await job(`Removing the background of ${name ?? 'the clip'}`, (signal, progress) =>
+          ai().cutout(source, { media: clip.media, start, end }, progress, signal),
+        );
+      } catch (error) {
+        project.notice(message(error));
+      } finally {
+        engine?.api.mattesChanged(clip.media);
+      }
+    },
+    [ai, engine, job],
+  );
+
+  const setRemoveBackground = useCallback(
+    async (id: number, on: boolean) => {
+      const { project } = state.current;
+      const done = await project.execute({
+        type: 'setClipProperties',
+        clip: id,
+        properties: { removeBackground: on },
+      });
+      const clip = project
+        .latest()
+        ?.project.tracks.flatMap((t) => t.clips)
+        .find((c) => c.id === id);
+      if (done && on && clip) await cutOut(clip);
+    },
+    [cutOut],
+  );
+
+  const unfinishedCutouts = useCallback(async () => {
+    const current = state.current.project.latest()?.project;
+    const clips = current?.tracks.flatMap((t) => (t.hidden ? [] : t.clips)) ?? [];
+    const waiting: Clip[] = [];
+    for (const clip of clips.filter((c) => c.removeBackground)) {
+      const [start, end] = shownRange(clip);
+      if (!covers(await readMatteIndex(clip.media, 'selfie'), start, end)) waiting.push(clip);
+    }
+    return waiting;
+  }, []);
+
   return {
     jobs,
     silenceSettings,
@@ -286,6 +361,15 @@ export function useAiTools(
     detectBeats,
     clearBeats,
     splitScenes,
+    setRemoveBackground,
+    unfinishedCutouts,
+    makeMattes: async (id: number) => {
+      const clip = state.current.project
+        .latest()
+        ?.project.tracks.flatMap((t) => t.clips)
+        .find((c) => c.id === id);
+      if (clip?.removeBackground) await cutOut(clip);
+    },
     client: ai,
     run: job,
   };

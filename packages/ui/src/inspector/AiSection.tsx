@@ -56,6 +56,29 @@ export function AiSection({
       {ai.jobs.map((job) => (
         <AiJobRow key={job.id} job={job} />
       ))}
+      {clip.video && project?.media.find((media) => media.id === clip.media) && (
+        <>
+          <h4 className="cgv-subhead">Background</h4>
+          <label className="cgv-check-row">
+            <input
+              type="checkbox"
+              data-testid="remove-background"
+              checked={!!clip.removeBackground}
+              disabled={disabled}
+              onChange={(event) =>
+                void ai.setRemoveBackground(clip.id, event.currentTarget.checked)
+              }
+            />
+            Remove the background, keeping the people
+          </label>
+          {!clip.removeBackground && (
+            <p className="cgv-muted">
+              MediaPipe Selfie Segmentation (Apache-2.0) works out each frame on this computer; it
+              downloads once (under 1 MB).
+            </p>
+          )}
+        </>
+      )}
       {moving && (
         <>
           <h4 className="cgv-subhead">Scenes</h4>
@@ -172,7 +195,7 @@ export function AiSection({
           </div>
         </>
       )}
-      {!sound && !moving && !ai.jobs.length && (
+      {!sound && !moving && !clip.video && !ai.jobs.length && (
         <p className="cgv-muted">The AI tools work on video and sound clips.</p>
       )}
     </Section>

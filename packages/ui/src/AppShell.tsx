@@ -130,11 +130,18 @@ export function AppShell({ platform }: Props) {
     onSnapping: (snapping) => update({ snapping }),
     catalog,
   });
-  const ai = useAiTools(project, platform.cache, { modelBase: options.modelBase });
+  const ai = useAiTools(project, platform.cache, { modelBase: options.modelBase, engine: client });
   const captions = useCaptions(editor, ai, platform, { model: options.captionModel });
   const exporter = useExport(client, project, platform, {
     backend: options.backend,
     decode: options.decode,
+    // Exports read background removal's mattes: they wait until every one is made.
+    blocked: async () => {
+      const waiting = await ai.unfinishedCutouts();
+      if (!waiting.length) return null;
+      for (const clip of waiting) void ai.makeMattes(clip.id);
+      return 'The background of some clips is still being removed. Export once the AI tools finish.';
+    },
   });
   // Previews render once someone opens the effects or transitions.
   const [browsing, setBrowsing] = useState(false);
