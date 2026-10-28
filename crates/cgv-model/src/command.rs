@@ -195,6 +195,9 @@ pub struct ClipProperties {
     /// Slow motion blends neighbouring frames.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame_blending: Option<bool>,
+    /// The picture keeps only its people.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remove_background: Option<bool>,
 }
 
 /// Track sound settings to change; missing ones stay as they are.

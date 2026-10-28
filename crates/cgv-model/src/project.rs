@@ -711,6 +711,10 @@ pub struct Clip {
     /// Slow motion blends neighbouring source frames instead of repeating them.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub frame_blending: bool,
+    /// The picture keeps only its people: a matte the AI tools work out from the
+    /// media, applied after the clip's effects as masks are.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remove_background: bool,
     /// Whether the clip shows the media's picture.
     pub video: bool,
     /// Whether the clip plays the media's sound. "Detach audio" moves it to a linked clip.

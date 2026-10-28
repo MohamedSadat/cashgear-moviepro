@@ -233,6 +233,8 @@ export interface Clip {
   keepPitch?: boolean;
   /** Slow motion blends neighbouring frames. */
   frameBlending?: boolean;
+  /** The picture keeps only its people, by mattes the AI tools make. */
+  removeBackground?: boolean;
   video: boolean;
   audio: boolean;
   link: number | null;
@@ -355,6 +357,8 @@ export interface ClipProperties {
   blendMode?: BlendMode;
   keepPitch?: boolean;
   frameBlending?: boolean;
+  /** The picture keeps only its people. */
+  removeBackground?: boolean;
 }
 
 /** Track sound settings to change; missing ones stay as they are. */

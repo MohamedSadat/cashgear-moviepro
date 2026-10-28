@@ -44,6 +44,7 @@ export function copyClips(project: Project, ids: number[]): ClipboardItem[] {
           blendMode: clip.blendMode,
           keepPitch: clip.keepPitch,
           frameBlending: clip.frameBlending,
+          removeBackground: clip.removeBackground,
           // Sound settings only where there is sound to take them.
           ...(clip.audio
             ? { fadeIn: clip.fadeIn ?? 0, fadeOut: clip.fadeOut ?? 0, denoise: clip.denoise ?? 0 }

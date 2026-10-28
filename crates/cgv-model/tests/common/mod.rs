@@ -1001,6 +1001,7 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
                 }),
                 keep_pitch: rng.percent(10).then(|| rng.percent(50)),
                 frame_blending: rng.percent(10).then(|| rng.percent(50)),
+                remove_background: rng.percent(10).then(|| rng.percent(50)),
             },
         },
 

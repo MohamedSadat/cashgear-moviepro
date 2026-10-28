@@ -51,8 +51,8 @@ fn creative(project: Value) -> Result<Value, String> {
     Ok(project)
 }
 
-/// Format 7 adds what the AI tools make: beats on clips and captions on titles.
-/// Their defaults change nothing.
+/// Format 7 adds what the AI tools make: beats on clips, captions on titles and
+/// background removal. Their defaults change nothing.
 fn ai(project: Value) -> Result<Value, String> {
     Ok(project)
 }

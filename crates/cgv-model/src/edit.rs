@@ -1019,6 +1019,7 @@ impl Edit {
             freeze: spec.freeze,
             keep_pitch: true,
             frame_blending: false,
+            remove_background: false,
             video,
             audio,
             link: None,
@@ -1715,6 +1716,7 @@ impl Edit {
             blend_mode: Default::default(),
             masks: Vec::new(),
             frame_blending: false,
+            remove_background: false,
             effects: Vec::new(),
             keyframes: sound_keys,
             ..clip.clone()
@@ -1909,6 +1911,7 @@ impl Edit {
             freeze: true,
             keep_pitch: true,
             frame_blending: false,
+            remove_background: clip.remove_background,
             video: true,
             audio: false,
             link: None,
@@ -2739,6 +2742,12 @@ fn apply_properties(clip: &mut Clip, properties: &ClipProperties) -> Result<(), 
     }
     if let Some(blending) = properties.frame_blending {
         clip.frame_blending = blending;
+    }
+    if let Some(remove) = properties.remove_background {
+        if remove && (clip.is_generated() || !clip.video) {
+            return Err("Only clips showing media have a background to remove".into());
+        }
+        clip.remove_background = remove;
     }
     Ok(())
 }

@@ -383,6 +383,9 @@ pub fn validate(project: &Project) -> Result<(), String> {
             if !beats_ok {
                 return Err(format!("Clip {} has invalid beats", clip.id));
             }
+            if clip.remove_background && (clip.is_generated() || !clip.video) {
+                return Err(format!("Clip {} has no picture to cut out", clip.id));
+            }
             if let Some(caption) = &clip.caption {
                 if !clip.is_title() {
                     return Err(format!("Clip {} is a caption but not a title", clip.id));
