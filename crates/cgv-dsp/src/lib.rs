@@ -2,6 +2,7 @@
 //! reverb, meters and loudness. Every processor works in place on planar `f32`
 //! blocks of one or two channels at a fixed rate, and keeps its state from one
 //! block to the next, so a stream cut into blocks of any size sounds the same.
+pub mod beat;
 pub mod biquad;
 pub mod delay;
 pub mod duck;
@@ -11,6 +12,7 @@ pub mod loudness;
 pub mod meter;
 pub mod oversample;
 pub mod reverb;
+pub mod silence;
 pub mod stretch;
 
 pub use effect::{Chain, Settings};
