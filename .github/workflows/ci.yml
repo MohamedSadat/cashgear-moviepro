@@ -86,7 +86,7 @@ jobs:
       # before clippy (Tauri embeds dist), typecheck and the browser tests.
       - run: pnpm build
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo clippy -p cgv-wasm -p cgv-denoise --target wasm32-unknown-unknown -- -D warnings
+      - run: cargo clippy -p cgv-wasm -p cgv-denoise -p cgv-ai --target wasm32-unknown-unknown -- -D warnings
       - run: cargo test --workspace
       - run: pnpm typecheck
       - run: pnpm lint

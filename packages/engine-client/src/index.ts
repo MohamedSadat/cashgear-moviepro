@@ -16,6 +16,15 @@ export {
   type EngineGpu,
   type GpuAdapterInfo,
 } from './capabilities';
+export { createAiClient, isCancelled, type AiClient } from './ai/client';
+export {
+  defaultSilenceSettings,
+  envelopeRate,
+  soundAnalysisVersion,
+  type BeatAnalysis,
+  type SilenceSettings,
+  type SoundAnalysis,
+} from './ai/types';
 export { createJobsClient, type JobsClient } from './jobs/client';
 export type { Filmstrip, Waveform } from './jobs/types';
 export { imageType } from './media/sources';
