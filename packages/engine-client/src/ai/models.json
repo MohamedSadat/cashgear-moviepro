@@ -1,0 +1,125 @@
+{
+  "comment": "The AI tools' models: pinned Hugging Face revisions, each file checked by size and SHA-256. The app downloads them on first use; pnpm fetch-models puts them in tests/models for tests.",
+  "models": [
+    {
+      "id": "whisper-large-v3-turbo",
+      "name": "Whisper large-v3-turbo",
+      "use": "captions",
+      "license": "MIT",
+      "origin": "https://huggingface.co/openai/whisper-large-v3-turbo",
+      "repo": "onnx-community/whisper-large-v3-turbo_timestamped",
+      "revision": "b3f77bf9a8c4d5ea3415827033d1ffea7955fd9a",
+      "files": [
+        {
+          "role": "encoder",
+          "path": "onnx/encoder_model_q4f16.onnx",
+          "size": 370035242,
+          "sha256": "65261f977474ce30e46ed2c2b885e8ef68ef917941f78af48b098b86fad1adaa"
+        },
+        {
+          "role": "decoder",
+          "path": "onnx/decoder_model_merged_q4f16.onnx",
+          "size": 193566135,
+          "sha256": "617e5b4f91ca190c43fa4d3bd2e671cfbee19c9a6ac4890f0a4bbaf658f00cf4"
+        },
+        {
+          "role": "vocab",
+          "path": "vocab.json",
+          "size": 1036558,
+          "sha256": "e2aa043ef015641d363d8288e7c241c85e36a5c761fb303598e0710233344387"
+        },
+        {
+          "role": "tokens",
+          "path": "added_tokens.json",
+          "size": 34648,
+          "sha256": "3c51f66c4c21f9e126970078f11ae77a78c74aee8df606ee9daba86e467108e0"
+        },
+        {
+          "role": "generation",
+          "path": "generation_config.json",
+          "size": 3797,
+          "sha256": "8568ddf83476167b4607014956b87142763fa6923e71259a606734beb39bdfc8"
+        },
+        {
+          "role": "config",
+          "path": "config.json",
+          "size": 1330,
+          "sha256": "32c02d1dfb9a93ff236cdcf0f741f8f3a4cedb437c407a361a022451ac009131"
+        }
+      ],
+      "check": {
+        "samples": [
+          0.08766, 0.01769, 0.40307, -0.33671, 0.21301, -0.04585, -0.25671, 0.17104, 0.05922,
+          0.23921, 0.17867, -0.19075, 0.04572, -0.43628, 0.25161, 0.38852, 0.10781, -0.29439,
+          -0.04351, -0.08992, -0.15439, 0.08107, 0.04508, -0.04992, 0.09517, -0.17651, -0.17928,
+          0.26966, -0.20582, -0.26088, -1.16988, -0.14054, 0.06983, 0.6021, 0.08212, -0.03558,
+          -0.05792, 0.31297, 0.28005, -0.22196, -0.17837, -0.04875, 0.06669, 0.09136, -0.24382,
+          0.1668, 0.28468, 0.12145, 0.04968, 0.40352, 0.41555, -0.02324, -0.32275, -0.14789,
+          0.45986, -0.48521, -0.06261, 0.09227, -0.05712, 0.13828, 0.11244, -0.24192, -0.0813,
+          -0.50686
+        ],
+        "top": [50364, 50365, 50465, 50366, 50415]
+      }
+    },
+    {
+      "id": "whisper-tiny",
+      "name": "Whisper tiny",
+      "use": "captions",
+      "license": "MIT",
+      "origin": "https://huggingface.co/openai/whisper-tiny",
+      "repo": "onnx-community/whisper-tiny_timestamped",
+      "revision": "517244293732ee2d58139af5814231b7e6830a0d",
+      "files": [
+        {
+          "role": "encoder",
+          "path": "onnx/encoder_model_quantized.onnx",
+          "size": 10097109,
+          "sha256": "d4397fbfed1975bb5dd1bedb748808367331c85293f54cbc927774728daec2b2"
+        },
+        {
+          "role": "decoder",
+          "path": "onnx/decoder_model_merged_quantized.onnx",
+          "size": 30730264,
+          "sha256": "ced2053c1aa8ff7048927197416a5c169f50010e7b280e5d564b46a991fca011"
+        },
+        {
+          "role": "vocab",
+          "path": "vocab.json",
+          "size": 1036584,
+          "sha256": "50d6a919f0a0601d56a04eb583c780d18553aa388254ba3158eb6a00f13e2c1a"
+        },
+        {
+          "role": "tokens",
+          "path": "added_tokens.json",
+          "size": 34604,
+          "sha256": "9715fd2243b6f06a5858b5e32950d2853f73dd5bc201aafcf76f5082a2d8acd1"
+        },
+        {
+          "role": "generation",
+          "path": "generation_config.json",
+          "size": 3772,
+          "sha256": "f5c67e5a4f7102f8cb4d058bc95da276bbc19eeec997267c3bb0f25ef68facd1"
+        },
+        {
+          "role": "config",
+          "path": "config.json",
+          "size": 2243,
+          "sha256": "46aeea0a406afbeb563fc8e59ca10609203df4299af6a83f73752fef369efd2d"
+        }
+      ],
+      "check": {
+        "samples": [
+          0.31663, -0.66878, 0.22956, 0.32767, 0.34031, -0.80187, -0.46023, -0.48869, 0.88891,
+          0.74307, -0.3318, -0.7433, -0.02019, 1.3245, 0.1344, -0.02602, -0.56388, -0.42166,
+          -0.72678, -0.18122, -0.54951, -1.2074, -0.31743, 0.25969, 0.23502, 0.25866, -0.61809,
+          0.01825, -0.35494, -0.39483, 0.27601, 0.90454, -1.08761, -0.6095, -0.44983, -0.33704,
+          -0.26428, -1.19284, 0.46675, -0.66935, 0.36336, -0.08287, 0.02699, -0.76807, -0.47485,
+          -0.18772, 1.39848, 0.72724, -0.31031, -0.27015, -0.22349, -0.4364, -0.34802, -0.46398,
+          -0.03513, -0.74198, -0.15199, -0.0984, -0.53455, -0.17755, -0.52593, -0.25002, -0.63924,
+          0.32754
+        ],
+        "top": [50363, 50364, 50464, 50514, 50257]
+      }
+    }
+  ]
+}

@@ -63,6 +63,50 @@ export interface SceneSettings {
 
 export const defaultSceneSettings: SceneSettings = { ratio: 3, minScore: 15, minLength: 0.5 };
 
+/** The speech models captions can use: turbo for real work, tiny for quick tests. */
+export type CaptionModel = 'whisper-large-v3-turbo' | 'whisper-tiny';
+
+export interface ModelState {
+  id: CaptionModel;
+  name: string;
+  license: string;
+  /** Bytes it downloads. */
+  bytes: number;
+  installed: boolean;
+}
+
+export interface TranscriptWord {
+  text: string;
+  /** Source seconds. */
+  start: number;
+  end: number;
+  /** The model's confidence, 0 to 1. */
+  probability: number;
+}
+
+/** A stretch Whisper wrote as one piece: usually a sentence or a clause. */
+export interface TranscriptSegment {
+  start: number;
+  end: number;
+  text: string;
+  words: TranscriptWord[];
+}
+
+export interface Transcript {
+  /** The language code, such as `en` or `ar`. */
+  language: string;
+  segments: TranscriptSegment[];
+}
+
+export interface TranscribeRequest {
+  model: CaptionModel;
+  /** A language code, or null to detect it. */
+  language: string | null;
+  /** Source seconds to transcribe. */
+  start: number;
+  end: number;
+}
+
 export interface BeatAnalysis {
   /** Beats per minute, or null without a steady pulse. */
   tempo: number | null;
@@ -92,5 +136,22 @@ export interface AiApi {
   ): Promise<SceneAnalysis | null>;
   /** The source times (seconds) at which new scenes start, in order. */
   sceneCuts(analysis: SceneAnalysis, settings: SceneSettings): Promise<number[]>;
+  modelState(id: CaptionModel): Promise<ModelState>;
+  /** Downloads a model's missing files, checking each one. */
+  installModel(
+    job: number,
+    id: CaptionModel,
+    onProgress: (fraction: number) => void,
+  ): Promise<void>;
+  removeModel(id: CaptionModel): Promise<void>;
+  /** Where models download from: null for Hugging Face, or a folder of local copies (tests). */
+  setModelBase(url: string | null): Promise<void>;
+  /** Speech to text for a range of a medium's sound, with word times in source seconds. */
+  transcribe(
+    job: number,
+    source: MediaSourceRef,
+    request: TranscribeRequest,
+    onProgress: (fraction: number) => void,
+  ): Promise<Transcript & { provider: 'webgpu' | 'wasm' }>;
   cancel(job: number): void;
 }

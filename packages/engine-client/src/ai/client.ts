@@ -3,6 +3,10 @@ import type { MediaSourceRef } from '../media/types';
 import type {
   AiApi,
   BeatAnalysis,
+  CaptionModel,
+  ModelState,
+  TranscribeRequest,
+  Transcript,
   SceneAnalysis,
   SceneSettings,
   SilenceSettings,
@@ -61,6 +65,26 @@ export function createAiClient() {
     },
     sceneCuts(analysis: SceneAnalysis, settings: SceneSettings): Promise<number[]> {
       return api.sceneCuts(analysis, settings);
+    },
+    modelState(id: CaptionModel): Promise<ModelState> {
+      return api.modelState(id);
+    },
+    installModel(id: CaptionModel, onProgress: (fraction: number) => void, signal?: AbortSignal) {
+      return run(signal, (job) => api.installModel(job, id, proxy(onProgress)));
+    },
+    removeModel(id: CaptionModel): Promise<void> {
+      return api.removeModel(id);
+    },
+    setModelBase(url: string | null): Promise<void> {
+      return api.setModelBase(url);
+    },
+    transcribe(
+      source: MediaSourceRef,
+      request: TranscribeRequest,
+      onProgress: (fraction: number) => void,
+      signal?: AbortSignal,
+    ): Promise<Transcript & { provider: 'webgpu' | 'wasm' }> {
+      return run(signal, (job) => api.transcribe(job, source, request, proxy(onProgress)));
     },
     dispose() {
       api[releaseProxy]();

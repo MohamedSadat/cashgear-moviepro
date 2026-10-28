@@ -5,6 +5,7 @@
 import { expose, transfer } from 'comlink';
 import { AudioSampleSink, VideoSampleSink } from 'mediabunny';
 import init, {
+  Resampler16k,
   SceneScores,
   SoundAnalysis as Analysis,
   beats,
@@ -13,13 +14,93 @@ import init, {
 } from '../pkg/ai/cgv_ai';
 import { openInput } from '../media/sources';
 import type { MediaSourceRef } from '../media/types';
-import type { AiApi, SceneAnalysis, SceneSettings, SilenceSettings, SoundAnalysis } from './types';
+import { install, isInstalled, modelInfo, modelSize, removeModel, setModelBase } from './models';
+import { hasWebGpu } from './runtime';
+import type {
+  AiApi,
+  CaptionModel,
+  SceneAnalysis,
+  SceneSettings,
+  SilenceSettings,
+  SoundAnalysis,
+  TranscribeRequest,
+} from './types';
+import { Whisper } from './whisper';
 
 /** Frames are scored this many pixels wide: enough to see a cut, cheap to compare. */
 const sceneWidth = 64;
 
 const ready = init();
 const cancelled = new Set<number>();
+/** The speech model last used, kept loaded for the next job. */
+let whisper: Whisper | null = null;
+
+async function loadWhisper(id: CaptionModel, provider?: 'webgpu' | 'wasm'): Promise<Whisper> {
+  const wanted = provider ?? ((await hasWebGpu()) ? 'webgpu' : 'wasm');
+  if (whisper?.id === id && whisper.provider === wanted) return whisper;
+  await whisper?.release();
+  whisper = null;
+  try {
+    whisper = await Whisper.load(id, wanted);
+  } catch (error) {
+    if (wanted !== 'webgpu') throw error;
+    console.warn('Whisper could not start on WebGPU; using the CPU:', error);
+    whisper = await Whisper.load(id, 'wasm');
+  }
+  return whisper;
+}
+
+/** A medium's sound from `start` to `end` seconds, as 16 kHz mono. */
+async function speech(
+  source: MediaSourceRef,
+  start: number,
+  end: number,
+  progress: (fraction: number) => void,
+  check: () => void,
+): Promise<Float32Array> {
+  const input = await openInput(source);
+  try {
+    const track = await input.getPrimaryAudioTrack();
+    if (!track) throw new Error('This clip has no sound to transcribe.');
+    const resampler = new Resampler16k(await track.getSampleRate());
+    const chunks: Float32Array[] = [];
+    let first: number | null = null;
+    try {
+      for await (const sample of new AudioSampleSink(track).samples(start, end)) {
+        try {
+          check();
+          first ??= sample.timestamp;
+          const frames = sample.numberOfFrames;
+          const channels = sample.numberOfChannels;
+          const plane = new Float32Array(frames);
+          const mono = new Float32Array(frames);
+          for (let c = 0; c < channels; c++) {
+            sample.copyTo(plane, { planeIndex: c, format: 'f32-planar' });
+            for (let i = 0; i < frames; i++) mono[i] += plane[i] / channels;
+          }
+          chunks.push(resampler.push(mono));
+          progress((sample.timestamp - start) / Math.max(1e-3, end - start));
+        } finally {
+          sample.close();
+        }
+      }
+      chunks.push(resampler.finish());
+    } finally {
+      resampler.free();
+    }
+    const all = new Float32Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
+    let at = 0;
+    for (const chunk of chunks) {
+      all.set(chunk, at);
+      at += chunk.length;
+    }
+    // Decoding starts at the packet holding `start`, which may begin earlier.
+    const skip = Math.max(0, Math.round((start - (first ?? start)) * 16_000));
+    return all.subarray(Math.min(skip, all.length));
+  } finally {
+    input.dispose();
+  }
+}
 
 /** Stops job `job` if it was cancelled. */
 function check(job: number) {
@@ -167,6 +248,96 @@ const api: AiApi = {
       settings.minLength,
     );
     return Array.from(frames, (frame) => analysis.times[frame]);
+  },
+
+  async modelState(id: CaptionModel) {
+    await ready;
+    const model = modelInfo(id);
+    return {
+      id,
+      name: model.name,
+      license: model.license,
+      bytes: modelSize(model),
+      installed: await isInstalled(model),
+    };
+  },
+
+  async installModel(job: number, id: CaptionModel, onProgress: (fraction: number) => void) {
+    await ready;
+    try {
+      await install(modelInfo(id), throttle(onProgress), () => check(job));
+    } finally {
+      cancelled.delete(job);
+    }
+  },
+
+  async removeModel(id: CaptionModel) {
+    if (whisper?.id === id) {
+      await whisper.release();
+      whisper = null;
+    }
+    await removeModel(modelInfo(id));
+  },
+
+  async setModelBase(url: string | null) {
+    setModelBase(url);
+  },
+
+  async transcribe(
+    job: number,
+    source: MediaSourceRef,
+    request: TranscribeRequest,
+    onProgress: (fraction: number) => void,
+  ) {
+    await ready;
+    const model = modelInfo(request.model);
+    try {
+      if (!(await isInstalled(model))) throw new Error(`${model.name} is not downloaded yet.`);
+      const progress = throttle(onProgress);
+      const samples = await speech(
+        source,
+        request.start,
+        request.end,
+        (fraction) => progress(0.05 * fraction),
+        () => check(job),
+      );
+      const run = (speaker: Whisper) =>
+        speaker.run(
+          samples,
+          request.language,
+          (fraction) => progress(0.05 + 0.95 * fraction),
+          () => check(job),
+        );
+      let speaker = await loadWhisper(request.model);
+      let transcript;
+      try {
+        transcript = await run(speaker);
+      } catch (error) {
+        // A lost or failing GPU: the CPU gives the same words, more slowly.
+        if ((error as Error).name === 'AbortError' || speaker.provider !== 'webgpu') throw error;
+        console.warn('Whisper failed on WebGPU; trying the CPU:', error);
+        speaker = await loadWhisper(request.model, 'wasm');
+        transcript = await run(speaker);
+      }
+      const shift = (time: number) => time + request.start;
+      progress(1);
+      return {
+        language: transcript.language,
+        provider: speaker.provider,
+        segments: transcript.segments.map((segment) => ({
+          ...segment,
+          start: shift(segment.start),
+          end: shift(segment.end),
+          words: segment.words.map((word) => ({
+            ...word,
+            start: shift(word.start),
+            end: shift(word.end),
+          })),
+        })),
+      };
+    } finally {
+      cancelled.delete(job);
+    }
   },
 
   cancel(job: number) {
