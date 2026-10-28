@@ -45,6 +45,8 @@ export function AiSection({
 }) {
   const project = editor.project.snapshot?.project;
   const sound = project ? soundClipOf(project, clip.id) : null;
+  const moving =
+    clip.video && project?.media.find((media) => media.id === clip.media)?.kind === 'video';
   const beats = sound ? beatTimes(sound) : [];
   const tempo = tempoOf(beats);
   const settings = ai.silenceSettings;
@@ -54,7 +56,21 @@ export function AiSection({
       {ai.jobs.map((job) => (
         <AiJobRow key={job.id} job={job} />
       ))}
-      {sound ? (
+      {moving && (
+        <>
+          <h4 className="cgv-subhead">Scenes</h4>
+          <p className="cgv-muted">Split the clip wherever its picture cuts to a new shot.</p>
+          <CgButton
+            size="small"
+            data-testid="split-scenes"
+            disabled={disabled}
+            onClick={() => void ai.splitScenes(clip.id)}
+          >
+            Split at scene changes
+          </CgButton>
+        </>
+      )}
+      {sound && (
         <>
           <h4 className="cgv-subhead">Silences</h4>
           <label className="cgv-check-row">
@@ -155,8 +171,9 @@ export function AiSection({
             )}
           </div>
         </>
-      ) : (
-        !ai.jobs.length && <p className="cgv-muted">This clip has no sound for the AI tools.</p>
+      )}
+      {!sound && !moving && !ai.jobs.length && (
+        <p className="cgv-muted">The AI tools work on video and sound clips.</p>
       )}
     </Section>
   );
