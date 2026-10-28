@@ -9,6 +9,7 @@
       "origin": "https://huggingface.co/openai/whisper-large-v3-turbo",
       "repo": "onnx-community/whisper-large-v3-turbo_timestamped",
       "revision": "b3f77bf9a8c4d5ea3415827033d1ffea7955fd9a",
+      "previousText": true,
       "files": [
         {
           "role": "encoder",

@@ -1,13 +1,15 @@
-import { WhisperFeatures, token_times } from '../pkg/ai/cgv_ai';
+import { WhisperFeatures, silences, token_times } from '../pkg/ai/cgv_ai';
 import { modelInfo, readModelFile, readModelJson, type ModelId } from './models';
 import { createSession, ort, type Provider } from './runtime';
 import { mergePunctuation, Tokenizer } from './tokenizer';
 import type { Transcript, TranscriptSegment, TranscriptWord } from './types';
 
 // Speech to text with Whisper, the way OpenAI's `transcribe` does it: 30 s
-// windows, greedy decoding under the timestamp rules (falling back to sampling
-// when a window repeats itself or reads as unlikely), windows judged silent
-// skipped, and word times from the alignment heads' cross-attention.
+// windows prompted with the text before them, greedy decoding under the
+// timestamp rules (falling back to sampling when a window repeats itself or
+// reads as unlikely), windows judged silent skipped, and word times from the
+// alignment heads' cross-attention. Windows also start where speech does,
+// after any pause of a second or more.
 
 interface GenerationConfig {
   alignment_heads: [number, number][];
@@ -43,6 +45,15 @@ const LOGPROB_LIMIT = -1;
 const NO_SPEECH_LIMIT = 0.6;
 /** Tokens a window may write: half the decoder's context, as OpenAI allows. */
 const MAX_TOKENS = 224;
+/** Pauses at least this long are skipped, up to a little before the speech after them. */
+const PAUSE_SECONDS = 1;
+const PAUSE_LEAD = 0.2;
+/**
+ * Tokens of earlier windows a window is prompted with: the decoder's 448
+ * positions hold them, the start-of-previous token, the three-token prompt
+ * and the window's own tokens.
+ */
+const CONTEXT_TOKENS = 220;
 
 type Cache = Record<string, ort.Tensor>;
 
@@ -92,6 +103,7 @@ export class Whisper {
   private readonly heads: number;
   private readonly empty: ort.Tensor;
   private readonly startOfTranscript: number;
+  private readonly startOfPrevious: number;
   private readonly transcribe: number;
   private readonly noTimestamps: number;
   private readonly noSpeech: number;
@@ -115,6 +127,7 @@ export class Whisper {
     this.empty = new ort.Tensor('float32', new Float32Array(0), [1, this.heads, 0, size]);
     this.startOfTranscript = generation.decoder_start_token_id;
     this.transcribe = tokenizer.special('<|transcribe|>');
+    this.startOfPrevious = tokenizer.special('<|startofprev|>');
     this.noTimestamps = generation.no_timestamps_token_id;
     this.timestampBegin = this.noTimestamps + 1;
     this.endOfText = tokenizer.endOfText;
@@ -235,11 +248,23 @@ export class Whisper {
   ): Promise<Transcript> {
     const total = Math.ceil(samples.length / HOP);
     const segments: Segment[] = [];
+    const pauses = Whisper.pauses(samples);
+    // What earlier windows said, as OpenAI prompts each window with it: without
+    // it, turbo skipped sentences after a window opened in one speaker's
+    // trailing noise. Tiny skips more with it, so models.json says which do.
+    const withContext = !!modelInfo(this.id).previousText;
+    let context: number[] = [];
     let language_ = language;
     let seek = 0;
     let window = 0;
     while (seek < total) {
       check();
+      // A window that would start in a pause starts just before the speech after it.
+      const pause = pauses.find(([from, to]) => seek >= from && seek < to);
+      if (pause) {
+        seek = pause[1];
+        continue;
+      }
       const size = Math.min(WINDOW_FRAMES, total - seek);
       const offset = seek / FRAMES_PER_SECOND;
       const mel = this.features.log_mel(samples.subarray(seek * HOP, (seek + size) * HOP));
@@ -255,13 +280,18 @@ export class Whisper {
       try {
         language_ ??= await this.detect(encoded);
         const prompt = [this.startOfTranscript, this.languageToken(language_), this.transcribe];
-        const decoded = await this.decodeWithFallback(encoded, prompt, window, check);
+        const prompted = context.length
+          ? [this.startOfPrevious, ...context.slice(-CONTEXT_TOKENS), ...prompt]
+          : prompt;
+        const decoded = await this.decodeWithFallback(encoded, prompted, window, check);
         const silent =
           decoded.noSpeech > NO_SPEECH_LIMIT && decoded.averageLogprob <= LOGPROB_LIMIT;
         if (silent || !decoded.tokens.some((token) => token < this.endOfText)) {
           seek += size;
         } else {
           const found = await this.segments(encoded, prompt, decoded, size, check);
+          // A window that needed sampling well above greedy starts the context afresh.
+          context = decoded.temperature > 0.5 || !withContext ? [] : [...context, ...found.tokens];
           for (const segment of found.segments)
             segments.push({
               ...segment,
@@ -282,6 +312,28 @@ export class Whisper {
       onProgress(Math.min(1, seek / total));
     }
     return { language: language_ ?? 'en', segments };
+  }
+
+  /**
+   * Pauses in spectrogram frames, from 10 ms levels (as `cgv-dsp` measures
+   * them) under a threshold picked from the recording.
+   */
+  private static pauses(samples: Float32Array): [number, number][] {
+    const levels = new Float32Array(Math.ceil(samples.length / HOP));
+    for (let i = 0; i < levels.length; i++) {
+      const part = samples.subarray(i * HOP, (i + 1) * HOP);
+      let sum = 0;
+      for (const value of part) sum += value * value;
+      levels[i] = sum > 0 ? Math.max(-120, 10 * Math.log10(sum / part.length)) : -120;
+    }
+    const found = silences(levels, NaN, PAUSE_SECONDS, PAUSE_LEAD);
+    const pauses: [number, number][] = [];
+    for (let i = 0; i + 1 < found.length; i += 2)
+      pauses.push([
+        Math.round(found[i] * FRAMES_PER_SECOND),
+        Math.round(found[i + 1] * FRAMES_PER_SECOND),
+      ]);
+    return pauses;
   }
 
   private languageToken(language: string) {
@@ -349,15 +401,23 @@ export class Whisper {
     window: number,
     check: () => void,
   ): Promise<Decoded> {
-    let decoded: Decoded | null = null;
+    const tries: Decoded[] = [];
     for (const temperature of TEMPERATURES) {
-      decoded = await this.decode(encoded, prompt, temperature, window, check);
+      const decoded = await this.decode(encoded, prompt, temperature, window, check);
       const silent = decoded.noSpeech > NO_SPEECH_LIMIT && decoded.averageLogprob < LOGPROB_LIMIT;
       const poor =
         decoded.compression > COMPRESSION_LIMIT || decoded.averageLogprob < LOGPROB_LIMIT;
-      if (silent || !poor) break;
+      if (silent || !poor) return decoded;
+      tries.push(decoded);
     }
-    return decoded!;
+    // When every try is poor, OpenAI keeps the last, sampled at the highest
+    // temperature: noise for a whole window when one sentence in it is hard.
+    // Keep the likeliest instead, as faster-whisper does, preferring tries that
+    // do not repeat themselves.
+    const unrepeated = tries.filter((decoded) => decoded.compression <= COMPRESSION_LIMIT);
+    return (unrepeated.length ? unrepeated : tries).reduce((best, decoded) =>
+      decoded.averageLogprob > best.averageLogprob ? decoded : best,
+    );
   }
 
   /** One pass of decoding at `temperature` (0 is greedy). */
@@ -374,6 +434,8 @@ export class Whisper {
     let sum = 0;
     let noSpeech = 0;
     let cache: Cache | null = null;
+    // No speech is read where the transcript starts, after any earlier text.
+    const start = prompt.indexOf(this.startOfTranscript);
     try {
       let input = prompt;
       while (tokens.length < MAX_TOKENS) {
@@ -391,8 +453,9 @@ export class Whisper {
         Whisper.drop(cache, next);
         cache = next;
         if (!tokens.length) {
+          const size = outputs.logits.dims[2];
           const first = logSoftmax(
-            (outputs.logits.data as Float32Array).subarray(0, outputs.logits.dims[2]),
+            (outputs.logits.data as Float32Array).subarray(start * size, (start + 1) * size),
           );
           noSpeech = Math.exp(first[this.noSpeech]);
         }
@@ -489,8 +552,8 @@ export class Whisper {
   }
 
   /**
-   * The window's segments with their words, in seconds from its start, and how
-   * many spectrogram frames it used.
+   * The window's segments with their words, in seconds from its start, how
+   * many spectrogram frames it used, and the tokens of the segments kept.
    */
   private async segments(
     encoded: ort.Tensor,
@@ -498,7 +561,7 @@ export class Whisper {
     decoded: Decoded,
     size: number,
     check: () => void,
-  ): Promise<{ segments: Segment[]; consumed: number }> {
+  ): Promise<{ segments: Segment[]; consumed: number; tokens: number[] }> {
     const { tokens } = decoded;
     const begin = this.timestampBegin;
     const isStamp = (token: number) => token >= begin;
@@ -556,10 +619,15 @@ export class Whisper {
         passed += counts[piece++];
       segments[piece].words.push(word.word);
     }
-    const kept = segments.filter((segment) => segment.words.length);
+    // Segments the model puts after the sound has ended are made up.
+    const limit = size / FRAMES_PER_SECOND;
+    const kept = segments.filter((segment) => segment.words.length && segment.start < limit);
     for (const segment of kept) {
       segment.start = Math.min(segment.start, segment.words[0].start);
-      segment.end = Math.max(segment.end, segment.words[segment.words.length - 1].end);
+      segment.end = Math.min(
+        limit,
+        Math.max(segment.end, segment.words[segment.words.length - 1].end),
+      );
     }
     // With word times, a window whose last segment ran on resumes after its last word.
     const lastWord = kept.at(-1)?.words.at(-1);
@@ -573,7 +641,8 @@ export class Whisper {
     const early = singleEnding || !cuts.length;
     if (early && stopped >= FRAMES_PER_SECOND && size - stopped >= FRAMES_PER_SECOND)
       consumed = stopped;
-    return { segments: kept, consumed };
+    const said = pieces.flatMap((piece, i) => (kept.includes(segments[i]) ? piece.tokens : []));
+    return { segments: kept, consumed, tokens: said };
   }
 
   /**

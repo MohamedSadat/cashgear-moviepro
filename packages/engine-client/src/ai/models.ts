@@ -19,6 +19,11 @@ export interface ModelInfo {
   id: ModelId;
   /** The model's answer to a fixed input on the CPU, which a GPU must match. */
   check?: { samples: number[]; top?: number[] };
+  /**
+   * Whether each window of speech is prompted with the text before it. Large
+   * models skip less with it; small ones skip more.
+   */
+  previousText?: boolean;
   name: string;
   use: string;
   license: string;
