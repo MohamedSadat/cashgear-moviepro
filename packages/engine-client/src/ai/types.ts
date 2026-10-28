@@ -35,6 +35,34 @@ export const defaultSilenceSettings: SilenceSettings = {
   padding: 0.15,
 };
 
+/**
+ * The version of cgv-ai's scene scores. Raise it when they change, so analyses
+ * cached before are made again.
+ */
+export const sceneAnalysisVersion = 1;
+
+/** A video's frames measured once: when each shows and how much it changed. */
+export interface SceneAnalysis {
+  /** Source time of each frame, in seconds. */
+  times: Float64Array;
+  /** Each frame's change from the one before (0 to 255). */
+  scores: Float32Array;
+  /** Each frame's change from the one two before, which tells flashes from cuts. */
+  skips: Float32Array;
+}
+
+/** How a scene change must stand out. */
+export interface SceneSettings {
+  /** Times the mean change of the frames around it. */
+  ratio: number;
+  /** Change (0 to 255) a cut needs at least. */
+  minScore: number;
+  /** Seconds a scene lasts at least. */
+  minLength: number;
+}
+
+export const defaultSceneSettings: SceneSettings = { ratio: 3, minScore: 15, minLength: 0.5 };
+
 export interface BeatAnalysis {
   /** Beats per minute, or null without a steady pulse. */
   tempo: number | null;
@@ -56,5 +84,13 @@ export interface AiApi {
   /** Silences as `[start, end]` source seconds, in order. */
   silences(analysis: SoundAnalysis, settings: SilenceSettings): Promise<[number, number][]>;
   beats(analysis: SoundAnalysis): Promise<BeatAnalysis>;
+  /** Decodes every frame of a medium's picture and scores it; null when it has none. */
+  analyzeScenes(
+    job: number,
+    source: MediaSourceRef,
+    onProgress: (fraction: number) => void,
+  ): Promise<SceneAnalysis | null>;
+  /** The source times (seconds) at which new scenes start, in order. */
+  sceneCuts(analysis: SceneAnalysis, settings: SceneSettings): Promise<number[]>;
   cancel(job: number): void;
 }

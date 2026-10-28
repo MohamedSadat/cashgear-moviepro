@@ -1,9 +1,12 @@
 //! The AI tools' analysis, as a WASM module of its own run in the AI worker.
 //! The worker decodes media and runs the models; this module does the arithmetic
-//! around them: sound levels and onsets for silences and beats.
+//! around them: sound levels and onsets for silences and beats, and frame
+//! differences for scene cuts.
 //!
 //! Every result is in the media's own time (seconds from its first sample), so
 //! it can be cached per file and reused by every clip of it.
+pub mod scene;
+
 use cgv_dsp::beat::Onsets;
 use cgv_dsp::silence::{Levels, SilenceSettings};
 
@@ -111,6 +114,58 @@ mod bindings {
     #[wasm_bindgen]
     pub fn silences(levels: &[f32], threshold_db: f32, min_length: f64, padding: f64) -> Vec<f64> {
         crate::silences(levels, threshold_db, min_length, padding)
+    }
+
+    /// See [`crate::scene::SceneScores`].
+    #[wasm_bindgen]
+    pub struct SceneScores(crate::scene::SceneScores);
+
+    #[wasm_bindgen]
+    impl SceneScores {
+        #[wasm_bindgen(constructor)]
+        pub fn new() -> SceneScores {
+            SceneScores(crate::scene::SceneScores::new())
+        }
+
+        /// Scores the next frame (RGBA bytes).
+        pub fn push(&mut self, rgba: &[u8]) -> f32 {
+            self.0.push(rgba)
+        }
+
+        pub fn scores(&self) -> Vec<f32> {
+            self.0.scores().to_vec()
+        }
+
+        pub fn skips(&self) -> Vec<f32> {
+            self.0.skips().to_vec()
+        }
+    }
+
+    impl Default for SceneScores {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    /// The frames that start new scenes; see [`crate::scene::cuts`].
+    #[wasm_bindgen]
+    pub fn scene_cuts(
+        scores: &[f32],
+        skips: &[f32],
+        times: &[f64],
+        ratio: f32,
+        min_score: f32,
+        min_length: f64,
+    ) -> Vec<u32> {
+        let settings = crate::scene::SceneSettings {
+            ratio,
+            min_score,
+            min_length,
+        };
+        crate::scene::cuts(scores, skips, times, &settings)
+            .into_iter()
+            .map(|i| i as u32)
+            .collect()
     }
 
     /// The tempo first (NaN without a steady pulse), then the beat times.

@@ -1,6 +1,13 @@
 import { proxy, releaseProxy, wrap } from 'comlink';
 import type { MediaSourceRef } from '../media/types';
-import type { AiApi, BeatAnalysis, SilenceSettings, SoundAnalysis } from './types';
+import type {
+  AiApi,
+  BeatAnalysis,
+  SceneAnalysis,
+  SceneSettings,
+  SilenceSettings,
+  SoundAnalysis,
+} from './types';
 
 /** True for the error a cancelled AI job rejects with. */
 export function isCancelled(error: unknown) {
@@ -44,6 +51,16 @@ export function createAiClient() {
     },
     beats(analysis: SoundAnalysis): Promise<BeatAnalysis> {
       return api.beats(analysis);
+    },
+    analyzeScenes(
+      source: MediaSourceRef,
+      onProgress: (fraction: number) => void,
+      signal?: AbortSignal,
+    ): Promise<SceneAnalysis | null> {
+      return run(signal, (id) => api.analyzeScenes(id, source, proxy(onProgress)));
+    },
+    sceneCuts(analysis: SceneAnalysis, settings: SceneSettings): Promise<number[]> {
+      return api.sceneCuts(analysis, settings);
     },
     dispose() {
       api[releaseProxy]();

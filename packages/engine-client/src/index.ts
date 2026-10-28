@@ -18,10 +18,14 @@ export {
 } from './capabilities';
 export { createAiClient, isCancelled, type AiClient } from './ai/client';
 export {
+  defaultSceneSettings,
   defaultSilenceSettings,
   envelopeRate,
+  sceneAnalysisVersion,
   soundAnalysisVersion,
   type BeatAnalysis,
+  type SceneAnalysis,
+  type SceneSettings,
   type SilenceSettings,
   type SoundAnalysis,
 } from './ai/types';
