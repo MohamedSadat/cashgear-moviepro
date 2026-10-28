@@ -407,6 +407,8 @@ name = "cgv-ai"
 version = "0.1.0"
 dependencies = [
  "cgv-dsp",
+ "realfft",
+ "sha2",
  "wasm-bindgen",
 ]
 

@@ -1,11 +1,13 @@
 //! The AI tools' analysis, as a WASM module of its own run in the AI worker.
 //! The worker decodes media and runs the models; this module does the arithmetic
-//! around them: sound levels and onsets for silences and beats, and frame
-//! differences for scene cuts.
+//! around them: sound levels and onsets for silences and beats, frame
+//! differences for scene cuts, and Whisper's features and word timing.
 //!
 //! Every result is in the media's own time (seconds from its first sample), so
 //! it can be cached per file and reused by every clip of it.
+pub mod align;
 pub mod scene;
+pub mod whisper;
 
 use cgv_dsp::beat::Onsets;
 use cgv_dsp::silence::{Levels, SilenceSettings};
@@ -166,6 +168,80 @@ mod bindings {
             .into_iter()
             .map(|i| i as u32)
             .collect()
+    }
+
+    /// See [`crate::whisper::Features`].
+    #[wasm_bindgen]
+    pub struct WhisperFeatures(crate::whisper::Features);
+
+    #[wasm_bindgen]
+    impl WhisperFeatures {
+        #[wasm_bindgen(constructor)]
+        pub fn new(n_mels: usize) -> WhisperFeatures {
+            WhisperFeatures(crate::whisper::Features::new(n_mels))
+        }
+
+        /// The log-mel spectrogram of up to 30 s of 16 kHz sound: `n_mels` rows
+        /// of 3000 frames.
+        pub fn log_mel(&self, samples: &[f32]) -> Vec<f32> {
+            self.0.log_mel(samples)
+        }
+    }
+
+    /// See [`crate::whisper::Resampler`].
+    #[wasm_bindgen]
+    pub struct Resampler16k(crate::whisper::Resampler);
+
+    #[wasm_bindgen]
+    impl Resampler16k {
+        #[wasm_bindgen(constructor)]
+        pub fn new(rate: u32) -> Resampler16k {
+            Resampler16k(crate::whisper::Resampler::new(rate))
+        }
+
+        /// Adds mono samples; returns the 16 kHz samples they complete.
+        pub fn push(&mut self, samples: &[f32]) -> Vec<f32> {
+            self.0.push(samples)
+        }
+
+        pub fn finish(&mut self) -> Vec<f32> {
+            self.0.finish()
+        }
+    }
+
+    /// When each token row starts; see [`crate::align::token_times`].
+    #[wasm_bindgen]
+    pub fn token_times(weights: &[f32], heads: usize, tokens: usize, frames: usize) -> Vec<f64> {
+        crate::align::token_times(weights, heads, tokens, frames)
+    }
+
+    /// SHA-256 of bytes fed in pieces, for checking model downloads as they stream.
+    #[wasm_bindgen]
+    #[derive(Default)]
+    pub struct Hasher(sha2::Sha256);
+
+    #[wasm_bindgen]
+    impl Hasher {
+        #[wasm_bindgen(constructor)]
+        pub fn new() -> Hasher {
+            Hasher::default()
+        }
+
+        pub fn update(&mut self, bytes: &[u8]) {
+            use sha2::Digest;
+            self.0.update(bytes);
+        }
+
+        /// The hash so far, in lower-case hex.
+        pub fn hex(&self) -> String {
+            use sha2::Digest;
+            self.0
+                .clone()
+                .finalize()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect()
+        }
     }
 
     /// The tempo first (NaN without a steady pulse), then the beat times.
