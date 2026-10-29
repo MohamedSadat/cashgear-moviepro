@@ -2,6 +2,38 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-29: Phase 11 answers
+
+- **Editions:** Free and Pro. Prices live in the store, not in the app.
+  - Free exports carry a small CashGear Video watermark and stop at 1080p. Pro removes the watermark and unlocks larger sizes, up to 4K.
+  - Every editing and AI tool stays free: AI runs on the user's machine and costs nothing to serve.
+- **Licensing:** licence keys, on CashGear Backup's protocol, so one server can serve both apps.
+  - `POST {server}/activate {key, machine, product: "cashgear-video", version}` and `POST {server}/refresh {licenceId, machine}`. Both answer `200 {"token"}` or a 4xx `{"error", "revoked"}`.
+  - The token is Backup's signed envelope: `{"payload", "signature"}` in base64, ECDSA P-256 with SHA-256 (IEEE P1363), checked offline with public keys built into the app.
+  - A licence keeps working for 14 days without reaching the server. After that the app falls back to Free until a check succeeds. A revoked licence cannot be refreshed.
+  - No CashGear licensing server exists yet: we build a small reference server that the user can deploy, and the tests run against it.
+  - The web version activates the same key once per browser.
+- **Platforms:** Windows only for v1.0; macOS stays second.
+  - Releases are signed through Azure Trusted Signing on the user's Azure account.
+  - CI signs once the user adds its secrets. Until then, releases are test-signed with a throwaway certificate made during the build.
+- **Web host:** the existing Azure Static Web App, on a custom subdomain of `cashgearerp.com` (`video.cashgearerp.com` unless the user names another). The user adds the DNS record.
+  - Desktop installers and update manifests go on this repository's GitHub Releases.
+
+## 2026-10-29: Phase 11 defaults
+
+- **Installer:** Tauri's NSIS installer, installing per user with no admin rights.
+- **Updates:** Tauri's updater plugin, which reads `latest.json` from the latest GitHub release.
+  - Update packages are signed with the updater's own key, which is separate from code signing. Its private key lives only in a GitHub secret, set with the user's go-ahead.
+- **FFmpeg:** `ffmpeg.exe` and `ffprobe.exe` ship as separate files next to the app, as now. Beside them go the LGPL text, the exact build configuration, and an offer of the source; the source archive is attached to each release.
+- **Watermark:** drawn by the engine into exported frames only, never into the preview. The export dialog says when it applies.
+- **1080p cap:** a Free export may be at most 1920 pixels on its long side and 1080 on its short side, so vertical 1080×1920 exports stay free.
+- **Web licence:** the browser's machine id is a random id kept in IndexedDB. Clearing site data means activating again, so the app can also deactivate a browser to free its place.
+- **Error reporting:** opt-in, and local until a CashGear backend can receive reports. An error or crash writes a diagnostic report with versions, GPU, the error and recent log lines, and no media or project content. The user can save it or copy it into a support email.
+- **Stress tests:** CI runs shortened versions. The 1-hour, 1,000-clip project and the 8-hour playback run once on the reference machine, as evidence.
+- **Versions:** semantic versioning, one version across the app, crates and packages, and a `CHANGELOG.md`. The phase ends with the `v1.0.0` tag.
+- **Before selling (the user's):** get legal advice on codec patents for the markets sold in, as the plan's risks say.
+- **Public source (a finding):** this repository is public, so anyone can build a copy without the licence checks. Licensing protects the official signed builds only. Making the repository private is the user's call; its Actions minutes would then count against the account's quota.
+
 ## 2026-10-28: Phase 10 findings and defaults
 
 - **WebGPU on the reference GPU (a finding, with a guard):** onnxruntime-web 1.30 on WebGPU computes fp16 and int8 models wrongly with the GTX 1650's driver 457.51 (November 2020).
