@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  FLICKS_PER_SECOND,
   exportFileName,
   formatInfo,
   startExport,
@@ -13,6 +14,8 @@ import {
 } from '@cgv/engine-client';
 import type { ExportDestination, MediaPlatform } from '../platform';
 import type { ProjectState } from '../project/useProject';
+import { projectEnd } from '../timeline/controller';
+import { estimateBytes } from './form';
 
 export type ExportStatus =
   | { state: 'idle' }
@@ -115,7 +118,15 @@ export function useExport(
       running.current = { export: null, destination: null, cancelled: false };
       let destination: ExportDestination | null;
       try {
-        destination = await platform.chooseExport({ fileName, format, settings, ...choice });
+        const seconds = projectEnd(snapshot.project) / FLICKS_PER_SECOND;
+        const estimatedBytes = estimateBytes(settings, snapshot.project.settings, seconds);
+        destination = await platform.chooseExport({
+          fileName,
+          format,
+          settings,
+          estimatedBytes,
+          ...choice,
+        });
       } catch (error) {
         running.current = null;
         throw error;

@@ -10,11 +10,13 @@ import {
   type EngineGpu,
   type GpuFault,
 } from '@cgv/engine-client';
+import { AboutDialog } from './about/AboutDialog';
 import { useAiTools, type AiToolsState } from './ai/useAiTools';
 import { CaptionsPanel } from './captions/CaptionsPanel';
 import { useCaptions, type CaptionsState } from './captions/useCaptions';
 import { BlockedScreen, CapabilityNotice, CapabilityStrip } from './CapabilityReport';
 import { DevOverlay } from './DevOverlay';
+import { diagnosticReport } from './diagnostics/report';
 import { useCatalog } from './effects/catalog';
 import { EffectsBrowser } from './effects/EffectsBrowser';
 import { usePreviews } from './effects/usePreviews';
@@ -26,6 +28,8 @@ import { TitlesBrowser } from './titles/TitlesBrowser';
 import { useTitlePreviews } from './titles/useTitlePreviews';
 import { useEditor, type EditorState } from './editing/useEditor';
 import { LicenceDialog } from './licence/LicenceDialog';
+import { UpdateDialog } from './updates/UpdateDialog';
+import { useUpdates, type UpdatesState } from './updates/useUpdates';
 import { useLicence, type LicenceApi } from './licence/useLicence';
 import { ExportDialog } from './export/ExportDialog';
 import { useExport, type ExportState } from './export/useExport';
@@ -53,6 +57,7 @@ import {
 } from './project/ProjectDialogs';
 import { useProject, type ProjectState } from './project/useProject';
 import { useAppSettings } from './settings/useAppSettings';
+import { useStorageWatch } from './storage/useStorageWatch';
 import { effectiveKeymap } from './shortcuts/keymap';
 import { ShortcutsDialog } from './shortcuts/ShortcutsDialog';
 import { useShortcuts } from './shortcuts/useShortcuts';
@@ -79,6 +84,7 @@ export interface DiagnosticHooks {
   ai: AiToolsState;
   captions: CaptionsState;
   licence: LicenceApi;
+  updates: UpdatesState;
 }
 
 const defaultAutosaveMs = 30_000;
@@ -128,6 +134,8 @@ export function AppShell({ platform }: Props) {
   const voiceover = useVoiceover(client, project, playback, platform);
   const { settings, update, saveLayout } = useAppSettings();
   const licence = useLicence(platform);
+  const updates = useUpdates(platform);
+  useStorageWatch(platform.kind === 'web', project);
   const catalog = useCatalog(client);
   const editor = useEditor(project, playback, {
     snapping: settings.snapping,
@@ -162,7 +170,7 @@ export function AppShell({ platform }: Props) {
     [library.items],
   );
   const [dialog, setDialog] = useState<
-    'projects' | 'settings' | 'shortcuts' | 'export' | 'licence' | null
+    'projects' | 'settings' | 'shortcuts' | 'export' | 'licence' | 'update' | 'about' | null
   >(null);
   const editorRun = editor.run;
   const runAction = useCallback(
@@ -227,6 +235,7 @@ export function AppShell({ platform }: Props) {
       ai,
       captions,
       licence,
+      updates,
     };
     Reflect.set(window, '__cgv', hooks);
   }, [
@@ -243,6 +252,7 @@ export function AppShell({ platform }: Props) {
     ai,
     captions,
     licence,
+    updates,
   ]);
 
   const gpu: EngineGpu =
@@ -260,6 +270,30 @@ export function AppShell({ platform }: Props) {
     engine.status === 'ready' ? engine.sharedMemory : undefined,
     gpu,
   );
+
+  const saveReport = async () => {
+    const text = diagnosticReport({
+      version: native?.version ?? import.meta.env.VITE_CGV_VERSION ?? 'development',
+      edition: `${licence.status.edition} (${licence.status.state})`,
+      platform: platform.kind,
+      sections: {
+        Engine:
+          engine.status === 'ready'
+            ? { status: 'ready', info: engine.info, sharedMemory: engine.sharedMemory }
+            : engine,
+        Capabilities: { probe, report },
+        Desktop: native ?? null,
+        Notices: project.notices,
+      },
+    });
+    const saved = await platform
+      .saveTextFile('CashGear Video report', 'txt', 'Diagnostic report', text)
+      .catch((error: unknown) => {
+        project.notice(`The report could not be saved: ${String(error)}`);
+        return null;
+      });
+    if (saved) project.notice(`The diagnostic report is saved: ${saved}`);
+  };
 
   const monitor = (
     <main className="cgv-stage">
@@ -284,6 +318,9 @@ export function AppShell({ platform }: Props) {
             Retry engine
           </button>
           {options.backend !== 'webgl2' && <a href="?gpu=webgl2">Try the WebGL2 renderer</a>}
+          <button type="button" data-testid="engine-error-report" onClick={() => void saveReport()}>
+            Save a diagnostic report
+          </button>
         </div>
       )}
       <div className="cgv-monitor-area">
@@ -317,6 +354,16 @@ export function AppShell({ platform }: Props) {
         {exporter.status.state !== 'idle' && dialog !== 'export' && (
           <ExportChip exporter={exporter} onOpen={() => setDialog('export')} />
         )}
+        {updates.available && (
+          <button
+            type="button"
+            className="cgv-export-chip"
+            data-testid="update-chip"
+            onClick={() => setDialog('update')}
+          >
+            Update to {updates.available.version}
+          </button>
+        )}
         <button
           type="button"
           className={
@@ -348,6 +395,16 @@ export function AppShell({ platform }: Props) {
           onClick={() => setDialog('shortcuts')}
         >
           {icons.keyboard}
+        </button>
+        <button
+          type="button"
+          className="cgv-icon-button"
+          aria-label="About CashGear Video"
+          title="About CashGear Video"
+          data-testid="open-about"
+          onClick={() => setDialog('about')}
+        >
+          {icons.info}
         </button>
         {options.diagnostic && engine.status === 'ready' && engine.fault && (
           <div className="cgv-diagnostics">
@@ -470,6 +527,23 @@ export function AppShell({ platform }: Props) {
       )}
       {dialog === 'licence' && (
         <LicenceDialog licence={licence} platform={platform.kind} onClose={() => setDialog(null)} />
+      )}
+      {dialog === 'about' && (
+        <AboutDialog
+          platform={platform.kind}
+          native={native}
+          licence={licence.status}
+          onReport={() => void saveReport()}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'update' && (
+        <UpdateDialog
+          updates={updates}
+          project={project}
+          exporting={exporter.status.state === 'running'}
+          onClose={() => setDialog(null)}
+        />
       )}
       {dialog === 'shortcuts' && (
         <ShortcutsDialog

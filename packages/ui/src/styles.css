@@ -956,6 +956,21 @@ body,
   color: var(--cgv-marker-orange);
 }
 
+.cgv-notices {
+  max-height: 50vh;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  font-size: 11px;
+  white-space: pre-wrap;
+  background: var(--cgv-bg);
+  border: 1px solid var(--cgv-border);
+}
+
+.cgv-update-notes {
+  white-space: pre-wrap;
+}
+
 .cgv-inline-button {
   padding: 0 6px;
   font-size: 12px;

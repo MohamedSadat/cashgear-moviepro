@@ -4,7 +4,9 @@ import {
   Autosaver,
   FLICKS_PER_SECOND,
   planOpen,
+  isQuotaError,
   projectIdOf,
+  quotaMessage,
   referencedMedia,
   type Command,
   type EngineClient,
@@ -117,7 +119,8 @@ export interface ProjectOptions {
 const untitled = 'Untitled project';
 /** Stills dropped on the timeline last this long. */
 
-const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+const message = (error: unknown) =>
+  isQuotaError(error) ? quotaMessage : error instanceof Error ? error.message : String(error);
 
 /**
  * The open project: opening, saving, autosave and recovery, relinking, and the

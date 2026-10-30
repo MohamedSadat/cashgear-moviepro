@@ -126,4 +126,10 @@ export const icons = {
       <path d="M4 6.5h.5M6.5 6.5H7M9 6.5h.5M11.5 6.5h.5M4.5 9.5h7" />
     </Icon>
   ),
+  info: (
+    <Icon>
+      <circle cx="8" cy="8" r="6.5" />
+      <path d="M8 7.5V11.5M8 5V5.5" />
+    </Icon>
+  ),
 };

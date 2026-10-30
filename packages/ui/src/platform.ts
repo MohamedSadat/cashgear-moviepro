@@ -38,6 +38,13 @@ export interface ExportChoice {
   path?: string;
   /** Web test support: download the file (OPFS) instead of asking where to save it. */
   download?: boolean;
+  /** About how big the file gets: the desktop checks the disk has room. */
+  estimatedBytes?: number;
+}
+
+export interface UpdateInfo {
+  version: string;
+  notes: string | null;
 }
 
 export interface NativeInfo {
@@ -159,6 +166,16 @@ export interface MediaPlatform {
    * this browser profile.
    */
   machineId(): Promise<string>;
+  /** Desktop: newer versions from the release feed. */
+  updates?: {
+    /** The newer version the feed offers, or null. */
+    check(): Promise<UpdateInfo | null>;
+    /**
+     * Downloads the update, checks its signature and installs it: the installer
+     * closes the app and starts the new version.
+     */
+    install(onProgress: (received: number, total: number | null) => void): Promise<void>;
+  };
   /** Desktop: the fonts installed on this computer, for titles. */
   installedFonts?(): Promise<FontFamilyEntry[]>;
 }

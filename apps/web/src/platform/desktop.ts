@@ -1,4 +1,5 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import {
   mediaStore,
@@ -15,6 +16,7 @@ import type {
   MediaPlatform,
   NativeInfo,
   ProjectStore,
+  UpdateInfo,
 } from '@cgv/ui';
 
 /** A file the native side has registered for streaming through `cgv-media`. */
@@ -123,12 +125,14 @@ async function chooseExport({
   format,
   settings,
   path,
+  estimatedBytes,
 }: ExportChoice): Promise<ExportDestination | null> {
   const opened = await invoke<{ id: string; path: string } | null>('export_open', {
     name: fileName,
     extension: format.extension,
     path: path ?? null,
     convert: format.convertedFrom ? format.id : null,
+    needs: estimatedBytes ? Math.round(estimatedBytes) : null,
   });
   if (!opened) return null;
   const { id } = opened;
@@ -303,5 +307,18 @@ export const desktopPlatform: MediaPlatform = {
   cache: nativeCache,
   nativeInfo: () => invoke<NativeInfo>('native_info'),
   machineId: () => invoke<string>('licence_machine'),
+  updates: {
+    check: () => invoke<UpdateInfo | null>('update_check'),
+    async install(onProgress) {
+      const stop = await listen<[number, number | null]>('update-progress', ({ payload }) =>
+        onProgress(...payload),
+      );
+      try {
+        await invoke('update_install');
+      } finally {
+        stop();
+      }
+    },
+  },
   installedFonts,
 };

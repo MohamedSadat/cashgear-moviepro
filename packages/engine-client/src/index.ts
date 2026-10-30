@@ -44,6 +44,14 @@ export { imageType } from './media/sources';
 export { opfsCacheStore, validateCacheKey, type CacheStore } from './storage/cache-store';
 export { mediaStore, type StoredMedia } from './storage/media-store';
 export {
+  isQuotaError,
+  keepStorage,
+  quotaMessage,
+  storageUse,
+  storageWarning,
+  type StorageUse,
+} from './storage/quota';
+export {
   opfsProjectFiles,
   projectIndex,
   type ProjectEntry,
