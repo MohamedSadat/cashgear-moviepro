@@ -16,6 +16,8 @@ export interface ExportJob {
   decode?: 'auto' | 'software' | 'hardware';
   /** Font families beyond the bundled ones (imported, installed); the page's by default. */
   fonts?: FontFamilyEntry[];
+  /** The free edition: the picture carries a watermark, and stops at 1080p. */
+  free?: boolean;
 }
 
 /** Where the export worker writes the file. */

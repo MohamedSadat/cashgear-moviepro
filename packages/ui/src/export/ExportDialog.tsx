@@ -11,6 +11,7 @@ import {
   probeEncoders,
   remainingLabel,
   videoCodecLabels,
+  withinFreeSize,
   type EncoderSupport,
   type ProjectSettings,
 } from '@cgv/engine-client';
@@ -36,6 +37,10 @@ interface Props {
   project: ProjectState;
   exporter: ExportState;
   platform: 'web' | 'desktop';
+  /** The free edition: a watermark, and 1080p at most. */
+  free: boolean;
+  /** Opens the licence dialog. */
+  onLicence(): void;
   /** Hides the dialog; a running export carries on. */
   onClose(): void;
 }
@@ -56,17 +61,10 @@ const rates = [
 const mp3Rates = [128, 192, 256, 320];
 
 /** Export settings, then the export's progress, result or error. */
-export function ExportDialog({ project, exporter, platform, onClose }: Props) {
+export function ExportDialog(props: Props) {
+  const { project, exporter, onClose } = props;
   const status = exporter.status;
-  if (status.state === 'idle' || !project.snapshot)
-    return (
-      <ExportSettingsView
-        project={project}
-        exporter={exporter}
-        platform={platform}
-        onClose={onClose}
-      />
-    );
+  if (status.state === 'idle' || !project.snapshot) return <ExportSettingsView {...props} />;
   const footer = (main: ReactNode) => (
     <>
       {main}
@@ -173,10 +171,10 @@ export function ExportDialog({ project, exporter, platform, onClose }: Props) {
   );
 }
 
-function ExportSettingsView({ project, exporter, platform, onClose }: Props) {
+function ExportSettingsView({ project, exporter, platform, free, onLicence, onClose }: Props) {
   const snapshot = project.snapshot!;
   const settings: ProjectSettings = snapshot.project.settings;
-  const [form, setForm] = useState<ExportForm>(() => initialForm(settings));
+  const [form, setForm] = useState<ExportForm>(() => initialForm(settings, free));
   const [support, setSupport] = useState<EncoderSupport | null>(null);
   const [starting, setStarting] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -211,14 +209,17 @@ function ExportSettingsView({ project, exporter, platform, onClose }: Props) {
   const missing = project.missing.length;
   const update = (change: Partial<ExportForm>) => setForm((value) => ({ ...value, ...change }));
   const size = (value: string) => Math.max(0, Math.round(Number(value)) || 0);
+  const tooBig = free && info.video.length > 0 && !withinFreeSize(result.width, result.height);
   const blocked =
     duration <= 0
       ? 'The timeline is empty.'
-      : info.video.length && !usable.video.includes(form.videoCodec)
-        ? `This browser cannot encode ${info.label} video at this size.`
-        : result.audio && !usable.audio.includes(form.audioCodec)
-          ? `This browser cannot encode ${audioCodecLabels[form.audioCodec]} sound.`
-          : null;
+      : tooBig
+        ? 'The free edition exports up to 1080p. A Pro licence allows larger sizes.'
+        : info.video.length && !usable.video.includes(form.videoCodec)
+          ? `This browser cannot encode ${info.label} video at this size.`
+          : result.audio && !usable.audio.includes(form.audioCodec)
+            ? `This browser cannot encode ${audioCodecLabels[form.audioCodec]} sound.`
+            : null;
 
   const start = async () => {
     setStarting(true);
@@ -232,17 +233,22 @@ function ExportSettingsView({ project, exporter, platform, onClose }: Props) {
     }
   };
 
-  const presetOptions = useMemo(
-    () => [
+  const presetOptions = useMemo(() => {
+    const pro = (width: number, height: number) => free && !withinFreeSize(width, height);
+    return [
       ...exportPresets.map((preset) => ({
         id: preset.id,
         label: `${preset.label} (${preset.width}×${preset.height})`,
+        pro: pro(preset.width, preset.height),
       })),
-      { id: 'project', label: `Project size (${settings.width}×${settings.height})` },
-      { id: 'custom', label: 'Custom' },
-    ],
-    [settings.width, settings.height],
-  );
+      {
+        id: 'project',
+        label: `Project size (${settings.width}×${settings.height})`,
+        pro: pro(settings.width, settings.height),
+      },
+      { id: 'custom', label: 'Custom', pro: false },
+    ];
+  }, [free, settings.width, settings.height]);
 
   return (
     <Dialog
@@ -296,8 +302,9 @@ function ExportSettingsView({ project, exporter, platform, onClose }: Props) {
                 onChange={(event) => setForm(applyPreset(form, event.target.value, settings))}
               >
                 {presetOptions.map((option) => (
-                  <option key={option.id} value={option.id}>
+                  <option key={option.id} value={option.id} disabled={option.pro}>
                     {option.label}
+                    {option.pro ? ' (Pro)' : ''}
                   </option>
                 ))}
               </select>
@@ -498,6 +505,14 @@ function ExportSettingsView({ project, exporter, platform, onClose }: Props) {
           </div>
         )}
         {notice && <p className="cgv-form-note">{notice}</p>}
+        {free && info.video.length > 0 && (
+          <p className="cgv-form-note" data-testid="export-watermark">
+            Free edition: the video carries a small CashGear Video watermark and stops at 1080p.{' '}
+            <button type="button" className="cgv-inline-button" onClick={onLicence}>
+              Licence…
+            </button>
+          </p>
+        )}
         {missing > 0 && (
           <p className="cgv-form-note cgv-warning">
             {missing === 1 ? 'One file is' : `${missing} files are`} missing: their clips export as

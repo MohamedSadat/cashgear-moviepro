@@ -62,6 +62,8 @@ export function useExport(
     decode?: ExportJob['decode'];
     /** Why the project cannot export yet (mattes still being made), or null. */
     blocked?: () => Promise<string | null>;
+    /** The free edition: exports carry a watermark and stop at 1080p. */
+    free?: boolean;
   },
 ): ExportState {
   const [status, setStatus] = useState<ExportStatus>({ state: 'idle' });
@@ -135,6 +137,7 @@ export function useExport(
         platform: platform.kind,
         backend: options.backend,
         decode: options.decode,
+        free: options.free,
       };
       const current = startExport(job, destination.target, {
         progress: (progress) =>
@@ -160,7 +163,7 @@ export function useExport(
       })();
       return true;
     },
-    [client, finishWith, options.backend, options.decode, platform, project],
+    [client, finishWith, options.backend, options.decode, options.free, platform, project],
   );
 
   const cancel = useCallback(() => {

@@ -139,6 +139,7 @@ export function AppShell({ platform }: Props) {
   const exporter = useExport(client, project, platform, {
     backend: options.backend,
     decode: options.decode,
+    free: licence.status.edition === 'free',
     // Exports read background removal's mattes: they wait until every one is made.
     blocked: async () => {
       const waiting = await ai.unfinishedCutouts();
@@ -462,6 +463,8 @@ export function AppShell({ platform }: Props) {
           project={project}
           exporter={exporter}
           platform={platform.kind}
+          free={licence.status.edition === 'free'}
+          onLicence={() => setDialog('licence')}
           onClose={() => setDialog(null)}
         />
       )}

@@ -5,6 +5,7 @@ import {
   applyPreset,
   estimateBytes,
   exportSettings,
+  fitForFree,
   formatBytes,
   initialForm,
   usableCodecs,
@@ -99,5 +100,26 @@ describe('export form', () => {
     expect(formatBytes(61_440_000)).toBe('61.4 MB');
     expect(formatBytes(400)).toBe('1 KB');
     expect(formatBytes(2.5e9)).toBe('2.50 GB');
+  });
+});
+
+describe('the free edition', () => {
+  it('starts within 1080p, either way up, keeping the shape of the frame', () => {
+    const uhd = { ...hd, width: 3840, height: 2160 };
+    expect(initialForm(uhd, true)).toMatchObject({ preset: 'youtube-1080p', width: 1920 });
+    expect(initialForm(uhd, false)).toMatchObject({ width: 3840, height: 2160 });
+    expect(initialForm({ ...hd, width: 2160, height: 3840 }, true)).toMatchObject({
+      preset: 'tiktok',
+      width: 1080,
+      height: 1920,
+    });
+    expect(initialForm({ ...hd, width: 2560, height: 1080 }, true)).toMatchObject({
+      preset: 'custom',
+      width: 1920,
+      height: 810,
+    });
+    expect(initialForm(vertical, true)).toEqual(initialForm(vertical));
+    const custom = { ...initialForm(hd), preset: 'custom', width: 2000, height: 2000 };
+    expect(fitForFree(custom, hd)).toMatchObject({ width: 1080, height: 1080 });
   });
 });

@@ -6,7 +6,9 @@ import { MediaService } from '../media/service';
 import initWasm, { Engine, MediaLibrary, ProjectSession } from '../pkg/cgv_wasm';
 import { drawsGpuFrames } from '../playback/draw';
 import { cancelled, runExport } from './job';
+import { withinFreeSize } from './settings';
 import { openTarget } from './targets';
+import { addWatermark } from './watermark';
 import type { ExportWorkerApi } from './types';
 
 // The export worker: its own engine (WASM, GPU device, decoders) and its own
@@ -22,6 +24,10 @@ const api: ExportWorkerApi = {
   async run(job, target, events) {
     if (started) throw new Error('This export worker has already run');
     started = true;
+    const { settings } = job;
+    if (job.free && settings.video && !withinFreeSize(settings.width, settings.height)) {
+      throw new Error('The free edition exports up to 1080p. A Pro licence allows larger sizes.');
+    }
     fontCatalog().addEntries(job.fonts ?? []);
     await initWasm({ module_or_path: new URL('../pkg/cgv_wasm_bg.wasm', import.meta.url) });
     // The engine renders off screen: its canvas is never shown.
@@ -47,6 +53,9 @@ const api: ExportWorkerApi = {
             .catch((error) => console.warn(`Export: the proxy of ${id} failed: ${message(error)}`));
       if (stop.signal.aborted) throw stop.signal.reason ?? cancelled();
       session = ProjectSession.open(job.project, false, undefined);
+      if (job.free && settings.video && session.duration() > 0) {
+        addWatermark(session, session.duration());
+      }
       const blocks = new AudioBlocks((id) => media.audioTrack(id));
       const file = await openTarget(target, events);
       return await runExport(

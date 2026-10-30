@@ -3,9 +3,11 @@ import {
   defaultLoudness,
   evenSize,
   exportPresets,
+  fitFreeSize,
   formatInfo,
   presetBitrate,
   qualityBitrate,
+  withinFreeSize,
   type EncoderSupport,
   type ExportAudioCodec,
   type ExportFormat,
@@ -54,9 +56,10 @@ function matchingPreset(project: ProjectSettings) {
   );
 }
 
-export function initialForm(project: ProjectSettings): ExportForm {
+/** The form for a project; the free edition starts within its 1080p limit. */
+export function initialForm(project: ProjectSettings, free = false): ExportForm {
   const preset = matchingPreset(project);
-  return {
+  const form: ExportForm = {
     preset: preset?.id ?? 'project',
     format: 'mp4',
     width: project.width,
@@ -69,6 +72,23 @@ export function initialForm(project: ProjectSettings): ExportForm {
     audioCodec: 'aac',
     mp3Kbps: 256,
     loudness: defaultLoudness,
+  };
+  return free ? fitForFree(form, project) : form;
+}
+
+/** Within the free edition's limit: a bigger frame becomes the largest of its shape within 1080p. */
+export function fitForFree(form: ExportForm, project: ProjectSettings): ExportForm {
+  if (withinFreeSize(form.width, form.height)) return form;
+  const size = fitFreeSize(form.width, form.height);
+  const preset = exportPresets.find(
+    (candidate) => candidate.width === size.width && candidate.height === size.height,
+  );
+  if (preset) return applyPreset(form, preset.id, project);
+  return {
+    ...form,
+    ...size,
+    preset: 'custom',
+    quality: form.quality === 'recommended' ? 'high' : form.quality,
   };
 }
 

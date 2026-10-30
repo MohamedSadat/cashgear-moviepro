@@ -243,6 +243,28 @@ export function evenSize(width: number, height: number): { width: number; height
   return { width: side(width), height: side(height) };
 }
 
+/** The free edition's largest export, either way up: 1080p. */
+export const freeExportSize = { long: 1920, short: 1080 };
+
+export function withinFreeSize(width: number, height: number): boolean {
+  return (
+    Math.max(width, height) <= freeExportSize.long &&
+    Math.min(width, height) <= freeExportSize.short
+  );
+}
+
+/** The largest frame of this shape the free edition exports, in even sizes. */
+export function fitFreeSize(width: number, height: number): { width: number; height: number } {
+  const scale = Math.min(
+    1,
+    freeExportSize.long / Math.max(width, height),
+    freeExportSize.short / Math.min(width, height),
+  );
+  // Rounding down keeps it within the limit.
+  const side = (value: number) => Math.max(16, 2 * Math.floor((value * scale) / 2));
+  return { width: side(width), height: side(height) };
+}
+
 /** Whole frames at `rate` that cover `durationFlicks` (exact, in integers). */
 export function frameCount(durationFlicks: number, rate: FrameRate): number {
   if (durationFlicks <= 0) return 0;
