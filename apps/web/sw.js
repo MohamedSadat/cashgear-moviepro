@@ -7,7 +7,8 @@
 //   time they are used, and dropped once a build no longer has them.
 // - Pages come from the network first, so a new build shows at once, and from the
 //   cache offline. Cached responses keep their cross-origin isolation headers.
-// - A range request (media) is answered from a cached file as a 206 slice of it.
+// - A range request (media) is answered as a 206 slice of the cached file; a file
+//   first read in ranges is fetched and cached whole.
 
 /** Cached when the worker installs. */
 const shell = self.__SHELL__;
@@ -59,17 +60,29 @@ async function slice(response, range) {
   return new Response(body.slice(start, end + 1), { status: 206, headers });
 }
 
+/** Whole files on their way into the cache, so ranges read together fetch one copy. */
+const filling = new Map();
+
+/** Fetches the whole file at `url` and caches it; null when it cannot be had whole. */
+function fill(url) {
+  let whole = filling.get(url);
+  if (!whole) {
+    whole = (async () => {
+      const response = await fetch(url);
+      if (response.status !== 200) return null;
+      await (await caches.open(filesCache)).put(url, response.clone());
+      return response;
+    })().finally(() => filling.delete(url));
+    filling.set(url, whole);
+  }
+  return whole.then((response) => response?.clone() ?? null);
+}
+
 async function fromCache(request) {
   const range = request.headers.get('Range');
-  const cached = await caches.match(request.url);
+  const cached = (await caches.match(request.url)) ?? (await fill(request.url).catch(() => null));
   if (cached) return range ? slice(cached, range) : cached;
-  const response = await fetch(request);
-  // Whole files only: a range is part of one.
-  if (response.status === 200 && !range && files.has(new URL(request.url).pathname)) {
-    const cache = await caches.open(filesCache);
-    await cache.put(request.url, response.clone());
-  }
-  return response;
+  return fetch(request);
 }
 
 async function page(request) {
