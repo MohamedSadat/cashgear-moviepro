@@ -25,6 +25,8 @@ import { useTemplatePreviews } from './templates/useTemplatePreviews';
 import { TitlesBrowser } from './titles/TitlesBrowser';
 import { useTitlePreviews } from './titles/useTitlePreviews';
 import { useEditor, type EditorState } from './editing/useEditor';
+import { LicenceDialog } from './licence/LicenceDialog';
+import { useLicence, type LicenceApi } from './licence/useLicence';
 import { ExportDialog } from './export/ExportDialog';
 import { useExport, type ExportState } from './export/useExport';
 import { icons } from './icons';
@@ -76,6 +78,7 @@ export interface DiagnosticHooks {
   voiceover: VoiceoverState;
   ai: AiToolsState;
   captions: CaptionsState;
+  licence: LicenceApi;
 }
 
 const defaultAutosaveMs = 30_000;
@@ -124,6 +127,7 @@ export function AppShell({ platform }: Props) {
   const meters = useMeters(client, options.diagnostic);
   const voiceover = useVoiceover(client, project, playback, platform);
   const { settings, update, saveLayout } = useAppSettings();
+  const licence = useLicence(platform);
   const catalog = useCatalog(client);
   const editor = useEditor(project, playback, {
     snapping: settings.snapping,
@@ -156,9 +160,9 @@ export function AppShell({ platform }: Props) {
     () => new Map(library.items.map((item) => [item.id, item.video?.rotation ?? 0])),
     [library.items],
   );
-  const [dialog, setDialog] = useState<'projects' | 'settings' | 'shortcuts' | 'export' | null>(
-    null,
-  );
+  const [dialog, setDialog] = useState<
+    'projects' | 'settings' | 'shortcuts' | 'export' | 'licence' | null
+  >(null);
   const editorRun = editor.run;
   const runAction = useCallback(
     (action: Parameters<typeof editorRun>[0]) =>
@@ -221,6 +225,7 @@ export function AppShell({ platform }: Props) {
       voiceover,
       ai,
       captions,
+      licence,
     };
     Reflect.set(window, '__cgv', hooks);
   }, [
@@ -236,6 +241,7 @@ export function AppShell({ platform }: Props) {
     voiceover,
     ai,
     captions,
+    licence,
   ]);
 
   const gpu: EngineGpu =
@@ -310,6 +316,18 @@ export function AppShell({ platform }: Props) {
         {exporter.status.state !== 'idle' && dialog !== 'export' && (
           <ExportChip exporter={exporter} onOpen={() => setDialog('export')} />
         )}
+        <button
+          type="button"
+          className={
+            'cgv-licence-badge' + (licence.status.edition === 'pro' ? ' cgv-licence-pro' : '')
+          }
+          data-testid="open-licence"
+          data-edition={licence.status.edition}
+          title="Licence"
+          onClick={() => setDialog('licence')}
+        >
+          {licence.status.edition === 'pro' ? 'Pro' : 'Free'}
+        </button>
         <button
           type="button"
           className="cgv-primary"
@@ -446,6 +464,9 @@ export function AppShell({ platform }: Props) {
           platform={platform.kind}
           onClose={() => setDialog(null)}
         />
+      )}
+      {dialog === 'licence' && (
+        <LicenceDialog licence={licence} platform={platform.kind} onClose={() => setDialog(null)} />
       )}
       {dialog === 'shortcuts' && (
         <ShortcutsDialog

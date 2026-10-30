@@ -153,6 +153,12 @@ export interface MediaPlatform {
   ): Promise<string | null>;
   cache: CacheStore;
   nativeInfo(): Promise<NativeInfo | undefined>;
+  /**
+   * This machine's id for licences: on the desktop a salted hash of the computer's
+   * own id, so reinstalling keeps its activation; on the web a random id kept by
+   * this browser profile.
+   */
+  machineId(): Promise<string>;
   /** Desktop: the fonts installed on this computer, for titles. */
   installedFonts?(): Promise<FontFamilyEntry[]>;
 }

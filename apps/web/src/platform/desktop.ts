@@ -302,5 +302,6 @@ export const desktopPlatform: MediaPlatform = {
     invoke<string | null>('text_file_save', { name, extension, label, contents: text }),
   cache: nativeCache,
   nativeInfo: () => invoke<NativeInfo>('native_info'),
+  machineId: () => invoke<string>('licence_machine'),
   installedFonts,
 };

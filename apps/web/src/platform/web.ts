@@ -307,4 +307,15 @@ export const webPlatform: MediaPlatform = {
   },
   cache,
   nativeInfo: async () => undefined,
+  machineId: async () => {
+    // A browser profile is a machine: its id lives as long as its site data.
+    const key = 'cgv.machine.v1';
+    try {
+      let id = localStorage.getItem(key);
+      if (!id) localStorage.setItem(key, (id = `web-${crypto.randomUUID()}`));
+      return id;
+    } catch {
+      return `web-${crypto.randomUUID()}`;
+    }
+  },
 };
