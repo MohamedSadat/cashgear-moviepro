@@ -113,7 +113,10 @@ fn gigabytes(bytes: u64) -> String {
 /// the cache folder when FFmpeg converts it afterwards. Null when the user cancels,
 /// and an error when the disk lacks room for `needs` bytes.
 #[tauri::command]
-#[allow(clippy::too_many_arguments, reason = "Tauri passes the page's fields one by one")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Tauri passes the page's fields one by one"
+)]
 pub async fn export_open(
     app: AppHandle,
     media: State<'_, MediaState>,
