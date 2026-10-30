@@ -44,6 +44,12 @@ jobs:
           tool: wasm-bindgen@0.2.129
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+        env:
+          # The public web app is a release build: without a licence server and its
+          # keys (repository variables) it is the free edition, never Pro.
+          VITE_CGV_RELEASE: '1'
+          VITE_CGV_LICENCE_SERVER: ${{ vars.CGV_LICENCE_SERVER }}
+          VITE_CGV_LICENCE_KEYS: ${{ vars.CGV_LICENCE_KEYS }}
       - name: Build And Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
