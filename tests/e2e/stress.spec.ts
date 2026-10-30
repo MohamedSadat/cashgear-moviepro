@@ -1,7 +1,9 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { chromium, expect, test, type Page, type TestInfo } from '@playwright/test';
 
 // Phase 11 exit criterion: a one-hour project of 1,000 clips edits, plays and
 // exports without crashes or memory growth. The page's memory (its workers'
@@ -52,6 +54,8 @@ interface Memory {
   js: number;
   /** The browser's processes' private memory: the GPU's, with frames and textures, too. */
   processes: number | null;
+  /** The same by kind of process (browser, renderer, GPU, utility). */
+  byKind?: Record<string, number>;
 }
 
 /** What the app holds, in MB. */
@@ -64,24 +68,29 @@ async function memory(page: Page): Promise<Memory> {
     ).measureUserAgentSpecificMemory;
     return (await measure.call(performance)).bytes;
   });
-  let processes: number | null = null;
-  if (process.platform === 'win32') {
-    const cdp = await page.context().browser()!.newBrowserCDPSession();
-    const { processInfo } = await cdp.send('SystemInfo.getProcessInfo');
-    await cdp.detach();
-    const ids = processInfo.map((info) => info.id).join(',');
-    const sum = spawnSync(
-      'powershell.exe',
-      [
-        '-NoProfile',
-        '-Command',
-        `(Get-Process -Id ${ids} -ErrorAction SilentlyContinue | Measure-Object PrivateMemorySize64 -Sum).Sum`,
-      ],
-      { encoding: 'utf8' },
-    );
-    processes = Math.round(Number(sum.stdout.trim()) / 1e6);
+  if (process.platform !== 'win32') return { js: Math.round(bytes / 1e6), processes: null };
+  const cdp = await page.context().browser()!.newBrowserCDPSession();
+  const { processInfo } = await cdp.send('SystemInfo.getProcessInfo');
+  await cdp.detach();
+  const kinds = new Map(processInfo.map((info) => [info.id, info.type]));
+  const listed = spawnSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-Command',
+      `Get-Process -Id ${[...kinds.keys()].join(',')} -ErrorAction SilentlyContinue | ` +
+        'ForEach-Object { "$($_.Id) $($_.PrivateMemorySize64)" }',
+    ],
+    { encoding: 'utf8' },
+  );
+  const byKind: Record<string, number> = {};
+  for (const line of listed.stdout.trim().split(/\r?\n/)) {
+    const [id, size] = line.split(' ').map(Number);
+    const kind = kinds.get(id) ?? 'other';
+    byKind[kind] = (byKind[kind] ?? 0) + Math.round(size / 1e6);
   }
-  return { js: Math.round(bytes / 1e6), processes };
+  const processes = Object.values(byKind).reduce((sum, size) => sum + size, 0);
+  return { js: Math.round(bytes / 1e6), processes, byKind };
 }
 
 const median = (values: number[]) => [...values].sort((a, b) => a - b)[values.length >> 1];
@@ -93,11 +102,27 @@ function record(testInfo: TestInfo, body: unknown) {
   return testInfo.attach('stress', { body: text, contentType: 'application/json' });
 }
 
-test('a one-hour project of 1,000 clips edits, plays and exports without crashes or memory growth', async ({
-  page,
-}, testInfo) => {
+test('a one-hour project of 1,000 clips edits, plays and exports without crashes or memory growth', async () => {
+  const testInfo = test.info();
   test.setTimeout((15 + minutes * 1.5) * 60_000);
-  await page.goto('/?diagnostic=1');
+  // A profile of its own, as users have: in Playwright's incognito contexts the
+  // browser keeps OPFS, where the export is written, in its own memory.
+  const profile = await mkdtemp(join(tmpdir(), 'cgv-stress-'));
+  const context = await chromium.launchPersistentContext(profile, {
+    channel: testInfo.project.use.channel,
+    args: testInfo.project.use.launchOptions?.args,
+    viewport: { width: 1280, height: 800 },
+  });
+  try {
+    await stress(context.pages()[0] ?? (await context.newPage()), testInfo);
+  } finally {
+    await context.close();
+    await rm(profile, { recursive: true, force: true, maxRetries: 5 }).catch(() => {});
+  }
+});
+
+async function stress(page: Page, testInfo: TestInfo) {
+  await page.goto('http://127.0.0.1:4173/?diagnostic=1');
   await page.waitForFunction(
     () =>
       !!Reflect.get(window, '__cgv')?.client &&
@@ -275,4 +300,4 @@ test('a one-hour project of 1,000 clips edits, plays and exports without crashes
   const before = samples.find((sample) => sample.at === 'played')!.js;
   expect(samples.at(-1)!.js).toBeLessThan(before + Math.max(64, before * 0.15));
   if (!software) expect(edits.medianMs).toBeLessThan(50);
-});
+}
