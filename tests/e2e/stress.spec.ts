@@ -214,7 +214,7 @@ async function stress(page: Page, testInfo: TestInfo) {
   for (const fraction of [0.05, 0.3, 0.5, 0.75, 0.95]) {
     await page.evaluate(
       (time) => Reflect.get(window, '__cgv').client.api.seek(time),
-      Math.round(fraction * built.end * 30) * FRAME,
+      Math.round(fraction * end * 30) * FRAME,
     );
     await page.getByTestId('play-toggle').click();
     await expect(transport).toHaveAttribute('data-playing', 'true');
