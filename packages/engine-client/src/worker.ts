@@ -50,7 +50,18 @@ function requirePlayback() {
   if (!playback) throw new Error('The engine is not running');
   return playback;
 }
-function requireDiagnostics() {
+let markStarted = () => {};
+const started = new Promise<void>((resolve) => (markStarted = resolve));
+
+/**
+ * The playback controller for test calls, waiting a little for an engine that
+ * is still starting: a project may open before the GPU engine has started,
+ * all the sooner when the service worker serves the app's files.
+ */
+async function requireDiagnostics() {
+  if (!playback && !disposed) {
+    await Promise.race([started, new Promise((resolve) => setTimeout(resolve, 30_000))]);
+  }
   if (!diagnostic) throw new Error('Diagnostics are disabled');
   return requirePlayback();
 }
@@ -115,6 +126,7 @@ const api: EngineApi = {
     decode = (diagnostic && options.decode) || 'auto';
     if (media) media.decode = decode;
     playback = controller;
+    markStarted();
     loop = new FrameLoop(
       {
         resize: (size) => running.resize(size.width, size.height),
@@ -249,17 +261,17 @@ const api: EngineApi = {
   mattesChanged: (media) => requirePlayback().mattesChanged(media),
   sampleAtContextFrame: (frame) => audio?.sampleAtContextFrame(frame) ?? null,
   async seekAndWait(time) {
-    const controller = requireDiagnostics();
-    const started = performance.now();
+    const controller = await requireDiagnostics();
+    const begun = performance.now();
     controller.pause();
     controller.seek(time);
     await controller.whenSettled();
-    return { ms: performance.now() - started };
+    return { ms: performance.now() - begun };
   },
-  renderPixels: (time) => requireDiagnostics().pixels(time),
+  renderPixels: async (time) => (await requireDiagnostics()).pixels(time),
   pickColor: (time, x, y, clip) => requirePlayback().pickColor(time, x, y, clip),
   async readComposition() {
-    requireDiagnostics();
+    await requireDiagnostics();
     return (await engine!.read_pixels()) as Pixels;
   },
 };
