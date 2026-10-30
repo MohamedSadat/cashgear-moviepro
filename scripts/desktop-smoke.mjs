@@ -713,8 +713,12 @@ try {
       properties: { denoise: 1 },
     });
     await hooks.client.api.seek(bed.start + 1);
-    hooks.meters.take();
     await hooks.client.play();
+    // As in the sound step: listen once playback's clock runs.
+    const transport = document.querySelector('[data-testid="transport"]');
+    for (let waited = 0; transport?.dataset.starting !== 'false' && waited < 15000; waited += 100)
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    hooks.meters.take();
     await new Promise((resolve) => setTimeout(resolve, 3000));
     await hooks.client.togglePlay();
     const track = (await hooks.client.api.projectSnapshot()).project.tracks.find((t) =>
