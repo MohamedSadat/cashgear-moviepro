@@ -17,6 +17,11 @@ import { PNG } from 'pngjs';
 import { barMismatches, sweepBand } from '../tests/e2e/pattern.mjs';
 import { root } from './lib.mjs';
 
+/** The version the app reports: its bundle's. */
+const appVersion = JSON.parse(
+  await readFile(join(root, 'apps/desktop/src-tauri/tauri.conf.json'), 'utf8'),
+).version;
+
 if (process.platform !== 'win32') throw new Error('Desktop smoke currently targets Windows.');
 const runtimeKeys = [
   'HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
@@ -209,7 +214,9 @@ try {
     if (!(await page.evaluate(() => crossOriginIsolated)))
       throw new Error('Desktop is not cross-origin isolated');
     await expect(page.getByTestId('shared-memory')).toHaveText('Shared memory OK');
-    await expect(page.getByTestId('native-info')).toHaveText(/^Desktop 0\.1\.0 · windows x86_64$/);
+    await expect(page.getByTestId('native-info')).toHaveText(
+      `Desktop ${appVersion} · windows x86_64`,
+    );
     const pixels = PNG.sync.read(await monitor.screenshot());
     const mismatches = barMismatches(pixels);
     if (mismatches.length) throw new Error(backend + ' pattern mismatch: ' + mismatches.join('; '));
