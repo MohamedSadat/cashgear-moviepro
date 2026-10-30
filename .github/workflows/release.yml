@@ -1,0 +1,113 @@
+name: Release
+# A version tag (v1.2.3) builds the release: the web build, the installer test, and
+# the signed Windows installer with its update. With every release setting present
+# (scripts/release-check.mjs) it drafts the GitHub release; publishing the draft is
+# what makes installed apps see the update. Without them, the files stay workflow
+# artifacts.
+#
+# Repository variables: CGV_LICENCE_SERVER, CGV_LICENCE_KEYS, CGV_UPDATER_PUBKEY,
+# CGV_SIGN_ENDPOINT, CGV_SIGN_ACCOUNT, CGV_SIGN_PROFILE (Azure Artifact Signing).
+# Secrets: TAURI_SIGNING_PRIVATE_KEY (+ _PASSWORD), AZURE_CLIENT_ID,
+# AZURE_CLIENT_SECRET, AZURE_TENANT_ID.
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  release:
+    name: Build, test and draft the release
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      VITE_CGV_RELEASE: '1'
+      VITE_CGV_LICENCE_SERVER: ${{ vars.CGV_LICENCE_SERVER }}
+      VITE_CGV_LICENCE_KEYS: ${{ vars.CGV_LICENCE_KEYS }}
+      CGV_UPDATER_PUBKEY: ${{ vars.CGV_UPDATER_PUBKEY }}
+      CGV_SIGN_ENDPOINT: ${{ vars.CGV_SIGN_ENDPOINT }}
+      CGV_SIGN_ACCOUNT: ${{ vars.CGV_SIGN_ACCOUNT }}
+      CGV_SIGN_PROFILE: ${{ vars.CGV_SIGN_PROFILE }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.11.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.1
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
+      - name: Ensure WebView2 Runtime
+        run: ./scripts/setup-webview2.ps1
+      - run: pnpm install --frozen-lockfile
+      - name: Check the release
+        id: check
+        run: pnpm release:check
+      - uses: actions/cache@v4
+        with:
+          path: .tools/ffmpeg
+          key: ffmpeg-${{ runner.os }}-${{ hashFiles('scripts/build-ffmpeg-lgpl.mjs', 'scripts/lib.mjs') }}
+      - name: LGPL FFmpeg (pinned, hash-checked)
+        run: pnpm setup:ffmpeg
+      - run: pnpm build
+      - name: Install, update and uninstall a test build
+        run: pnpm desktop:installer-test
+      - name: Code signing (Azure Artifact Signing, else a throwaway certificate)
+        shell: pwsh
+        env:
+          CLIENT_PACKAGE: https://api.nuget.org/v3-flatcontainer/microsoft.artifactsigning.client/1.0.146/microsoft.artifactsigning.client.1.0.146.nupkg
+          CLIENT_SHA256: 7761e5d8f31e54b764da21d33cd8b0a2940e1b05526c7dfcb5e94b0431426f70
+        run: |
+          $tools = Join-Path $env:RUNNER_TEMP 'signing'
+          New-Item -ItemType Directory -Force $tools | Out-Null
+          if ($env:CGV_SIGN_ENDPOINT -and $env:CGV_SIGN_ACCOUNT -and $env:CGV_SIGN_PROFILE) {
+            $package = Join-Path $tools 'client.zip'
+            Invoke-WebRequest $env:CLIENT_PACKAGE -OutFile $package
+            if ((Get-FileHash $package -Algorithm SHA256).Hash -ne $env:CLIENT_SHA256) { throw 'The signing client is not the pinned one.' }
+            Expand-Archive $package (Join-Path $tools 'client')
+            @{ Endpoint = $env:CGV_SIGN_ENDPOINT; CodeSigningAccountName = $env:CGV_SIGN_ACCOUNT; CertificateProfileName = $env:CGV_SIGN_PROFILE } |
+              ConvertTo-Json | Set-Content (Join-Path $tools 'metadata.json')
+            "CGV_SIGN_DLIB=$(Join-Path $tools 'client/bin/x64/Azure.CodeSigning.Dlib.dll')" >> $env:GITHUB_ENV
+            "CGV_SIGN_METADATA=$(Join-Path $tools 'metadata.json')" >> $env:GITHUB_ENV
+            "CGV_SIGN_REQUIRED=1" >> $env:GITHUB_ENV
+          } else {
+            Write-Output 'Azure Artifact Signing is not set up: signing with a throwaway certificate.'
+            $lines = node scripts/test-certificate.mjs $tools
+            foreach ($line in $lines) { if ($line -match '^CGV_SIGN_') { $line >> $env:GITHUB_ENV } }
+          }
+      - name: The release installer
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: pnpm desktop:installer
+      - name: Gather the release files
+        if: steps.check.outputs.complete == 'true'
+        run: node scripts/release-assets.mjs target/release-files "${{ steps.check.outputs.notes }}"
+      - name: Draft the GitHub release
+        if: steps.check.outputs.complete == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${{ github.ref_name }}" target/release-files/*
+          --draft --title "CashGear Video ${{ steps.check.outputs.version }}"
+          --notes-file "${{ steps.check.outputs.notes }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-build
+          path: |
+            target/release/bundle/nsis/
+            bench/results/
