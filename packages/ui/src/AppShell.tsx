@@ -89,6 +89,10 @@ export interface DiagnosticHooks {
 
 const defaultAutosaveMs = 30_000;
 
+// How the WASM engine and the browser report running out of memory.
+const outOfMemory =
+  /out of memory|Memory\.grow|Maximum memory size|allocation failed|Array buffer allocation/i;
+
 // Rust startup errors that mean no GPU backend could be created at all.
 const noGpu =
   /No usable WebGPU or WebGL2 adapter|WebGL2 surface unavailable|GPU device unavailable/;
@@ -314,6 +318,12 @@ export function AppShell({ platform }: Props) {
       {engine.status === 'error' && (
         <div className="cgv-error" role="alert" data-testid="engine-error">
           <p>{engine.message}</p>
+          {outOfMemory.test(engine.message) && (
+            <p data-testid="engine-out-of-memory">
+              The editor ran out of memory. Your project is autosaved: close other tabs or apps,
+              then retry. A lower preview quality and proxies for 4K media use less.
+            </p>
+          )}
           <button type="button" onClick={() => setGeneration((value) => value + 1)}>
             Retry engine
           </button>
