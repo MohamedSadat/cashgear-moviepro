@@ -1,6 +1,6 @@
 # CashGear Video — agent notes
 
-CashGear Video is a browser and desktop video editor built on one Rust/WASM engine. `docs/PLAN.md` holds the phased plan, `docs/PROGRESS.md` records what is done and the evidence for it, and `docs/decisions.md` logs every answer and default.
+CashGear Video is a browser and desktop video editor built on one Rust/WASM engine. `docs/PLAN.md` holds the phased plan, `docs/PROGRESS.md` records what is done and the evidence for it, `docs/decisions.md` logs every answer and default, and `docs/RELEASE.md` is the release checklist.
 
 ## Workflow
 
