@@ -12,6 +12,8 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # Run on a branch to try the release build and installer test without drafting.
+  workflow_dispatch:
 permissions:
   contents: write
 concurrency:
@@ -94,10 +96,10 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: pnpm desktop:installer
       - name: Gather the release files
-        if: steps.check.outputs.complete == 'true'
+        if: steps.check.outputs.complete == 'true' && github.ref_type == 'tag'
         run: node scripts/release-assets.mjs target/release-files "${{ steps.check.outputs.notes }}"
       - name: Draft the GitHub release
-        if: steps.check.outputs.complete == 'true'
+        if: steps.check.outputs.complete == 'true' && github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: >

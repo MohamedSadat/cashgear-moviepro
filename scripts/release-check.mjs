@@ -36,7 +36,8 @@ versions['Cargo.toml'] = readFileSync(join(root, 'Cargo.toml'), 'utf8').match(
 for (const [path, found] of Object.entries(versions)) {
   if (found !== version) problems.push(`${path} is version ${found}, not ${version}.`);
 }
-const tag = process.env.GITHUB_REF_NAME;
+// A run on a branch (workflow_dispatch) has no tag to check.
+const tag = process.env.GITHUB_REF_TYPE === 'tag' ? process.env.GITHUB_REF_NAME : null;
 if (tag && tag !== `v${version}`) problems.push(`The tag ${tag} is not v${version}.`);
 
 const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8');
@@ -54,7 +55,7 @@ const settings = {
   'licence public keys (CGV_LICENCE_KEYS)': env.VITE_CGV_LICENCE_KEYS,
   "updater's public key (CGV_UPDATER_PUBKEY)": env.CGV_UPDATER_PUBKEY,
   "updater's private key (TAURI_SIGNING_PRIVATE_KEY)": env.TAURI_SIGNING_PRIVATE_KEY,
-  'Azure Trusted Signing (CGV_SIGN_ENDPOINT, CGV_SIGN_ACCOUNT, CGV_SIGN_PROFILE)':
+  'Azure Artifact Signing (CGV_SIGN_ENDPOINT, CGV_SIGN_ACCOUNT, CGV_SIGN_PROFILE)':
     env.CGV_SIGN_ENDPOINT && env.CGV_SIGN_ACCOUNT && env.CGV_SIGN_PROFILE,
 };
 const missing = Object.entries(settings)

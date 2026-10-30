@@ -103,6 +103,12 @@ async function attach(port) {
   return { browser, page };
 }
 
+const policyKey = 'HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments';
+const policyName = 'cgv-desktop.exe';
+const hostedRunner =
+  process.env.GITHUB_ACTIONS === 'true' && process.env.RUNNER_ENVIRONMENT === 'github-hosted';
+const reg = (args) => spawnSync('reg.exe', args, { encoding: 'utf8', windowsHide: true });
+let policySet = false;
 let server;
 let profile;
 let dataDir;
@@ -227,13 +233,34 @@ try {
   const port = await freePort();
   profile = join(work, 'webview2');
   dataDir = join(work, 'data');
+  const browserArguments = `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1`;
+  // Elevated WebView2 hosts ignore browser arguments from the environment. On
+  // GitHub's disposable runners, which run elevated, the documented policy passes
+  // them to our executable only, as the desktop smoke does.
+  if (hostedRunner) {
+    const added = reg([
+      'add',
+      policyKey,
+      '/v',
+      policyName,
+      '/t',
+      'REG_SZ',
+      '/d',
+      browserArguments,
+      '/f',
+      '/reg:64',
+    ]);
+    if (added.status !== 0)
+      throw new Error('Could not set the WebView2 test policy: ' + added.stderr);
+    policySet = true;
+  }
   const app = spawn(appExe(), [], {
     windowsHide: true,
     env: {
       ...process.env,
       CGV_DATA_DIR: dataDir,
       WEBVIEW2_USER_DATA_FOLDER: profile,
-      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1`,
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: browserArguments,
     },
     stdio: 'ignore',
   });
@@ -295,6 +322,7 @@ try {
   console.log(JSON.stringify(results, null, 2));
 } finally {
   server?.close();
+  if (policySet) reg(['delete', policyKey, '/v', policyName, '/f', '/reg:64']);
   if (existsSync(installDir)) {
     stopApp();
     if (uninstallEntry() && existsSync(join(installDir, 'uninstall.exe'))) {
