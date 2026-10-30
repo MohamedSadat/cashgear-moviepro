@@ -39,6 +39,13 @@ Dated entries, newest first. Every answer to a phase question is recorded here, 
 - **Storage:** the web asks the browser to keep its storage once a project has media. It warns once when less than 1 GB is left or 90% is used, and a refused write says the storage is full.
   - The desktop checks before an export that the disk has room for the estimated file plus 256 MB.
 - **Out of memory:** the engine-error box adds what to do when the message is about memory.
+- **Incognito OPFS (a finding):** the first one-hour stress run grew from 1.2 to 2.3 GB of private memory, all of it in the browser process, in doubling steps. Playwright's default contexts are incognito, and Chrome keeps OPFS in memory for incognito profiles, so the export file (written to OPFS before its download) grew there. The stress test now uses a profile of its own, as users have: memory stays flat.
+- **Service worker and tests:**
+  - With the worker serving files from its cache, a project could open before the GPU engine had started, and a test's render call failed in between. Test-only calls (`renderPixels`, `seekAndWait`, `readComposition`) now wait up to 30 s for a starting engine.
+  - Tests run with service workers blocked (`playwright.config.ts`), as before this phase. `pwa.spec.ts` tests the worker in a profile of its own, offline, with pack media.
+  - Media read in byte ranges (the music beds) were first never cached, so they could not open offline. A ranged read that misses the cache now fetches the whole file once and answers with its slice.
+- **Stress on CI:** a one-minute stress project took about 12 minutes on SwiftShader, and with its retry the job passed its 75-minute limit. The stress test runs on software GPUs only when `CGV_STRESS_MINUTES` is set.
+- **Long playback:** per the answer, one hour of looped playback is this phase's evidence; the 8-hour run is on the release checklist (`docs/RELEASE.md`).
 
 ## 2026-10-29: Phase 11 answers
 
