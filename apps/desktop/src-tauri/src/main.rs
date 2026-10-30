@@ -2,6 +2,7 @@
 
 mod export;
 mod fonts;
+mod licence;
 mod media;
 mod project;
 
@@ -44,6 +45,7 @@ fn main() {
             export::export_finish,
             export::export_cancel,
             fonts::fonts_installed,
+            licence::licence_machine,
             media::media_pick,
             media::media_register,
             media::media_forget,

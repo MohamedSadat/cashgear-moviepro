@@ -502,6 +502,8 @@ dependencies = [
  "fontdb",
  "serde",
  "serde_json",
+ "sha2",
+ "winreg",
 ]
 
 [[package]]

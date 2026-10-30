@@ -6,6 +6,7 @@ pub mod cache;
 pub mod export;
 pub mod ffmpeg;
 pub mod fonts;
+pub mod machine;
 pub mod probe;
 pub mod project;
 pub mod proxy;
