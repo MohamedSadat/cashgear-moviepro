@@ -16,7 +16,8 @@ async function ready(page: Page) {
   expect(await page.evaluate(() => crossOriginIsolated)).toBe(true);
 }
 
-test('the web app installs, and the installed app starts offline with every capability', async ({}, testInfo) => {
+test('the web app installs, and the installed app starts offline with every capability', async () => {
+  const testInfo = test.info();
   const profile = await mkdtemp(join(tmpdir(), 'cgv-pwa-'));
   const context = await chromium.launchPersistentContext(profile, {
     channel: testInfo.project.use.channel,
