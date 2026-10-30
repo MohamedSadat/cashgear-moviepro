@@ -5,18 +5,34 @@ mod fonts;
 mod licence;
 mod media;
 mod project;
+mod updates;
 
 use tauri::Manager;
 
-/// Sample native command: proves the UI can reach `cgv-native` through Tauri IPC.
+#[derive(serde::Serialize)]
+struct AppInfo {
+    product: &'static str,
+    /// The app's version from its bundle settings, which the updater compares.
+    version: String,
+    os: &'static str,
+    arch: &'static str,
+}
+
 #[tauri::command]
-fn native_info() -> cgv_native::NativeInfo {
-    cgv_native::info()
+fn native_info(app: tauri::AppHandle) -> AppInfo {
+    let info = cgv_native::info();
+    AppInfo {
+        product: info.product,
+        version: app.package_info().version.to_string(),
+        os: info.os,
+        arch: info.arch,
+    }
 }
 
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let media = media::MediaState::new(app.handle());
             export::clear_leftovers(&media);
@@ -64,6 +80,8 @@ fn main() {
             project::autosave_remove,
             project::media_locate,
             project::media_search,
+            updates::update_check,
+            updates::update_install,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run CashGear Video");

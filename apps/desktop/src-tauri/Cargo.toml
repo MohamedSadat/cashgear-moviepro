@@ -12,8 +12,12 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 cgv-native.workspace = true
 serde.workspace = true
+# generate_context! embeds the plugins' settings as JSON.
+serde_json.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+# The OS certificate store (SChannel on Windows) rather than a bundled one.
+tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls"] }
 uuid = { version = "1", features = ["v4"] }
 
 [features]

@@ -73,7 +73,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .tools/ffmpeg
-          key: ffmpeg-${{ runner.os }}-${{ hashFiles('scripts/build-ffmpeg-lgpl.mjs') }}
+          key: ffmpeg-${{ runner.os }}-${{ hashFiles('scripts/build-ffmpeg-lgpl.mjs', 'scripts/lib.mjs') }}
       - name: LGPL FFmpeg (pinned, hash-checked)
         run: pnpm setup:ffmpeg
       - uses: actions/cache@v4

@@ -17,6 +17,20 @@ export function bindgenPath() {
 }
 
 /** The folder holding ffmpeg and ffprobe: CGV_FFMPEG_DIR, then .tools/ffmpeg/bin, else PATH (''). */
+/** The pinned LGPL FFmpeg build (scripts/build-ffmpeg-lgpl.mjs). */
+export const ffmpegPin = {
+  // BtbN keeps the last autobuild of each month longer than its daily builds.
+  release: 'autobuild-2026-08-31-13-27',
+  /** The FFmpeg commit it was built from (its version is n9.0.1-11-ge47273f4d9). */
+  commit: 'e47273f4d9',
+  builds: {
+    'win32-x64': {
+      file: 'ffmpeg-n9.0.1-11-ge47273f4d9-win64-lgpl-shared-9.0.zip',
+      sha256: '83a824f0729a69d143c9865125bb86988a11dd388325f0033711045522068aa0',
+    },
+  },
+};
+
 export function ffmpegDir() {
   if (process.env.CGV_FFMPEG_DIR) return process.env.CGV_FFMPEG_DIR;
   const tools = join(root, '.tools', 'ffmpeg', 'bin');

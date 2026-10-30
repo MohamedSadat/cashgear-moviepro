@@ -8,16 +8,9 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { ffmpegBuildInfo, root, run } from './lib.mjs';
+import { ffmpegBuildInfo, ffmpegPin, root, run } from './lib.mjs';
 
-// BtbN keeps the last autobuild of each month longer than its daily builds.
-const release = 'autobuild-2026-08-31-13-27';
-const builds = {
-  'win32-x64': {
-    file: 'ffmpeg-n9.0.1-11-ge47273f4d9-win64-lgpl-shared-9.0.zip',
-    sha256: '83a824f0729a69d143c9865125bb86988a11dd388325f0033711045522068aa0',
-  },
-};
+const { release, builds } = ffmpegPin;
 
 const key = process.platform + '-' + process.arch;
 const build = builds[key];

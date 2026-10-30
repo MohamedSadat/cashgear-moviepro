@@ -101,10 +101,19 @@ pub enum ExportEvent {
     Progress { progress: f32 },
 }
 
+/// Room an export leaves on its disk beyond its own size.
+const SPARE_BYTES: u64 = 256 << 20;
+
+fn gigabytes(bytes: u64) -> String {
+    format!("{:.1} GB", bytes as f64 / 1e9)
+}
+
 /// Asks where to save an export (or takes `path`, for tests) and opens the file
 /// the webview writes into: beside the destination until it is complete, or in
-/// the cache folder when FFmpeg converts it afterwards. Null when the user cancels.
+/// the cache folder when FFmpeg converts it afterwards. Null when the user cancels,
+/// and an error when the disk lacks room for `needs` bytes.
 #[tauri::command]
+#[allow(clippy::too_many_arguments, reason = "Tauri passes the page's fields one by one")]
 pub async fn export_open(
     app: AppHandle,
     media: State<'_, MediaState>,
@@ -113,6 +122,7 @@ pub async fn export_open(
     extension: String,
     path: Option<String>,
     convert: Option<Conversion>,
+    needs: Option<u64>,
 ) -> Result<Option<ExportFile>, String> {
     let destination = match path {
         Some(path) => PathBuf::from(path),
@@ -143,6 +153,16 @@ pub async fn export_open(
             .join(format!("{id}.{}", conversion.intermediate_extension())),
         None => part_path(&destination),
     };
+    if let (Some(needs), Some(free)) = (needs, cgv_native::disk::free_bytes(&file)) {
+        // Room for the file, and some to spare so the disk is not left full.
+        if free < needs.saturating_add(SPARE_BYTES) {
+            return Err(format!(
+                "There is not enough space on that disk: the export needs about {} and {} is free.",
+                gigabytes(needs + SPARE_BYTES),
+                gigabytes(free)
+            ));
+        }
+    }
     let writer = ExportWriter::create(&file)?;
     let job = Job {
         writer: Mutex::new(Some(writer)),

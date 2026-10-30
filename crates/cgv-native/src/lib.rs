@@ -3,6 +3,7 @@
 //! processes), the cache folder for thumbnails and waveforms, export files,
 //! project files and autosaves, and the installed fonts titles can use.
 pub mod cache;
+pub mod disk;
 pub mod export;
 pub mod ffmpeg;
 pub mod fonts;
