@@ -2,6 +2,44 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-30: Phase 11 findings and defaults
+
+- **Licence server:** `services/licensing`, Node 24 TypeScript with no dependencies, which Node runs as it is. It keeps licences in one JSON file, holding a lock file while it changes it, so the seller's commands (`keygen`, `issue`, `revoke`, `list`) can run beside it. It stores only each key's SHA-256. A Dockerfile serves it from a container; TLS ends at the host.
+  - **Protocol:** Backup's, with three additions that Backup ignores: tokens name their `product`, refusals carry a `code`, and `deactivate` frees a machine's place.
+  - **Keys:** 25 characters of Crockford base32 (125 bits). Reading them forgives case, spaces, missing dashes, and O, I and L typed for 0 and 1.
+- **Licence checks:** in the page, with WebCrypto, which takes the server's P1363 signatures as they are. They need no WASM, so the engine's budget is untouched.
+  - **Refreshes:** at start, every hour and when the connection returns, once a token is 12 hours old. After a week without one, the dialog asks the user to go online. After 14 days, the app is the free edition.
+  - **Clocks:** the app remembers the latest time it has seen, so setting the clock back does not stretch the grace period. Each good refresh resets that to the server's time, so a clock once set ahead does not make fresh tokens look old.
+  - **Machine ids:** the desktop's is a salted SHA-256 of Windows' `MachineGuid`; the web's is a random id per browser profile.
+- **Builds:** a build that is not a release (local, CI) with no licence server is Pro, so the tests' exports are unchanged. It also takes a test server from the address.
+  - A release build (`VITE_CGV_RELEASE=1`) ignores the address. Without a server and keys it is the free edition with activation unavailable, never Pro.
+  - The public web deploy is now a release build, so it shows the free edition until the server is set up.
+  - The desktop's content security policy allows `https://*.cashgearerp.com` and `http://127.0.0.1:*` (tests) for the licence server.
+- **Watermark:** "CashGear Video" in Inter SemiBold at 3% of the frame's shorter side, 80% opaque with a soft shadow, inset 3.5% from the bottom-right corner. A wrap box wider than the text, aligned right, puts its end at the margin whatever its width. GIFs carry it too; sound-only exports have no picture to mark.
+- **1080p cap:** the dialog starts a Free export within the limit, at the preset of the frame's shape when one fits (a 4K project starts at YouTube 1080p, a 2160×3840 one at TikTok). It marks larger presets "(Pro)".
+- **Installer:** NSIS, per user, 62 MB. It carries `ffmpeg.exe`, `ffprobe.exe` and FFmpeg's DLLs (not `ffplay`), with FFmpeg's LGPL text and a README naming the build, its configuration and where its source is. The release attaches that source as `ffmpeg-source.tar.gz`: FFmpeg at commit `e47273f4d9`, and BtbN's build scripts at the pinned tag, which name each library's source.
+- **Signing:** `scripts/sign-windows.mjs` signs the app, FFmpeg's files, the NSIS plugin, the uninstaller and the installer. It uses Azure's service, a certificate file, or nothing (allowed except with `CGV_SIGN_REQUIRED=1`).
+  - Microsoft has renamed Azure Trusted Signing to Artifact Signing. Its client is `Microsoft.ArtifactSigning.Client` 1.0.146, pinned by SHA-256 in the release workflow.
+  - Until its settings exist, the release workflow signs with a throwaway self-signed certificate.
+- **Updates:** Tauri's updater plugin (MIT/Apache-2.0), using native TLS. Its default rustls brings `webpki-root-certs` (CDLA-Permissive-2.0), which the licence gate refuses.
+  - The app checks 10 seconds after start and every six hours, and shows the waiting version in the header. Installing saves the project first.
+  - The NSIS installer runs in passive mode and starts the new version with the old one's environment.
+  - The updater's public key stays empty in `tauri.conf.json` until the user makes the key pair. The release workflow takes it from a repository variable.
+- **Release workflow:** on a `v*` tag it checks one version everywhere and a CHANGELOG section, builds, runs the installer test with throwaway keys, and builds the signed installer.
+  - With every setting present, it drafts the GitHub release: the installer, its `.sig`, `latest.json`, FFmpeg's source and the notices. Publishing the draft is what installed apps see.
+  - Without every setting, the files stay workflow artifacts.
+- **Web app:** a manifest with 192 and 512 px icons and a maskable one, drawn from the app icon by Chrome.
+  - The service worker caches the app shell when it installs: 31 files, 10.2 MB.
+  - Fonts, sounds, stickers and the 27 MB AI runtime are cached when first used, and dropped when a build no longer has them.
+  - Pages come from the network first, and from the cache offline with their isolation headers. Range requests are answered from cached files as 206 slices.
+- **Third-party notices:** `pnpm build` writes them: 334 crates, 26 npm packages, 25 fonts, the AI models and FFmpeg. Each licence text appears once, headed by every package that ships it: 243 texts, 861 KB, loaded only when About shows them.
+- **Diagnostic reports:** saved by the user from About or the engine-error box; nothing is sent.
+  - A report has the version, edition, browser, GPU, capabilities, the engine's state and the last 60 errors and warnings.
+  - Paths of two or more parts, and media file names, become `<file>`.
+- **Storage:** the web asks the browser to keep its storage once a project has media. It warns once when less than 1 GB is left or 90% is used, and a refused write says the storage is full.
+  - The desktop checks before an export that the disk has room for the estimated file plus 256 MB.
+- **Out of memory:** the engine-error box adds what to do when the message is about memory.
+
 ## 2026-10-29: Phase 11 answers
 
 - **Editions:** Free and Pro. Prices live in the store, not in the app.

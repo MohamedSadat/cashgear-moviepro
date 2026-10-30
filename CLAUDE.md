@@ -51,7 +51,7 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `ai/`: the AI worker (onnxruntime-web: WebGPU, else WASM), the model registry (`models.json`, pinned revisions and hashes) and downloads into OPFS, Whisper (`whisper.ts`, `tokenizer.ts`), background removal (`cutout.ts`, MediaPipe Selfie Segmentation) and its mattes in OPFS (`mattes.ts`), read by the engine and export workers.
 - `crates/cgv-model`: the project, every edit command, undo/redo and the `.cgvproj` format, with effects, keyframes (`animation.rs`), transitions, LUTs (`lut.rs`), titles and captions (`title.rs`), speed ramps, reverse and freeze frames (`timing.rs`), masks and blend modes (`masks.rs`), template slots (`FillSlot`), beats, background removal and cutting ranges out (`RemoveRanges`). `packages/ui/src/project`: opening, saving, autosave, recovery and relinking.
 - `crates/cgv-engine`: `plan_frame` (what a frame shows), the audio clip plan, transport, Auto quality and playback stats. `crates/cgv-audio`: the block mixer. `crates/cgv-render`: the compositor and WGSL.
-- `crates/cgv-media`: the media library model (Rust, via WASM). `crates/cgv-native`: the cgv-media protocol registry, byte ranges, ffprobe, proxies, export files and their GIF and MP3 conversions, the cache folder and installed fonts (`fonts.rs`, fontdb).
+- `crates/cgv-media`: the media library model (Rust, via WASM). `crates/cgv-native`: the cgv-media protocol registry, byte ranges, ffprobe, proxies, export files and their GIF and MP3 conversions, the cache folder, installed fonts (`fonts.rs`, fontdb), the machine id for licences (`machine.rs`) and free disk space (`disk.rs`).
 - `packages/ui`: React components, on the CG component library (`@cashgear/ui`).
   - `timeline/`: the canvas timeline. `controller.ts` owns the view, drawing and gestures outside React; `geometry.ts` and `draw.ts` are pure.
   - `editing/`: selection, tools, the clipboard and every editing action (`useEditor`), and drag gestures (`Gesture`, one undo step each).
@@ -65,8 +65,11 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `monitor/`: the transport, and `MonitorOverlay.tsx`, the handles over the picture (move, scale, rotate, crop, masks, Ken Burns) and the eyedropper; `geometry.ts` is pure.
   - `templates/`: project templates (loading, placing them, filling slots) and their browser.
   - `ai/` (`useAiTools`: jobs with progress and cancel, silences, beats, scenes, background removal; source-to-timeline timing), `inspector/AiSection.tsx` and `captions/` (the Captions tab, cues from transcripts, SRT and VTT).
-- `apps/web`: Vite app.
-- `apps/desktop/src-tauri`: Tauri 2 shell.
+  - `licence/` (Pro keys, offline token checks, the grace period and the licence dialog), `updates/` (the desktop's updates), `about/` (About and the third-party notices), `diagnostics/` (reports users may save) and `storage/` (the web's storage warnings).
+- `apps/web`: Vite app. `sw.js` is the service worker that `pwa.ts` builds with the build's files; `public/` has the manifest and install icons (`scripts/make-web-icons.mjs`).
+- `apps/desktop/src-tauri`: Tauri 2 shell, with the licence machine id (`licence.rs`) and updates (`updates.rs`, the updater plugin).
+- `services/licensing`: the reference licence server (Node 24 TypeScript, no dependencies), on CashGear Backup's protocol. Its README covers the protocol, the seller's commands and deploying.
+- Release: `scripts/desktop-installer.mjs` (the NSIS installer with FFmpeg and its notice), `sign-windows.mjs`, `installer-test.mjs`, `third-party-notices.mjs`, `release-check.mjs` and `release-assets.mjs`; `.github/workflows/release.yml` runs them on a version tag. `CHANGELOG.md` holds each release's notes.
 
 Browser-only Rust dependencies sit under `cfg(target_arch = "wasm32")`, so native workspace builds stay light.
 
@@ -79,7 +82,10 @@ pnpm fetch-test-media             # test clips into tests/media (CI sets CGV_REQ
 pnpm fetch-models [ids]           # AI models into tests/models (CI: whisper-tiny selfie selfie-landscape)
 pnpm dev:web                      # engine (debug) + Vite on http://127.0.0.1:5173, rebuilds on .rs/.wgsl changes
 pnpm dev:desktop                  # the same UI in Tauri
-pnpm build                        # release WASM + web build (run before typecheck, clippy, e2e, desktop)
+pnpm build                        # release WASM + web build + third-party notices (run before typecheck, clippy, e2e, desktop)
+pnpm desktop:installer            # the Windows installer (after pnpm build), signed when CGV_SIGN_* are set
+pnpm desktop:installer-test       # two test installers: installs, updates and uninstalls (about 11 minutes)
+pnpm release:check                # one version everywhere, and its CHANGELOG section
 ```
 
 Checks run in CI (`.github/workflows/ci.yml`). Run them in this order:
@@ -143,4 +149,11 @@ Gotchas:
 - AI tests serve `tests/models` over HTTP and pass it as `?models=` (with `?diagnostic=1`); `?captionModel=whisper-tiny` swaps the caption model. A test whose model is missing skips: turbo's WER runs only where it has been fetched.
 - Mattes live in OPFS (`ai-mattes/<media>/selfie/`) on the web and the desktop alike, in two-second chunks. The index's `done` ranges decide whether an export may start; the reader never evicts a chunk playback wants.
 - Measure long AI runs against a production build (Playwright's preview): the dev server reloads the page when Rust changes.
+- Builds that are not releases are Pro without a licence server, and take a test server from the address (`?licenceServer=&licenceKeys=`). Release builds (`VITE_CGV_RELEASE=1`: the web deploy and the release workflow) ignore the address and are the free edition without a server and keys, never Pro. The licence tests run `services/licensing` on a free port (`tests/e2e/licensing.ts`).
+- The free edition's watermark is a title clip the export worker adds on a new top track of its own copy of the project (`export/watermark.ts`). The preview and the project never have it, and the worker refuses Free exports over 1080p as the dialog does.
+- Tauri's `signCommand` is split at spaces and runs in `src-tauri`: keep its script path relative and free of spaces. Bundle resources must exist when any cargo build reads the config, so `desktop-installer.mjs` passes them (and the signing and updater settings) through `--config`, never `tauri.conf.json`.
+- The updater uses native TLS (SChannel): its rustls default brings a root store under CDLA-Permissive-2.0, which the licence gate refuses.
+- Installed apps read updates from `releases/latest/download/latest.json`. Make data releases (test media) with `--latest=false`, or the feed points at them.
+- Playwright's browser contexts are incognito, where nothing installs: `pwa.spec.ts` makes a profile and installs through CDP's `PWA` domain. Edge starts installed apps outside the test's reach, so there the app's page stands in.
+- The service worker runs in production builds on the web only. It caches the app shell when it installs and other build files when they are used; a range request is answered from the cached file.
 - WebView2 never asks Tauri for the script of a worker started by a worker, so such a worker never loads on the desktop (the browser has no such gap). Start one with `startNestedWorker` (`engine-client/src/nested-worker.ts`), from a `?worker&url` import; `shimNestedWorkers` does the same for a library's own threads (ONNX Runtime's). The desktop smoke covers both.
