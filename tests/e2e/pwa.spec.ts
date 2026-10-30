@@ -10,6 +10,48 @@ import { chromium, expect, test, type Page } from '@playwright/test';
 
 const base = 'http://127.0.0.1:4173';
 
+const FRAME = 23_520_000; // one frame at 30 fps
+
+async function projectOpen(page: Page) {
+  await page.waitForFunction(
+    () =>
+      !!Reflect.get(window, '__cgv')?.client &&
+      !['Opening…', undefined].includes(
+        document.querySelector('[data-testid="project-name"]')?.textContent ?? undefined,
+      ) &&
+      document.querySelector<HTMLElement>('[data-testid="project-bar"]')?.dataset.busy === 'false',
+  );
+}
+
+/** Waits until `count` media items are ready to use. */
+async function mediaReady(page: Page, count: number) {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async () => {
+          const items: { status: { state: string } }[] = await Reflect.get(
+            window,
+            '__cgv',
+          ).client.api.mediaSnapshot();
+          return items.filter((item) => item.status.state === 'ready').length;
+        }),
+      { timeout: 60_000 },
+    )
+    .toBe(count);
+}
+
+/** The composed frame at `time`, as RGBA bytes. */
+async function frame(page: Page, time: number): Promise<Buffer> {
+  const base64 = await page.evaluate(async (time) => {
+    const pixels = await Reflect.get(window, '__cgv').client.api.renderPixels(time);
+    let text = '';
+    for (let i = 0; i < pixels.data.length; i += 0x8000)
+      text += String.fromCharCode(...pixels.data.subarray(i, i + 0x8000));
+    return btoa(text);
+  }, time);
+  return Buffer.from(base64, 'base64');
+}
+
 async function ready(page: Page) {
   await expect(page.getByTestId('engine-status')).toHaveText('Engine ready');
   await expect(page.getByTestId('capability-strip')).toHaveAttribute('data-status', 'ok');
@@ -18,11 +60,14 @@ async function ready(page: Page) {
 
 test('the web app installs, and the installed app starts offline with every capability', async () => {
   const testInfo = test.info();
+  test.setTimeout(180_000);
   const profile = await mkdtemp(join(tmpdir(), 'cgv-pwa-'));
   const context = await chromium.launchPersistentContext(profile, {
     channel: testInfo.project.use.channel,
     args: testInfo.project.use.launchOptions?.args,
     viewport: { width: 1280, height: 800 },
+    // The config blocks service workers for every other test.
+    serviceWorkers: 'allow',
   });
   try {
     const page = context.pages()[0] ?? (await context.newPage());
@@ -51,6 +96,26 @@ test('the web app installs, and the installed app starts offline with every capa
     expect(cached).toContain('/');
     expect(cached.some((path) => /\/assets\/cgv_wasm_bg-.*\.wasm$/.test(path))).toBe(true);
 
+    // The pack's media are cached as they are used: a sticker and a music bed,
+    // whose files are read in ranges.
+    await projectOpen(page);
+    const clips = () =>
+      page.evaluate(async () => {
+        const { project } = await Reflect.get(window, '__cgv').client.api.projectSnapshot();
+        return project.tracks.flatMap((track: { clips: unknown[] }) => track.clips).length;
+      });
+    await page.getByTestId('library-tab-stickers').click();
+    await expect(page.getByTestId('sticker-item')).toHaveCount(30);
+    await page.locator('[data-testid="sticker-item"][data-key="heart"]').dblclick();
+    await expect.poll(clips).toBe(1);
+    await page.getByTestId('library-tab-music').click();
+    await page.locator('[data-testid="sound-item"][data-key="sunny-steps"]').dblclick();
+    await expect.poll(clips).toBe(2);
+    await mediaReady(page, 2);
+    const online = await frame(page, 6 * FRAME);
+    await page.keyboard.press('Control+s');
+    await expect(page.getByTestId('project-bar')).toHaveAttribute('data-busy', 'false');
+
     // Install it as the browser's install button does, and start it, offline.
     const browser = await context.browser()!.newBrowserCDPSession();
     const manifestId = base + '/';
@@ -75,11 +140,13 @@ test('the web app installs, and the installed app starts offline with every capa
       expect(await app.evaluate(() => matchMedia('(display-mode: standalone)').matches)).toBe(true);
     }
     await ready(app);
-    await app.waitForFunction(
-      () =>
-        document.querySelector<HTMLElement>('[data-testid="project-bar"]')?.dataset.busy ===
-        'false',
-    );
+    // The project comes back with its sticker and music, read from the cache.
+    await projectOpen(app);
+    await mediaReady(app, 2);
+    const offline = await frame(app, 6 * FRAME);
+    let same = 0;
+    for (let i = 0; i < online.length; i += 4) if (Math.abs(offline[i] - online[i]) <= 4) same++;
+    expect(same / (online.length / 4)).toBeGreaterThan(0.99);
     await context.setOffline(false);
     await browser.send('PWA.uninstall', { manifestId });
   } finally {

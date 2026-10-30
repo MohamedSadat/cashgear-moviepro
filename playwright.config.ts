@@ -24,6 +24,10 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:4173',
     viewport: { width: 1280, height: 800 },
     trace: 'retain-on-failure',
+    // The web app's service worker serves files from its cache, which changes
+    // when pages and media load. Tests run without it, as before; pwa.spec.ts
+    // tests it in a profile of its own, offline included.
+    serviceWorkers: 'block',
     screenshot: 'only-on-failure',
     launchOptions: {
       args: software
