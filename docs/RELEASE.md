@@ -40,7 +40,7 @@ A release is a version tag (`v1.2.3`). The release workflow (`.github/workflows/
    - `pnpm desktop:installer-test`
    - `CGV_STRESS_MINUTES=60 npx playwright test stress --project=chrome`
    - `CGV_PLAYBACK_HOURS=8 npx playwright test long-playback --project=chrome` (overnight)
-4. Push, wait for CI, then tag: `git tag -a v1.2.3 -m "CashGear Video 1.2.3" && git push origin v1.2.3`.
+4. Push, wait for CI, then tag: `git tag -a v1.2.3 -m "CashGear Video 1.2.3" && git push origin v1.2.3`. Never tag a commit whose message has `[skip ci]`: GitHub then skips the release workflow too. If that happens, start it with `gh workflow run release.yml --ref v1.2.3`.
 5. When the workflow has drafted the release:
    - Install it on a clean Windows machine. Check that SmartScreen names the publisher, and that the app updates from the previous version.
    - Then publish the draft as the latest release.
