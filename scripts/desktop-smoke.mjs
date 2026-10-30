@@ -567,8 +567,12 @@ try {
       );
     }
     await hooks.client.api.seek(clip.start + 1);
-    hooks.meters.take();
     await hooks.client.play();
+    // Software GPUs can take seconds to start playback: listen once its clock runs.
+    const transport = document.querySelector('[data-testid="transport"]');
+    for (let waited = 0; transport?.dataset.starting !== 'false' && waited < 15000; waited += 100)
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    hooks.meters.take();
     await new Promise((resolve) => setTimeout(resolve, 1500));
     await hooks.client.togglePlay();
     const readings = hooks.meters.take();

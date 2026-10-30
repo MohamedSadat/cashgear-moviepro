@@ -42,7 +42,8 @@ jobs:
   windows:
     name: Build and test (Windows)
     runs-on: windows-latest
-    timeout-minutes: 75
+    # Software GPUs draw on the CPU, and runners vary: the same tests took 26 and 50 minutes.
+    timeout-minutes: 120
     env:
       GPU_TEST_SOFTWARE: '1'
       # The FFmpeg integration tests must run here, not skip.
