@@ -3,7 +3,8 @@
 //   - one version everywhere: package.json files, the Cargo workspace, tauri.conf.json,
 //     the tag (GITHUB_REF_NAME, when set), and a CHANGELOG.md section for it;
 //   - which release settings are present. Without all of them the workflow builds
-//     and tests the release but does not draft it.
+//     and tests the release but does not draft it. Licensing is optional: without a
+//     licence server and keys the release has every feature.
 // Prints the version, and writes `version`, `notes` (the changelog section, as a
 // file) and `complete` to GITHUB_OUTPUT when it is set.
 import {
@@ -50,9 +51,10 @@ const section = changelog.match(
 if (!section?.trim()) problems.push(`CHANGELOG.md has no section for ${version}.`);
 
 const env = process.env;
+const licensing = !!(env.VITE_CGV_LICENCE_SERVER && env.VITE_CGV_LICENCE_KEYS);
+if (!!env.VITE_CGV_LICENCE_SERVER !== !!env.VITE_CGV_LICENCE_KEYS)
+  problems.push('Set both CGV_LICENCE_SERVER and CGV_LICENCE_KEYS, or neither.');
 const settings = {
-  'licence server (CGV_LICENCE_SERVER)': env.VITE_CGV_LICENCE_SERVER,
-  'licence public keys (CGV_LICENCE_KEYS)': env.VITE_CGV_LICENCE_KEYS,
   "updater's public key (CGV_UPDATER_PUBKEY)": env.CGV_UPDATER_PUBKEY,
   "updater's private key (TAURI_SIGNING_PRIVATE_KEY)": env.TAURI_SIGNING_PRIVATE_KEY,
   'Azure Artifact Signing (CGV_SIGN_ENDPOINT, CGV_SIGN_ACCOUNT, CGV_SIGN_PROFILE)':
@@ -72,6 +74,11 @@ console.log(
     ? 'Missing release settings (the release is built and tested, not drafted):\n  ' +
         missing.join('\n  ')
     : 'Every release setting is present.',
+);
+console.log(
+  licensing
+    ? 'Licensing is set up: the free edition applies until a key is activated.'
+    : 'Licensing is not set up: the release has every feature.',
 );
 if (env.GITHUB_OUTPUT) {
   mkdirSync(join(root, 'target'), { recursive: true });

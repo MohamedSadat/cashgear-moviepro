@@ -6,11 +6,11 @@ A release is a version tag (`v1.2.3`). The release workflow (`.github/workflows/
 2. Builds the app.
 3. Installs, updates and uninstalls a test build.
 4. Builds the signed installer.
-5. Drafts the GitHub release once every setting below exists. Publishing the draft is what installed apps see.
+5. Drafts the GitHub release once the updater key and code signing below exist. Publishing the draft is what installed apps see.
 
 ## Before the first release (once)
 
-1. **Licence server.**
+1. **Licence server (optional).** Without one, releases have every feature; with one, they are the free edition until a key is activated. The release workflow drafts either way.
    - Make its signing key on a machine you trust, and back up the private key offline: `node services/licensing/src/main.ts keygen --out <folder>`.
    - Deploy `services/licensing` over HTTPS (its README covers how), for example at `https://licensing.cashgearerp.com`. Its address must match `*.cashgearerp.com`, which the desktop's content security policy allows; another domain means changing `connect-src` in `tauri.conf.json`.
    - Set the repository variables `CGV_LICENCE_SERVER` (its address) and `CGV_LICENCE_KEYS` (the public key that `keygen` printed; comma-separated, for when keys rotate).
