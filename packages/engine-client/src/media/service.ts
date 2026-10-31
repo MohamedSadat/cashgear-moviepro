@@ -436,18 +436,22 @@ export class MediaService {
     try {
       const raw = managed.raw;
       const width = raw.visibleRect!.width;
+      // Only 8-bit 4:2:0 frames have planes to read; the test clips' barcodes are in those.
+      const readable = raw.format === 'NV12' || raw.format === 'I420';
       // The barcode strip is the top eighth: read a pair of luma rows through its middle.
-      const strip = await readPlanes(raw, {
-        x: 0,
-        y: Math.floor(raw.visibleRect!.height / 16) & ~1,
-        width,
-        height: 2,
-      });
-      const planes = crop ? await readPlanes(raw, crop) : undefined;
+      const strip = readable
+        ? await readPlanes(raw, {
+            x: 0,
+            y: Math.floor(raw.visibleRect!.height / 16) & ~1,
+            width,
+            height: 2,
+          })
+        : null;
+      const planes = crop && readable ? await readPlanes(raw, crop) : undefined;
       return {
         frame,
         timestampUs: managed.timestamp,
-        barcode: readBarcode(strip.y.subarray(0, width), width),
+        barcode: strip ? readBarcode(strip.y.subarray(0, width), width) : -1,
         yuv: planes && Uint8Array.from([...planes.y, ...planes.u, ...planes.v]),
         decodedFrames: decoded,
         format: raw.format,
