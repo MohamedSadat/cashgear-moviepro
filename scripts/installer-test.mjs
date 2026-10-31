@@ -90,7 +90,9 @@ async function attach(port) {
     60_000,
   );
   const browser = await chromium.connectOverCDP(endpoint);
-  const page = browser.contexts()[0].pages()[0];
+  // On a slow machine the webview answers before it has opened its page.
+  const context = await until('the webview', () => browser.contexts()[0], 30_000);
+  const page = context.pages()[0] ?? (await context.waitForEvent('page', { timeout: 60_000 }));
   await until('the app to load', () => page.url().startsWith('http'), 30_000);
   await page.goto(new URL(page.url()).origin + '/?diagnostic=1');
   await page.waitForFunction(() => !!window.__cgv?.updates, undefined, { timeout: 60_000 });
@@ -248,16 +250,18 @@ try {
       throw new Error('Could not set the WebView2 test policy: ' + added.stderr);
     policySet = true;
   }
-  const app = spawn(appExe(), [], {
-    windowsHide: true,
-    env: {
-      ...process.env,
-      CGV_DATA_DIR: dataDir,
-      WEBVIEW2_USER_DATA_FOLDER: profile,
-      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: browserArguments,
-    },
-    stdio: 'ignore',
-  });
+  const start = () =>
+    spawn(appExe(), [], {
+      windowsHide: true,
+      env: {
+        ...process.env,
+        CGV_DATA_DIR: dataDir,
+        WEBVIEW2_USER_DATA_FOLDER: profile,
+        WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: browserArguments,
+      },
+      stdio: 'ignore',
+    });
+  const app = start();
   const exited = new Promise((resolve) => app.once('exit', resolve));
   let { browser, page } = await attach(port);
   const before = await page.evaluate(() => window.__cgv.platform.nativeInfo());
@@ -283,13 +287,23 @@ try {
   await until('the update to install', () => uninstallEntry()?.version === versions[1], 180_000);
   results.steps.updateSeconds = (Date.now() - step) / 1000;
 
-  // 3. The installer starts the new version, with the same settings.
-  ({ browser, page } = await attach(port));
+  // 3. The installer starts the new version, with the same settings. It starts it
+  // as the desktop's user, which a CI runner's service session may not have: then
+  // the test starts it, and records that the installer did not.
+  try {
+    ({ browser, page } = await attach(port));
+    results.steps.restartedByInstaller = true;
+  } catch (error) {
+    log(`The installer did not start the app again (${error.message}): starting it`);
+    results.steps.restartedByInstaller = false;
+    start();
+    ({ browser, page } = await attach(port));
+  }
   const after = await page.evaluate(() => window.__cgv.platform.nativeInfo());
   if (after.version !== versions[1])
     throw new Error(`After the update the app is ${after.version}.`);
   results.steps.restartedVersion = after.version;
-  log(`Updated: the app restarted as ${after.version}`);
+  log(`Updated: the app runs as ${after.version}`);
   await browser.close().catch(() => {});
   stopApp();
 
