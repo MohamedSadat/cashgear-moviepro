@@ -2,6 +2,13 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-31: Every feature without a licence
+
+- **Answer:** "key the release full feature by default, disregard this license". A build without a licence server and keys now has every feature, releases included: no watermark, and exports up to 4K. This replaces the Phase 11 rule that a release without them is the free edition.
+  - Releases show it as the `included` state: the header has no licence badge, About says "Full edition", and the licence dialog says no licence is needed.
+  - The licensing code, server and tests stay. Setting `CGV_LICENCE_SERVER` and `CGV_LICENCE_KEYS` brings back the free edition until a key is activated.
+  - The public web app gets it with its next deploy; the desktop app with 1.0.1.
+
 ## 2026-10-31: The v1.0.0 release
 
 - **Answer:** "build github release if not exist". No release had the `v1.0.0` tag, because the workflow drafts one only when every release setting exists. The release was published by hand and marked latest, so the test media's data release no longer is.

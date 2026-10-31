@@ -14,7 +14,7 @@ A release is a version tag (`v1.2.3`). The release workflow (`.github/workflows/
    - Make its signing key on a machine you trust, and back up the private key offline: `node services/licensing/src/main.ts keygen --out <folder>`.
    - Deploy `services/licensing` over HTTPS (its README covers how), for example at `https://licensing.cashgearerp.com`. Its address must match `*.cashgearerp.com`, which the desktop's content security policy allows; another domain means changing `connect-src` in `tauri.conf.json`.
    - Set the repository variables `CGV_LICENCE_SERVER` (its address) and `CGV_LICENCE_KEYS` (the public key that `keygen` printed; comma-separated, for when keys rotate).
-   - The web deploy reads them too: until they exist, the public web app is the free edition.
+   - The web deploy reads them too. Until they exist, releases and the public web app have every feature (the user's answer of 2026-10-31); once they exist, the free edition applies until a key is activated.
 2. **Updater key.**
    - Make it with `pnpm --filter @cgv/desktop tauri signer generate -w <folder>/cashgear-video-updater.key`, choosing a password.
    - Set the secrets `TAURI_SIGNING_PRIVATE_KEY` (the key file's contents) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, and the variable `CGV_UPDATER_PUBKEY` (the `.pub` file's contents).
