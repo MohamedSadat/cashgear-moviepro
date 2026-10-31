@@ -2,6 +2,15 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-10-31: The v1.0.0 release
+
+- **Answer:** "build github release if not exist". No release had the `v1.0.0` tag, because the workflow drafts one only when every release setting exists. The release was published by hand and marked latest, so the test media's data release no longer is.
+- **Its installer:** the release run 41151991630's (built on `main` at `40cf1bb`, whose app is the same as `v1.0.0`'s: only scripts, tests and docs differ). It is a release build (the free edition), signed with the run's throwaway certificate, SHA-256 `18f0fa3b…cb50`.
+  - Its artifact's `.sig` came from the installer test's build of 1.0.0, made before the release step rebuilt the installer, so it was left out.
+  - With no updater key yet, the release has no `latest.json`, and 1.0.0 can never update itself: its users install later versions over it.
+- **Its other files:** `ffmpeg-source.tar.gz` and `third-party-notices.txt`, as `release-assets.mjs` makes them. The notes are the changelog's, after a note on the test certificate, the free edition and updates.
+- **Local installers (a finding):** an installer built here after a plain `pnpm build` is not a release build. It is Pro without a licence server, so it must never be shared: share the release's installer.
+
 ## 2026-10-30: Phase 11 findings and defaults
 
 - **Licence server:** `services/licensing`, Node 24 TypeScript with no dependencies, which Node runs as it is. It keeps licences in one JSON file, holding a lock file while it changes it, so the seller's commands (`keygen`, `issue`, `revoke`, `list`) can run beside it. It stores only each key's SHA-256. A Dockerfile serves it from a container; TLS ends at the host.
