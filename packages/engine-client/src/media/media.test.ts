@@ -4,6 +4,7 @@ import { DecoderPool } from './decoder-pool';
 import { FrameCache } from './frame-cache';
 import { FrameIndex } from './frame-index';
 import { drawsWhole, ManagedFrame, openFrameCount, type FrameLike, type FrameRect } from './frames';
+import { deepCodec } from './service';
 import { filmstripTimes } from './thumbnail';
 import { decodePcm, PeakAccumulator } from './waveform';
 
@@ -23,6 +24,20 @@ class FakeFrame implements FrameLike {
     return this.size;
   }
 }
+
+describe('deepCodec', () => {
+  it('finds the bit depth in each codec string', () => {
+    expect(deepCodec('vp09.02.40.10')).toBe(true);
+    expect(deepCodec('vp09.00.40.08')).toBe(false);
+    expect(deepCodec('av01.0.08M.10')).toBe(true);
+    expect(deepCodec('av01.0.08M.08')).toBe(false);
+    expect(deepCodec('hvc1.2.4.L153.B0')).toBe(true);
+    expect(deepCodec('hev1.1.6.L93.B0')).toBe(false);
+    expect(deepCodec('avc1.6E0033')).toBe(true);
+    expect(deepCodec('avc1.640028')).toBe(false);
+    expect(deepCodec('vp8')).toBe(false);
+  });
+});
 
 describe('ManagedFrame', () => {
   it('counts open frames and closes each exactly once', () => {

@@ -269,6 +269,8 @@ const api: EngineApi = {
     return { ms: performance.now() - begun };
   },
   renderPixels: async (time) => (await requireDiagnostics()).pixels(time),
+  renderYuv10: async (time, width, height, format) =>
+    (await requireDiagnostics()).deepPixels(time, width, height, format),
   pickColor: (time, x, y, clip) => requirePlayback().pickColor(time, x, y, clip),
   async readComposition() {
     await requireDiagnostics();

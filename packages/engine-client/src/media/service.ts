@@ -54,7 +54,14 @@ interface OpenMedia {
    * The decoders the browser has for the reader's track, its frame size, and
    * whether the browser draws its hardware frames wrongly (see `paddingShows`).
    */
-  decoders: { hardware: boolean; software: boolean; pixels: number; padded: boolean };
+  decoders: {
+    hardware: boolean;
+    software: boolean;
+    pixels: number;
+    padded: boolean;
+    /** More than 8 bits a sample, which only software decoders keep. */
+    deep: boolean;
+  };
   /** The decodable sound track, from the original or else the proxy. */
   audio: InputAudioTrack | null;
   /** An animated image's frames, by when each starts in its loop. */
@@ -98,7 +105,32 @@ async function decodersFor(
     software: await supports(config, 'prefer-software'),
     pixels: width * height,
     padded: hardware && coded && (await paddingShows(sink, config)),
+    deep: deepCodec(config.codec),
   };
+}
+
+/**
+ * Whether a WebCodecs codec string has more than 8 bits a sample: VP9 and AV1
+ * name their bit depth, HEVC Main 10 and range extensions are profiles 2 and 4,
+ * and H.264 High 10, 4:2:2 and 4:4:4 are profiles 110, 122 and 244. Hardware
+ * decoders hand such frames over at 8 bits, so exports decode them in software.
+ */
+export function deepCodec(codec: string): boolean {
+  const parts = codec.split('.');
+  switch (parts[0]) {
+    case 'vp09':
+      return Number(parts[3]) > 8;
+    case 'av01':
+      return Number(parts[3]) > 8;
+    case 'hvc1':
+    case 'hev1':
+      return /^[A-C]?(2|4)$/.test(parts[1] ?? '');
+    case 'avc1':
+    case 'avc3':
+      return [0x6e, 0x7a, 0xf4].includes(parseInt((parts[1] ?? '').slice(0, 2), 16));
+    default:
+      return false;
+  }
 }
 
 /**
@@ -154,7 +186,7 @@ export class MediaService {
           video!.probe.codedWidth,
           video!.probe.codedHeight,
         )
-      : { hardware: false, software: false, pixels: 0, padded: false };
+      : { hardware: false, software: false, pixels: 0, padded: false, deep: false };
     const reader = decodable
       ? new VideoReader(
           id,
@@ -264,9 +296,10 @@ export class MediaService {
   }
 
   /** The decoder policy: software up to 1080p where the browser has it. */
-  private useHardware({ hardware, software, pixels, padded }: OpenMedia['decoders']) {
+  private useHardware({ hardware, software, pixels, padded, deep }: OpenMedia['decoders']) {
     // Padded hardware frames are read back to be drawn right: software is quicker.
-    if (this.decode === 'fastest') return hardware && !(padded && software);
+    // Exports decode deep media in software, which keeps its precision.
+    if (this.decode === 'fastest') return hardware && !((padded || deep) && software);
     const preferHardware =
       this.decode === 'hardware' ||
       (this.decode === 'auto' && pixels > softwarePixels) ||
@@ -278,13 +311,21 @@ export class MediaService {
    * Seeks decode in hardware where they can: decoding from a key frame up to the
    * wanted frame is quicker there, and a paused monitor does not mind the GPU
    * process stalls that cost playback frames. Frames are asked for as soon as
-   * they are decoded, so a seek decodes up to its frame and not past it.
+   * they are decoded, so a seek decodes up to its frame and not past it. Exports
+   * seek deep media in software too, which keeps its precision.
    */
   private readerConfig(config: VideoDecoderConfig, decoders: OpenMedia['decoders']) {
-    const hardware = decoders.hardware && this.decode !== 'software';
+    const software =
+      this.decode === 'software' ||
+      (this.decode === 'fastest' && decoders.deep && decoders.software);
+    const hardware = decoders.hardware && !software;
     return {
       ...config,
-      hardwareAcceleration: hardware ? ('prefer-hardware' as const) : ('no-preference' as const),
+      hardwareAcceleration: hardware
+        ? ('prefer-hardware' as const)
+        : software
+          ? ('prefer-software' as const)
+          : ('no-preference' as const),
       optimizeForLatency: true,
     };
   }

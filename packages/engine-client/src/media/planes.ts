@@ -1,6 +1,6 @@
 /** A CPU frame's pixels, ready for `Engine.set_layer_planes`. */
 export interface FramePlanes {
-  format: 'I420' | 'NV12' | 'RGBA';
+  format: 'I420' | 'NV12' | 'RGBA' | DeepFormat;
   /** Visible size of the planes. */
   codedWidth: number;
   codedHeight: number;
@@ -13,13 +13,17 @@ export interface FramePlanes {
   displayHeight: number;
 }
 
-const native = new Set(['I420', 'NV12', 'RGBA', 'RGBX']);
+/** 10- and 12-bit planes in 16-bit words, which the compositor reads as integers. */
+export type DeepFormat = 'I420P10' | 'I422P10' | 'I444P10' | 'I420P12' | 'I422P12' | 'I444P12';
+const deep = new Set<string>(['I420P10', 'I422P10', 'I444P10', 'I420P12', 'I422P12', 'I444P12']);
+const native = new Set(['I420', 'NV12', 'RGBA', 'RGBX', ...deep]);
 
 /**
  * Copies a frame's visible pixels in its own format, with no colour conversion,
- * so the compositor converts Y'CbCr with the frame's own matrix. Formats the
- * compositor does not read (10-bit, alpha planes, BGRA) are converted to RGBA by
- * the browser.
+ * so the compositor converts Y'CbCr with the frame's own matrix. 10- and 12-bit
+ * planes keep every level: the browser's own conversions all go through 8 bits.
+ * Formats the compositor does not read (alpha planes, BGRA) are converted to
+ * RGBA by the browser.
  */
 export async function copyPlanes(frame: VideoFrame): Promise<FramePlanes> {
   const rect = frame.visibleRect!;

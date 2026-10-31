@@ -252,6 +252,18 @@ export class PlaybackController {
   }
 
   /**
+   * Diagnostics: the playhead frame at `time` read back as a planar 10-bit frame
+   * of `width` × `height` in FFmpeg's `format` (`yuv422p10le`, say), as exports
+   * read it.
+   */
+  async deepPixels(time: number, width: number, height: number, format: string) {
+    this.pause();
+    this.seek(time);
+    await this.whenSettled();
+    return (await this.deps.engine.read_yuv10(width, height, format)) as Pixels;
+  }
+
+  /**
    * The eyedropper: the colour of clip `clip`'s own picture at `x`, `y` (fractions
    * of the frame) at `time`, drawn alone without its effects, masks or blend, at
    * full opacity. Null where it shows nothing. The monitor is drawn again after.

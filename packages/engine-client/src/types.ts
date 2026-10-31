@@ -148,6 +148,12 @@ export interface EngineApi {
   seekAndWait(time: number): Promise<{ ms: number }>;
   /** Diagnostics: the frame at `time`, composed at full quality, as sRGB RGBA bytes. */
   renderPixels(time: number): Promise<Pixels>;
+  /**
+   * Diagnostics: the frame at `time` read back as planar 10-bit Y'CbCr of
+   * `width` × `height`, in FFmpeg's `format` (`yuv420p10le`, `yuv422p10le`,
+   * `yuv444p10le` or `yuva444p10le`): 16-bit little-endian samples.
+   */
+  renderYuv10(time: number, width: number, height: number, format: string): Promise<Pixels>;
   /** Diagnostics: the latest composition as it is, without drawing again. */
   readComposition(): Promise<Pixels>;
   /**

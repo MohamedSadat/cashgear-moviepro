@@ -5,7 +5,11 @@ import { deepClips, distinctLevels, encodeRamp, rampFrames, rampLevels } from '.
 
 // 10-bit media (deep-colour.ts): which decoders the browser has for each codec,
 // what pixel format their frames come in, and how many of the ramp's 877 luma
-// levels reach the composition. Results go to bench/results/deep-colour-*.json.
+// levels reach the composition, read back at 8 bits as the preview shows it and
+// at 10 bits as a 10-bit export reads it. Software decoders give 10-bit planes,
+// which must keep at least 95% of the levels on both backends; hardware decoders
+// hand their frames over at 8 bits (decisions, 2026-11-01), which is recorded.
+// Results go to bench/results/deep-colour-*.json.
 const root = process.cwd();
 const ffmpegDir = process.env.CGV_FFMPEG_DIR ?? join(root, '.tools/ffmpeg/bin');
 const ffmpeg = join(ffmpegDir, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
@@ -55,18 +59,28 @@ interface Measured {
   status: string;
   format?: string | null;
   colorSpace?: unknown;
-  /** Distinct green levels along the middle row of the composition (8-bit readback). */
-  composedLevels?: number;
+  /** Distinct green levels along the middle row of the composition, read back at 8 bits. */
+  levels8?: number;
+  /** Distinct luma codes along the middle row of a 10-bit 4:2:2 readback. */
+  levels10?: number;
   error?: string;
 }
 
-for (const decode of ['software', 'hardware'] as const) {
-  test(`10-bit media in ${decode} decoders: formats and the levels that reach the composition`, async ({
+const cases = [
+  { decode: 'software', backend: 'WebGPU' },
+  { decode: 'software', backend: 'WebGL2' },
+  { decode: 'hardware', backend: 'WebGPU' },
+] as const;
+
+for (const { decode, backend } of cases) {
+  test(`10-bit media in ${decode} decoders on ${backend}: the levels that reach the composition`, async ({
     page,
   }, testInfo) => {
     test.setTimeout(300000);
     const files = testSet(join(testInfo.project.outputDir, 'deep-colour'));
-    await page.goto(`/?diagnostic=1&decode=${decode}`);
+    await page.goto(
+      `/?diagnostic=1&decode=${decode}` + (backend === 'WebGL2' ? '&gpu=webgl2' : ''),
+    );
     await page.waitForFunction(
       () =>
         !!Reflect.get(window, '__cgv')?.client &&
@@ -139,20 +153,25 @@ for (const decode of ['software', 'hardware'] as const) {
           track: tracks[0].id,
           clip: { media: id, duration: rampFrames * FRAME, audio: false },
         });
-        const row = await page.evaluate(async () => {
-          const hooks = Reflect.get(window, '__cgv') as Hooks;
-          const pixels = (await hooks.client.api.renderPixels(0)) as {
-            width: number;
-            height: number;
-            data: Uint8Array;
-          };
-          const y = Math.floor(pixels.height / 2);
-          return Array.from(
-            { length: pixels.width },
-            (_, x) => pixels.data[(y * pixels.width + x) * 4 + 1],
-          );
-        });
-        entry.composedLevels = distinctLevels(row);
+        const rows = await page.evaluate(
+          async ([width, height]) => {
+            const api = (Reflect.get(window, '__cgv') as Hooks).client.api;
+            const pixels = (await api.renderPixels(0)) as { width: number; data: Uint8Array };
+            const y = Math.floor(height / 2);
+            const eight = Array.from(
+              { length: pixels.width },
+              (_, x) => pixels.data[(y * pixels.width + x) * 4 + 1],
+            );
+            const deep = (await api.renderYuv10(0, width, height, 'yuv422p10le')) as {
+              data: Uint8Array;
+            };
+            const luma = new Uint16Array(deep.data.buffer, deep.data.byteOffset, width * height);
+            return { eight, ten: Array.from(luma.subarray(y * width, (y + 1) * width)) };
+          },
+          [width, height],
+        );
+        entry.levels8 = distinctLevels(rows.eight);
+        entry.levels10 = distinctLevels(rows.ten);
       } catch (error) {
         entry.error = error instanceof Error ? error.message : String(error);
       }
@@ -161,10 +180,18 @@ for (const decode of ['software', 'hardware'] as const) {
     const out = join(root, 'bench/results');
     mkdirSync(out, { recursive: true });
     writeFileSync(
-      join(out, `deep-colour-${decode}-${testInfo.project.name}.json`),
-      JSON.stringify({ rampLevels, decode, measured }, null, 2) + '\n',
+      join(out, `deep-colour-${decode}-${backend.toLowerCase()}-${testInfo.project.name}.json`),
+      JSON.stringify({ rampLevels, decode, backend, measured }, null, 2) + '\n',
     );
-    // Every codec WebCodecs decodes here at all reaches the composition.
-    expect(measured.filter((m) => m.status === 'ready').length).toBeGreaterThan(0);
+    const decoded = measured.filter((m) => m.status === 'ready');
+    expect(decoded.length, 'VP9 and AV1 decode on the web').toBeGreaterThanOrEqual(4);
+    for (const m of decoded) {
+      expect(m.error, m.name).toBeUndefined();
+      // Through 8 bits the ramp keeps at most 256 levels.
+      expect(m.levels8!, m.name).toBeLessThanOrEqual(256);
+      if (m.format?.includes('P10'))
+        expect(m.levels10!, m.name).toBeGreaterThanOrEqual(Math.ceil(0.95 * rampLevels));
+    }
+    if (decode === 'software') for (const m of decoded) expect(m.format, m.name).toBe('I420P10');
   });
 }
