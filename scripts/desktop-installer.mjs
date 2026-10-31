@@ -104,6 +104,9 @@ const config = {
     },
   },
 };
+// Only this build's installer is left in the bundle folder (an earlier test build
+// there would end up in the release's files).
+rmSync(join(root, 'target/release/bundle/nsis'), { recursive: true, force: true });
 const configFile = join(staging, 'tauri.installer.json');
 writeFileSync(configFile, JSON.stringify(config, null, 2));
 await run(...pnpmCommand(['--filter', '@cgv/desktop', 'tauri', 'build', '--config', configFile]));
