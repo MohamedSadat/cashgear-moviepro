@@ -1,4 +1,4 @@
-> Exported from the Claude Docs plan on 2026-10-22. The doc is the source of truth; progress lives in PROGRESS.md and decisions in decisions.md.
+> Exported from the Claude Docs plan on 2026-10-22. The doc is the source of truth; progress lives in PROGRESS.md and decisions in decisions.md. Phase 12 was added here on 2026-11-01, after the doc's phases were done.
 
 # CashGear Video — Implementation Plan
 
@@ -457,6 +457,59 @@ UI command, then model update (undoable), then `renderFrame(t)` finds active cli
 - [ ] The 1-hour project edits and exports without crashes or memory growth.
 - [ ] The web app installs as a PWA and passes the capability check on Chrome and Edge.
 
+## Phase 12: Professional media pipeline
+
+**Goal:** professional footage keeps its full quality. Exports always render from the original media, 10-bit pictures keep their precision from decode to export, and the colour tools gain scopes and primary grading. Training-video tools stay in CashGear Capture (decisions, 2026-11-01).
+
+**Questions to ask first**
+
+- On the desktop, may raw frames cross between the native side and the webview for exports? That would let FFmpeg decode originals the webview cannot and encode masters. The other way is full-size copies the webview decodes.
+- HDR (PQ and HLG) in this phase, or 10-bit SDR first? Is there an HDR display to test on?
+- Which master formats: ProRes 422 HQ and 4444, DNxHR HQX, 10-bit HEVC, 10-bit AV1?
+- How deep does grading go: scopes and primary correction (wheels and curves), or secondary correction (HSL qualifiers) too?
+
+**Tasks**
+
+1. Measure first:
+   - A 10-bit test set, drawn and encoded with the pinned FFmpeg during the tests, as the green-screen set is. It holds a 10-bit ramp in ProRes 422 HQ, DNxHR HQX, HEVC Main10, VP9 profile 2 and AV1 at 1080p and 4K, a log clip, and HLG and PQ clips.
+   - What Chrome, Edge and WebView2 decode and encode at 10 bits through WebCodecs, in hardware and software.
+   - How fast frame-sized buffers move between the native side and the webview: the cgv-media protocol, Tauri's binary IPC and WebView2 shared buffers.
+2. Exports from originals: an export never reads a proxy. On the desktop, media the webview cannot decode reaches the export worker as the first answer decides.
+3. 10 bits from decode to export:
+   - 10-bit decoder outputs (`I420P10`, `I422P10`, `I444P10`) keep their planes. The frame cache stores them as they are, within its byte budget, and the compositor converts them with their own matrix.
+   - Effects, looks and blends stay in 16-bit float. WebGL2 without float targets stays 8-bit, and says so.
+   - Exports read the composition back at 10 bits for 10-bit encoders, beside `read_nv12`.
+4. Colour management:
+   - Each clip has an input colour space, read from the file's tags and changeable: Rec.709, Rec.2020, sRGB, or camera log through a LUT the user imports.
+   - The project has an output colour space: Rec.709 SDR, plus Rec.2020 PQ and HLG if HDR is in this phase.
+   - Exports are tagged with the output's primaries, transfer, matrix and range (`setparams` for FFmpeg encoders).
+5. Proxies for heavy media:
+   - Any source over 1080p, or in a 4:2:2 or 4:4:4 professional codec, gets a proxy at full, half or quarter size, in a format playback decodes smoothly.
+   - The desktop makes them with FFmpeg; the web with WebCodecs in the jobs worker.
+   - A monitor switch chooses proxies or originals. Exports never use proxies.
+6. Scopes, drawn on the GPU from the composited frame at the playhead, live during playback, in a panel of their own:
+   - A waveform, in luma or as an RGB parade.
+   - A vectorscope with the 75% targets and a skin-tone line.
+   - A histogram.
+7. Grading, as a Colour section in the inspector, keyframed like other fields:
+   - Lift, gamma, gain and offset wheels.
+   - White balance with the eyedropper.
+   - RGB and luma curves, plus hue against hue, hue against saturation and luma against saturation.
+   - If the answer includes secondary correction: an HSL qualifier with a matte view, combined with the existing masks.
+8. Master exports on the desktop, in the formats the answer picks, through the pinned FFmpeg:
+   - Its encoders: `prores_ks` (4:2:2 and 4:4:4 with alpha), `dnxhd` (DNxHR HQX), 10-bit HEVC through NVENC, AMF or Quick Sync, and 10-bit AV1 through SVT-AV1.
+   - Sound as 24-bit PCM, or as AAC up to 320 kbit/s through FFmpeg's own encoder, since Windows' encoder stops at 192 kbit/s.
+9. The Overview's scope becomes prosumer and professional. `CLAUDE.md`'s hard limits change if the first answer allows raw frames to cross.
+
+**Exit criteria**
+
+- [ ] A 4K ProRes 422 HQ source exports at 4K from its original. A ProRes 422 HQ master of it reaches at least 45 dB PSNR on Y'CbCr planes against FFmpeg's own decode of the source.
+- [ ] A limited-range 10-bit ramp (877 luma levels) keeps at least 95% of its levels through import, a grade and a 10-bit export. The same ramp through 8 bits keeps at most 220.
+- [ ] On SMPTE colour bars, every bar lands in its vectorscope target, and waveform levels are within 1% of their values.
+- [ ] A 4K30 project with three stacked tracks plays without dropped frames through proxies on the reference machine.
+- [ ] Every master export opens in FFmpeg with the expected codec, profile, bit depth and colour tags. The user opens one of each format in DaVinci Resolve.
+- [ ] Wheels and curves have golden renders on both backends, and each grading change is one undo step.
+
 ## Risks and testing strategy
 
 The biggest risks are codec gaps, frame leaks and webview differences; golden-frame and round-trip tests are the main defence because an agent-built engine needs objective checks.
@@ -472,6 +525,9 @@ The biggest risks are codec gaps, frame leaks and webview differences; golden-fr
 | FFmpeg license slip (GPL build) | Forced to open-source the app | Scripted LGPL build without `--enable-gpl`; CI check on the shipped libraries |
 | Codec patent licensing for a paid product | Legal exposure | Use OS, browser and GPU encoders where possible; get legal advice before `v1.0.0` |
 | Agent scope creep or silent design changes | Engine drifts from the plan | Questions every phase; decisions log; exit criteria with evidence |
+| Raw frames between native code and the webview are slow (Phase 12) | Exports from originals take long | Measure each path first; playback stays on proxies |
+| 10-bit frames take twice the bytes of 8-bit ones | Fewer cached frames, more decoding | The frame cache budgets bytes, not frames; proxies for playback |
+| ProRes and DNxHR in a paid product | Legal exposure | Legal advice before a release ships them, as for H.264 and HEVC |
 
 **Testing layers**
 
