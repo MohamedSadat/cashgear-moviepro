@@ -17,6 +17,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -34,7 +35,10 @@ const product = 'CashGear Video';
 const feedPort = 47811;
 const started = Date.now();
 const log = (line) => console.log(`[${((Date.now() - started) / 1000).toFixed(0)} s] ${line}`);
-const work = join(tmpdir(), `cgv-installer-${randomBytes(4).toString('hex')}`);
+// The temp folder's long name: the uninstaller removes the Start menu shortcut only
+// when its target matches the install folder exactly, and CI's temp folder is an
+// 8.3 short name (C:\Users\RUNNER~1\...).
+const work = join(realpathSync.native(tmpdir()), `cgv-installer-${randomBytes(4).toString('hex')}`);
 const feed = join(work, 'feed');
 const installDir = join(work, 'app');
 mkdirSync(feed, { recursive: true });
