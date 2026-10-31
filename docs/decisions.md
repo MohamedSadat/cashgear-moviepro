@@ -2,6 +2,13 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-11-01: Phase 12 answers
+
+- **Raw frames:** "Yes, for exports". On the desktop, raw frames may cross between the native side and the webview during exports. FFmpeg decodes originals the webview cannot (ProRes, DNxHR) for the export worker, and encodes masters from its frames. Playback stays on proxies. `CLAUDE.md`'s hard limit now says so.
+- **HDR:** "10-bit SDR first". This phase outputs Rec.709 SDR at 10 bits. HDR output and an HDR monitor view come in a later phase, and HDR sources keep the simple tone map.
+- **Masters:** "ProRes 422 HQ and 4444". So the 10-bit exports are ProRes, and DNxHR HQX, 10-bit HEVC and 10-bit AV1 are not in this phase. A release that ships ProRes needs legal advice first, as `docs/RELEASE.md` asks for H.264 and HEVC.
+- **Grading:** "Scopes and primary". The phase adds the waveform, vectorscope and histogram, wheels and curves. Secondary correction (HSL qualifiers) comes later.
+
 ## 2026-11-01: Training-video tools belong to CashGear Capture
 
 - **Answer:** "I think training video tools should be shipped with my cashgear-capture video editor". CashGear Video does not add tools for screen recordings, such as zooms that follow the pointer, click and key overlays, or pointer effects.

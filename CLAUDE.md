@@ -21,7 +21,8 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
 
 - No GPL, AGPL or LGPL dependencies. `cargo deny check licenses` and `pnpm licenses:check` must pass, and `pnpm licenses:selftest` proves they fail on GPL.
 - FFmpeg is the pinned LGPL build from `pnpm setup:ffmpeg`, without `--enable-gpl` or `--enable-nonfree`. It runs only as `ffmpeg` and `ffprobe` child processes of the desktop native side, never linked in.
-- The UI never touches media or GPU state. It sends engine commands and renders the snapshots that come back. Raw frames never cross to native code.
+- The UI never touches media or GPU state. It sends engine commands and renders the snapshots that come back.
+- Raw frames cross between native code and the webview only in desktop exports: FFmpeg decodes originals the webview cannot for the export worker, and encodes masters from its frames (Phase 12). Playback never takes raw frames from native code.
 
 ## Layout
 
