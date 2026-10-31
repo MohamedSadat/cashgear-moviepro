@@ -29,7 +29,13 @@ async function processMemory(page: Page): Promise<number | null> {
       '-Command',
       `(Get-Process -Id ${ids} -ErrorAction SilentlyContinue | Measure-Object PrivateMemorySize64 -Sum).Sum`,
     ],
-    { encoding: 'utf8' },
+    {
+      encoding: 'utf8',
+      // Windows PowerShell started from PowerShell 7 cannot load its modules with PS 7's path.
+      env: Object.fromEntries(
+        Object.entries(process.env).filter(([name]) => name.toLowerCase() !== 'psmodulepath'),
+      ),
+    },
   );
   return Math.round(Number(sum.stdout.trim()) / 1e6);
 }

@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,4 +72,20 @@ export function pnpmCommand(args) {
   return /\.[cm]?js$/.test(process.env.npm_execpath)
     ? [process.execPath, [process.env.npm_execpath, ...args]]
     : [process.env.npm_execpath, args];
+}
+
+/**
+ * Runs a Windows PowerShell script and returns its output. Windows PowerShell
+ * started from PowerShell 7 (GitHub's runners) inherits PowerShell 7's
+ * PSModulePath and then cannot load its own modules (certificates, signatures,
+ * processes): it gets its own path here, and stops on the first error.
+ */
+export function windowsPowerShell(script) {
+  const env = { ...process.env };
+  for (const name of Object.keys(env)) if (name.toLowerCase() === 'psmodulepath') delete env[name];
+  return execFileSync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', "$ErrorActionPreference = 'Stop'; " + script],
+    { encoding: 'utf8', env },
+  ).trim();
 }

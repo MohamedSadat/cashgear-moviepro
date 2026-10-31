@@ -9,7 +9,7 @@
 //   3. checks that the app the installer starts again is the new version;
 //   4. uninstalls it silently and checks that nothing is left behind.
 // Needs .tools/ffmpeg (pnpm setup:ffmpeg), the WebView2 Runtime and the Windows SDK.
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import {
   copyFileSync,
@@ -26,7 +26,7 @@ import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
-import { pnpmCommand, root, run } from './lib.mjs';
+import { pnpmCommand, root, run, windowsPowerShell } from './lib.mjs';
 import { makeTestCertificate } from './test-certificate.mjs';
 
 if (process.platform !== 'win32') throw new Error('The installer test runs on Windows.');
@@ -39,12 +39,6 @@ const feed = join(work, 'feed');
 const installDir = join(work, 'app');
 mkdirSync(feed, { recursive: true });
 const results = { versions: [], installer: {}, steps: {} };
-
-function powershell(script) {
-  return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
-    encoding: 'utf8',
-  }).trim();
-}
 
 function uninstallEntry() {
   const key = `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${product}`;
@@ -78,7 +72,7 @@ const appExe = () =>
   );
 
 function stopApp() {
-  powershell(
+  windowsPowerShell(
     `Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith('${installDir}') } | Stop-Process -Force`,
   );
 }
@@ -209,7 +203,7 @@ try {
   if (uninstallEntry()?.version !== versions[0])
     throw new Error('The install left no uninstall entry.');
   const files = JSON.parse(
-    powershell(
+    windowsPowerShell(
       `@(Get-ChildItem -Path '${installDir}' -Recurse -Include *.exe,*.dll | ForEach-Object { ` +
         `$s = Get-AuthenticodeSignature $_.FullName; ` +
         `[pscustomobject]@{ file = $_.FullName.Substring(${installDir.length + 1}); signer = $s.SignerCertificate.Thumbprint } }) | ConvertTo-Json`,
