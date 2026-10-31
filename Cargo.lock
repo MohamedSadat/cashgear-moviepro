@@ -404,7 +404,7 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
 name = "cgv-ai"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "cgv-dsp",
  "realfft",
@@ -414,7 +414,7 @@ dependencies = [
 
 [[package]]
 name = "cgv-audio"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "cgv-dsp",
  "rubato",
@@ -422,7 +422,7 @@ dependencies = [
 
 [[package]]
 name = "cgv-denoise"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "nnnoiseless",
  "rubato",
@@ -431,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "cgv-desktop"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "cgv-native",
  "serde",
@@ -445,7 +445,7 @@ dependencies = [
 
 [[package]]
 name = "cgv-dsp"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "ebur128",
  "realfft",
@@ -453,7 +453,7 @@ dependencies = [
 
 [[package]]
 name = "cgv-effects"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "cgv-model",
  "naga",
@@ -463,7 +463,7 @@ dependencies = [
 
 [[package]]
 name = "cgv-engine"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "cgv-audio",
  "cgv-dsp",
@@ -480,7 +480,7 @@ dependencies = [
 
 [[package]]
 name = "cgv-media"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "cgv-time",
  "serde",
@@ -489,7 +489,7 @@ dependencies = [
 
 [[package]]
 name = "cgv-model"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "cgv-time",
  "proptest",
@@ -499,7 +499,7 @@ dependencies = [
 
 [[package]]
 name = "cgv-native"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "fontdb",
  "serde",
@@ -511,7 +511,7 @@ dependencies = [
 
 [[package]]
 name = "cgv-render"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "cgv-effects",
  "cgv-model",
@@ -526,7 +526,7 @@ dependencies = [
 
 [[package]]
 name = "cgv-text"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "cgv-model",
  "rustybuzz",
@@ -538,14 +538,14 @@ dependencies = [
 
 [[package]]
 name = "cgv-time"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "cgv-wasm"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "cgv-audio",
  "cgv-dsp",

@@ -2,8 +2,9 @@
 
 CashGear Video follows [semantic versioning](https://semver.org). Each release's notes come from its section here: the release workflow copies them into the GitHub release and the update the desktop app shows.
 
-## [Unreleased]
+## [1.0.1] - 2026-10-31
 
+- **Every feature, no licence needed:** exports carry no watermark and go up to 4K, on the desktop and the web.
 - **Templates:** "Thanks for watching" keeps its thank-you on screen with the subscribe button, instead of losing it after a second. Bold intro plays its riser to the end under the impact, and Before and after shows both labels.
 
 ## [1.0.0] - 2026-10-30
@@ -23,4 +24,5 @@ The first release: a video editor for Chrome and Edge, and for Windows as a desk
 - **Web app:** installs as an app from Chrome or Edge, and starts offline once it has loaded.
 - **About:** the version, the edition and the third-party notices.
 
+[1.0.1]: https://github.com/MohamedSadat/cashgear-moviepro/releases/tag/v1.0.1
 [1.0.0]: https://github.com/MohamedSadat/cashgear-moviepro/releases/tag/v1.0.0
