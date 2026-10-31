@@ -2,6 +2,12 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-11-01: Training-video tools belong to CashGear Capture
+
+- **Answer:** "I think training video tools should be shipped with my cashgear-capture video editor". CashGear Video does not add tools for screen recordings, such as zooms that follow the pointer, click and key overlays, or pointer effects.
+  - CashGear Capture's video editor (its Phases 16 and 17) already has them: auto-zoom from clicks and typing, click highlights, keystrokes, pointer effects, annotations with keyframes, captions from speech and near-lossless export.
+- **What that leaves CashGear Video:** the general editor. The candidate for Phase 12 is a professional media pipeline: exports from originals rather than 720p proxies, 10-bit from decode to export, then scopes and grading. It is not decided yet.
+
 ## 2026-10-31: Every feature without a licence
 
 - **Answer:** "key the release full feature by default, disregard this license". A build without a licence server and keys now has every feature, releases included: no watermark, and exports up to 4K. This replaces the Phase 11 rule that a release without them is the free edition.
