@@ -340,6 +340,16 @@ impl Engine {
         self.renderer.start_nv12_readback((width, height))
     }
 
+    /// Export: the latest composition as a frame of `width` × `height` laid out as `layout`.
+    pub fn start_frame_readback(
+        &mut self,
+        width: u32,
+        height: u32,
+        layout: cgv_render::FrameLayout,
+    ) -> Result<Readback, String> {
+        self.renderer.start_frame_readback((width, height), layout)
+    }
+
     pub fn upload_still(
         &mut self,
         key: &str,

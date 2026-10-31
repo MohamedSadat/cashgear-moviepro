@@ -354,6 +354,8 @@ struct Convert {
     b: vec4<f32>,
     // x: transfer (0 SDR, 1 PQ, 2 HLG); y: 1 for BT.2020 primaries.
     mode: vec4<f32>,
+    // Deep planes: x, y: how many luma samples share a chroma sample across and down.
+    planes: vec4<f32>,
 }
 
 @group(0) @binding(10) var<uniform> convert: Convert;
@@ -361,6 +363,10 @@ struct Convert {
 @group(0) @binding(12) var plane1: texture_2d<f32>;
 @group(0) @binding(13) var plane2: texture_2d<f32>;
 @group(0) @binding(14) var plane_sampler: sampler;
+// Deep planes: 10- or 12-bit code values, read as integers.
+@group(0) @binding(15) var deep0: texture_2d<u32>;
+@group(0) @binding(16) var deep1: texture_2d<u32>;
+@group(0) @binding(17) var deep2: texture_2d<u32>;
 
 const REFERENCE_WHITE_NITS: f32 = 203.0;
 
@@ -436,6 +442,36 @@ fn fs_i420(in: FullOut) -> @location(0) vec4<f32> {
     return decode_ycc(y, cb, cr);
 }
 
+fn deep_chroma_at(plane: u32, at: vec2<i32>) -> f32 {
+    if (plane == 1u) {
+        return f32(textureLoad(deep1, at, 0).r);
+    }
+    return f32(textureLoad(deep2, at, 0).r);
+}
+
+// Chroma plane `plane` at luma pixel `p`, centre-sited and bilinear, as the
+// 8-bit planes' sampler reads them.
+fn deep_chroma(plane: u32, p: vec2<f32>) -> f32 {
+    let last = vec2<i32>(textureDimensions(deep1)) - vec2<i32>(1);
+    let c = (p + vec2<f32>(0.5)) / convert.planes.xy - vec2<f32>(0.5);
+    let base = floor(c);
+    let f = c - base;
+    let i = vec2<i32>(base);
+    let a = deep_chroma_at(plane, clamp(i, vec2<i32>(0), last));
+    let b = deep_chroma_at(plane, clamp(i + vec2<i32>(1, 0), vec2<i32>(0), last));
+    let d = deep_chroma_at(plane, clamp(i + vec2<i32>(0, 1), vec2<i32>(0), last));
+    let e = deep_chroma_at(plane, clamp(i + vec2<i32>(1, 1), vec2<i32>(0), last));
+    return mix(mix(a, b, f.x), mix(d, e, f.x), f.y);
+}
+
+// 10- and 12-bit planes, drawn at their own size: the matrix takes code values.
+@fragment
+fn fs_deep(in: FullOut) -> @location(0) vec4<f32> {
+    let p = floor(in.position.xy);
+    let y = f32(textureLoad(deep0, vec2<i32>(p), 0).r);
+    return decode_ycc(y, deep_chroma(1u, p), deep_chroma(2u, p));
+}
+
 // Straight-alpha RGBA (stored sRGB-encoded, so sampled linear) to premultiplied.
 @fragment
 fn fs_premultiply(in: FullOut) -> @location(0) vec4<f32> {
@@ -483,6 +519,9 @@ struct Export {
     picture: vec4<f32>,
     // x, y: the frame's size in pixels.
     size: vec4<f32>,
+    // Planar frames: x, y: chroma subsampling across and down; z: 1 with an alpha
+    // plane; w: texels a row of the packed target holds.
+    planar: vec4<f32>,
 }
 
 @group(0) @binding(30) var<uniform> export_info: Export;
@@ -504,6 +543,74 @@ fn export_chroma(c: vec2<f32>) -> vec2<f32> {
     let rgb = (export_rgb(p) + export_rgb(p + vec2<f32>(1.0, 0.0)) + export_rgb(p + vec2<f32>(0.0, 1.0))
         + export_rgb(p + vec2<f32>(1.0, 1.0))) * 0.25;
     return vec2<f32>(dot(export_info.cb, rgb), dot(export_info.cr, rgb));
+}
+
+// Unpremultiplied R'G'B' and the alpha at frame pixel centre `p`; transparent
+// outside the composition.
+fn export_rgba(p: vec2<f32>) -> vec4<f32> {
+    let uv = (p - export_info.picture.xy) / export_info.picture.zw;
+    let inside = all(uv >= vec2<f32>(0.0)) && all(uv < vec2<f32>(1.0));
+    let c = textureSampleLevel(export_texture, export_sampler, clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0);
+    let a = select(0.0, clamp(c.a, 0.0, 1.0), inside);
+    let rgb = select(vec3<f32>(0.0), linear_to_srgb(c.rgb / max(c.a, 1e-6)), a > 0.0);
+    return vec4<f32>(rgb, a);
+}
+
+// The colour that Y'CbCr is computed from: over black, or unpremultiplied with alpha.
+fn export_colour(p: vec2<f32>) -> vec4<f32> {
+    if (export_info.planar.z > 0.5) {
+        return vec4<f32>(export_rgba(p).rgb, 1.0);
+    }
+    return export_rgb(p);
+}
+
+// A 10-bit code: 10-bit limited-range values are the 8-bit ones times four.
+fn export_code(value: f32) -> u32 {
+    return u32(clamp(round(value * 1020.0), 0.0, 1023.0));
+}
+
+// Sample `index` of a planar 10-bit frame: luma, Cb, Cr, then alpha; 0 after them.
+fn export_sample(index: u32) -> u32 {
+    let w = u32(export_info.size.x);
+    let h = u32(export_info.size.y);
+    let step = vec2<u32>(export_info.planar.xy);
+    let cw = (w + step.x - 1u) / step.x;
+    let ch = (h + step.y - 1u) / step.y;
+    var n = index;
+    if (n < w * h) {
+        let p = vec2<f32>(f32(n % w), f32(n / w)) + vec2<f32>(0.5);
+        return export_code(dot(export_info.y, export_colour(p)));
+    }
+    n = n - w * h;
+    if (n < 2u * cw * ch) {
+        let i = n % (cw * ch);
+        let corner = vec2<f32>(f32((i % cw) * step.x), f32((i / cw) * step.y)) + vec2<f32>(0.5);
+        var rgb = vec4<f32>(0.0);
+        for (var dy = 0u; dy < step.y; dy = dy + 1u) {
+            for (var dx = 0u; dx < step.x; dx = dx + 1u) {
+                rgb = rgb + export_colour(corner + vec2<f32>(f32(dx), f32(dy)));
+            }
+        }
+        rgb = rgb / f32(step.x * step.y);
+        let row = select(export_info.cr, export_info.cb, n < cw * ch);
+        return export_code(dot(row, rgb));
+    }
+    n = n - 2u * cw * ch;
+    if (export_info.planar.z > 0.5 && n < w * h) {
+        let p = vec2<f32>(f32(n % w), f32(n / w)) + vec2<f32>(0.5);
+        return u32(round(export_rgba(p).a * 1023.0));
+    }
+    return 0u;
+}
+
+// Planar 10-bit frames: each texel holds two samples, low byte first.
+@fragment
+fn fs_export_deep(in: FullOut) -> @location(0) vec4<f32> {
+    let texel = vec2<u32>(floor(in.position.xy));
+    let first = (texel.y * u32(export_info.planar.w) + texel.x) * 2u;
+    let a = export_sample(first);
+    let b = export_sample(first + 1u);
+    return vec4<f32>(f32(a & 255u), f32(a >> 8u), f32(b & 255u), f32(b >> 8u)) / 255.0;
 }
 
 @fragment

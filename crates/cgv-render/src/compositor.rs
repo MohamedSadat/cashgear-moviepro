@@ -15,7 +15,7 @@ use cgv_model::{BlendMode, Mask, Params};
 use cgv_text::{FaceInfo, Painter, View};
 use wgpu::*;
 
-use crate::color::{rgb_to_yuv, yuv_to_rgb, FrameColor, Matrix, Transfer};
+use crate::color::{codes_to_rgb, rgb_to_yuv, yuv_to_rgb, FrameColor, Matrix, Transfer};
 use crate::geometry::{
     drawn_part, effect_size, export_picture, layer_geometry, nv12_texels, visible_map, Affine,
     CropRect, LayerGeometry, LayerTransform, Picture,
@@ -27,8 +27,8 @@ const LAYER_FORMAT: TextureFormat = TextureFormat::Rgba8UnormSrgb;
 /// Readback encodes sRGB in the shader into plain 8-bit storage.
 const READBACK_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
 const LAYER_UNIFORM_SIZE: u64 = 96;
-const CONVERT_UNIFORM_SIZE: u64 = 64;
-const EXPORT_UNIFORM_SIZE: u64 = 80;
+const CONVERT_UNIFORM_SIZE: u64 = 80;
+const EXPORT_UNIFORM_SIZE: u64 = 96;
 /// The `frame` uniform of an effect pass.
 const EFFECT_FRAME_SIZE: u64 = 64;
 /// The `Masks` uniform of the mask pass.
@@ -57,6 +57,10 @@ pub enum PlaneFormat {
     Nv12,
     /// 8-bit sRGB-encoded RGBA, opaque.
     Rgba,
+    /// Y, Cb and Cr planes of `bits`-bit samples (10 or 12) in 16-bit
+    /// little-endian words. Chroma is subsampled `chroma.0` times across and
+    /// `chroma.1` times down: 2×2 for 4:2:0, 2×1 for 4:2:2, 1×1 for 4:4:4.
+    Planar16 { bits: u32, chroma: (u32, u32) },
 }
 
 /// A CPU frame's pixels as WebCodecs `copyTo` lays them out.
@@ -390,8 +394,49 @@ struct CompTarget {
     present: [BindGroup; 2],
 }
 
-/// A readback in flight. `wait` resolves with tightly packed RGBA rows, or with
-/// an NV12 frame whose rows are `stride` bytes apart.
+/// How an export frame is laid out when it is read back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameLayout {
+    /// 8-bit NV12: luma rows, then interleaved Cb and Cr rows.
+    Nv12,
+    /// Planar 10-bit Y'CbCr in 16-bit little-endian words, as FFmpeg's
+    /// `yuv420p10le`, `yuv422p10le` and `yuv444p10le`: luma, Cb, then Cr, each
+    /// plane tightly packed. Chroma is subsampled `chroma.0` times across and
+    /// `chroma.1` times down. With `alpha` a full-range alpha plane follows, and
+    /// colour is not premultiplied (`yuva444p10le`).
+    Planar10 { chroma: (u32, u32), alpha: bool },
+}
+
+impl FrameLayout {
+    /// The bytes one frame of `frame` pixels takes.
+    pub fn bytes(self, frame: (u32, u32)) -> u64 {
+        let (width, height) = (u64::from(frame.0), u64::from(frame.1));
+        match self {
+            FrameLayout::Nv12 => width * height * 3 / 2,
+            FrameLayout::Planar10 { chroma, alpha } => {
+                let chroma_samples =
+                    width.div_ceil(u64::from(chroma.0)) * height.div_ceil(u64::from(chroma.1));
+                2 * (width * height * (1 + u64::from(alpha)) + 2 * chroma_samples)
+            }
+        }
+    }
+
+    /// The packed target: NV12 packs four bytes a texel, planar frames two
+    /// samples, so 8-bit targets can be read back on WebGL2 too.
+    fn texels(self, frame: (u32, u32)) -> (u32, u32) {
+        match self {
+            FrameLayout::Nv12 => nv12_texels(frame),
+            // A row holds `frame.0` samples.
+            FrameLayout::Planar10 { .. } => (
+                frame.0 / 2,
+                self.bytes(frame).div_ceil(2 * u64::from(frame.0)) as u32,
+            ),
+        }
+    }
+}
+
+/// A readback in flight. `wait` resolves with tightly packed RGBA rows, with an
+/// NV12 frame whose rows are `stride` bytes apart, or with a planar frame.
 pub struct Readback {
     device: Device,
     buffer: Buffer,
@@ -402,6 +447,8 @@ pub struct Readback {
     padded_row: u32,
     /// RGBA readbacks drop the row padding: the bytes a row keeps.
     tight_row: Option<u32>,
+    /// Planar frames drop the samples after their last plane.
+    length: Option<usize>,
     mapped: Rc<Cell<Option<bool>>>,
 }
 
@@ -430,7 +477,7 @@ impl Readback {
             .slice(..)
             .get_mapped_range()
             .map_err(|error| format!("Could not read the frame back: {error}"))?;
-        let pixels = match self.tight_row {
+        let mut pixels = match self.tight_row {
             Some(row) => {
                 let (row, padded) = (row as usize, self.padded_row as usize);
                 let rows = data.len() / padded;
@@ -442,6 +489,9 @@ impl Readback {
             }
             None => data.to_vec(),
         };
+        if let Some(length) = self.length {
+            pixels.truncate(length);
+        }
         drop(data);
         self.buffer.unmap();
         self.buffer.destroy();
@@ -458,9 +508,10 @@ async fn sleep_ms(ms: i32) {
     let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
 }
 
-/// The packed NV12 target of an export frame size.
+/// The packed target of an export frame size and layout.
 struct ExportTarget {
     frame: (u32, u32),
+    layout: FrameLayout,
     texture: Texture,
     view: TextureView,
 }
@@ -497,11 +548,21 @@ pub struct Compositor {
     luts: HashMap<String, (Texture, TextureView, u32)>,
     nv12_pipeline: RenderPipeline,
     i420_pipeline: RenderPipeline,
+    /// Layers from 10- and 12-bit planes: half float where the GPU renders to it,
+    /// so their precision survives until the composition.
+    deep_format: TextureFormat,
+    deep_layout: BindGroupLayout,
+    deep_pipeline: RenderPipeline,
+    /// Frame blending into deep layers.
+    deep_copy_pipeline: RenderPipeline,
+    deep_mix_pipeline: RenderPipeline,
     premultiply_pipeline: RenderPipeline,
     blit_pipeline: RenderPipeline,
     present_pipelines: HashMap<TextureFormat, RenderPipeline>,
     /// Made on the first export frame.
     export_pipeline: Option<RenderPipeline>,
+    /// Planar 10-bit export frames.
+    export_deep_pipeline: Option<RenderPipeline>,
     shader: ShaderModule,
     uniforms: Buffer,
     layer_uniforms: BindGroup,
@@ -539,6 +600,19 @@ fn texture_entry(binding: u32) -> BindGroupLayoutEntry {
         visibility: ShaderStages::FRAGMENT,
         ty: BindingType::Texture {
             sample_type: TextureSampleType::Float { filterable: true },
+            view_dimension: TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    }
+}
+
+fn uint_texture_entry(binding: u32) -> BindGroupLayoutEntry {
+    BindGroupLayoutEntry {
+        binding,
+        visibility: ShaderStages::FRAGMENT,
+        ty: BindingType::Texture {
+            sample_type: TextureSampleType::Uint,
             view_dimension: TextureViewDimension::D2,
             multisampled: false,
         },
@@ -608,6 +682,15 @@ impl Compositor {
                 texture_entry(12),
                 texture_entry(13),
                 sampler_entry(14),
+            ],
+        });
+        let deep_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Deep frame conversion"),
+            entries: &[
+                uniform_entry(10, false, CONVERT_UNIFORM_SIZE),
+                uint_texture_entry(15),
+                uint_texture_entry(16),
+                uint_texture_entry(17),
             ],
         });
         let present_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -691,17 +774,18 @@ impl Compositor {
             None,
             PrimitiveTopology::TriangleList,
         );
-        let frame_copy = |blend| {
+        let frame_copy = |format, blend| {
             Self::pipeline(
                 device,
                 &shader,
                 &[&copy_layout],
                 ("vs_full", "fs_copy"),
-                LAYER_FORMAT,
+                format,
                 blend,
                 PrimitiveTopology::TriangleList,
             )
         };
+        let deep_format = comp_format;
         let layer_pipeline = Self::pipeline(
             device,
             &shader,
@@ -817,11 +901,33 @@ impl Compositor {
             blend_pipeline,
             mask_pipeline,
             mask_layout,
-            frame_copy_pipeline: frame_copy(None),
-            frame_mix_pipeline: frame_copy(Some(BlendState {
-                color: constant,
-                alpha: constant,
-            })),
+            frame_copy_pipeline: frame_copy(LAYER_FORMAT, None),
+            frame_mix_pipeline: frame_copy(
+                LAYER_FORMAT,
+                Some(BlendState {
+                    color: constant,
+                    alpha: constant,
+                }),
+            ),
+            deep_format,
+            deep_pipeline: Self::pipeline(
+                device,
+                &shader,
+                &[&deep_layout],
+                ("vs_full", "fs_deep"),
+                deep_format,
+                None,
+                PrimitiveTopology::TriangleList,
+            ),
+            deep_layout,
+            deep_copy_pipeline: frame_copy(deep_format, None),
+            deep_mix_pipeline: frame_copy(
+                deep_format,
+                Some(BlendState {
+                    color: constant,
+                    alpha: constant,
+                }),
+            ),
             extract_pipeline,
             copy_pipeline: copy(None),
             over_pipeline: copy(Some(BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
@@ -848,6 +954,7 @@ impl Compositor {
             stills: HashMap::new(),
             comp: None,
             export: None,
+            export_deep_pipeline: None,
             frame: None,
             project: (16, 16),
             painter: Painter::default(),
@@ -1173,10 +1280,15 @@ impl Compositor {
         let second = self.copy_binding(device, &next.view);
         {
             let mut pass = begin_pass(&mut frame.encoder, "Frame blend", &target.view, true);
-            pass.set_pipeline(&self.frame_copy_pipeline);
+            let (copy, mix) = if current.key.format == LAYER_FORMAT {
+                (&self.frame_copy_pipeline, &self.frame_mix_pipeline)
+            } else {
+                (&self.deep_copy_pipeline, &self.deep_mix_pipeline)
+            };
+            pass.set_pipeline(copy);
             pass.set_bind_group(0, &first, &[]);
             pass.draw(0..3, 0..1);
-            pass.set_pipeline(&self.frame_mix_pipeline);
+            pass.set_pipeline(mix);
             let k = weight.clamp(0.0, 1.0);
             pass.set_blend_constant(Color {
                 r: k,
@@ -1253,6 +1365,9 @@ impl Compositor {
             // Opaque sRGB bytes go straight into a layer texture.
             return self.write_plane(device, queue, planes, 0, (width, height), LAYER_FORMAT, 4);
         }
+        if let PlaneFormat::Planar16 { bits, chroma } = planes.format {
+            return self.convert_deep(device, queue, planes, bits, chroma);
+        }
         let chroma = (width.div_ceil(2), height.div_ceil(2));
         let nv12 = planes.format == PlaneFormat::Nv12;
         let r8 = TextureFormat::R8Unorm;
@@ -1285,6 +1400,7 @@ impl Compositor {
         };
         let mut values: Vec<f32> = matrix.iter().flatten().copied().collect();
         values.extend([transfer, wide, 0.0, 0.0]);
+        values.extend([1.0, 1.0, 0.0, 0.0]);
         let frame = self.frame.as_mut().unwrap();
         let offset = Self::slot(frame, self.align, &floats(&values))?;
         let output = self.pool.acquire(
@@ -1345,6 +1461,89 @@ impl Compositor {
             } else {
                 &self.i420_pipeline
             });
+            pass.set_bind_group(0, &binding, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        frame.planes.extend(used);
+        Ok(output)
+    }
+
+    /// Converts 10- or 12-bit planes into a deep layer texture. The planes are
+    /// read as integers, so no level is lost before the conversion.
+    fn convert_deep(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        planes: &Planes,
+        bits: u32,
+        chroma: (u32, u32),
+    ) -> Result<Pooled, String> {
+        if !(9..=16).contains(&bits) || !(1..=2).contains(&chroma.0) || !(1..=2).contains(&chroma.1)
+        {
+            return Err(format!(
+                "{bits}-bit planes with {chroma:?} chroma are not supported"
+            ));
+        }
+        let (width, height) = (planes.width, planes.height);
+        let size = (width.div_ceil(chroma.0), height.div_ceil(chroma.1));
+        let r16 = TextureFormat::R16Uint;
+        let used = vec![
+            self.write_plane(device, queue, planes, 0, (width, height), r16, 2)?,
+            self.write_plane(device, queue, planes, 1, size, r16, 2)?,
+            self.write_plane(device, queue, planes, 2, size, r16, 2)?,
+        ];
+        let color = planes.color;
+        let matrix = codes_to_rgb(color.matrix, color.full_range, bits);
+        let transfer = match color.transfer {
+            Transfer::Sdr => 0.0,
+            Transfer::Pq => 1.0,
+            Transfer::Hlg => 2.0,
+        };
+        let wide = if color.transfer != Transfer::Sdr && color.matrix == Matrix::Bt2020 {
+            1.0
+        } else {
+            0.0
+        };
+        let mut values: Vec<f32> = matrix.iter().flatten().copied().collect();
+        values.extend([transfer, wide, 0.0, 0.0]);
+        values.extend([chroma.0 as f32, chroma.1 as f32, 0.0, 0.0]);
+        let frame = self.frame.as_mut().unwrap();
+        let offset = Self::slot(frame, self.align, &floats(&values))?;
+        let output = self.pool.acquire(
+            device,
+            TextureKey {
+                width,
+                height,
+                format: self.deep_format,
+            },
+        );
+        let mut entries = vec![BindGroupEntry {
+            binding: 10,
+            resource: BindingResource::Buffer(BufferBinding {
+                buffer: &self.uniforms,
+                offset,
+                size: BufferSize::new(CONVERT_UNIFORM_SIZE),
+            }),
+        }];
+        for (binding, plane) in (15..).zip(&used) {
+            entries.push(BindGroupEntry {
+                binding,
+                resource: BindingResource::TextureView(&plane.view),
+            });
+        }
+        let binding = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Deep frame conversion"),
+            layout: &self.deep_layout,
+            entries: &entries,
+        });
+        {
+            let mut pass = begin_pass(
+                &mut frame.encoder,
+                "Deep frame conversion",
+                &output.view,
+                true,
+            );
+            pass.set_pipeline(&self.deep_pipeline);
             pass.set_bind_group(0, &binding, &[]);
             pass.draw(0..3, 0..1);
         }
@@ -2768,6 +2967,7 @@ impl Compositor {
             height,
             padded_row,
             tight_row: Some(width * 4),
+            length: None,
         })
     }
 
@@ -2778,6 +2978,19 @@ impl Compositor {
         device: &Device,
         queue: &Queue,
         frame: (u32, u32),
+    ) -> Result<Readback, String> {
+        self.start_frame_readback(device, queue, frame, FrameLayout::Nv12)
+    }
+
+    /// Reads the last composition back as an export frame of `frame` pixels laid
+    /// out as `layout`, BT.709 limited range: the composition centred over black,
+    /// or over transparency where the layout has alpha. `frame` must have even sides.
+    pub fn start_frame_readback(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        frame: (u32, u32),
+        layout: FrameLayout,
     ) -> Result<Readback, String> {
         if frame.0 < 2 || frame.1 < 2 || frame.0 % 2 == 1 || frame.1 % 2 == 1 {
             return Err(format!(
@@ -2790,7 +3003,7 @@ impl Compositor {
             .as_ref()
             .map(|comp| (comp.width, comp.height))
             .ok_or("Nothing has been composed yet")?;
-        let texels = nv12_texels(frame);
+        let texels = layout.texels(frame);
         let limit = device.limits().max_texture_dimension_2d;
         if texels.0 > limit || texels.1 > limit {
             return Err(format!(
@@ -2801,7 +3014,7 @@ impl Compositor {
         if self
             .export
             .as_ref()
-            .is_none_or(|target| target.frame != frame)
+            .is_none_or(|target| target.frame != frame || target.layout != layout)
         {
             if let Some(old) = self.export.take() {
                 old.texture.destroy();
@@ -2823,21 +3036,27 @@ impl Compositor {
             let view = texture.create_view(&TextureViewDescriptor::default());
             self.export = Some(ExportTarget {
                 frame,
+                layout,
                 texture,
                 view,
             });
         }
-        if self.export_pipeline.is_none() {
-            self.export_pipeline = Some(Self::pipeline(
+        let (slot, entry) = match layout {
+            FrameLayout::Nv12 => (&mut self.export_pipeline, "fs_export"),
+            FrameLayout::Planar10 { .. } => (&mut self.export_deep_pipeline, "fs_export_deep"),
+        };
+        if slot.is_none() {
+            *slot = Some(Self::pipeline(
                 device,
                 &self.shader,
                 &[&self.export_layout],
-                ("vs_full", "fs_export"),
+                ("vs_full", entry),
                 READBACK_FORMAT,
                 None,
                 PrimitiveTopology::TriangleList,
             ));
         }
+        let pipeline = slot.as_ref().unwrap().clone();
         let picture = export_picture(frame, (comp_width, comp_height));
         let mut values: Vec<f32> = rgb_to_yuv(Matrix::Bt709, false)
             .iter()
@@ -2846,6 +3065,16 @@ impl Compositor {
             .collect();
         values.extend(picture.map(|value| value as f32));
         values.extend([frame.0 as f32, frame.1 as f32, 0.0, 0.0]);
+        let (chroma, alpha) = match layout {
+            FrameLayout::Nv12 => ((2, 2), false),
+            FrameLayout::Planar10 { chroma, alpha } => (chroma, alpha),
+        };
+        values.extend([
+            chroma.0 as f32,
+            chroma.1 as f32,
+            f32::from(u8::from(alpha)),
+            texels.0 as f32,
+        ]);
         queue.write_buffer(&self.export_uniforms, 0, &floats(&values));
 
         let comp = self.comp.as_ref().unwrap();
@@ -2893,7 +3122,7 @@ impl Compositor {
                 })],
                 ..Default::default()
             });
-            pass.set_pipeline(self.export_pipeline.as_ref().unwrap());
+            pass.set_pipeline(&pipeline);
             pass.set_bind_group(0, &binding, &[]);
             pass.draw(0..3, 0..1);
         }
@@ -2926,7 +3155,15 @@ impl Compositor {
             width: frame.0,
             height: frame.1,
             padded_row,
-            tight_row: None,
+            // Planar frames come back as one run of samples, without row padding.
+            tight_row: match layout {
+                FrameLayout::Nv12 => None,
+                FrameLayout::Planar10 { .. } => Some(texels.0 * 4),
+            },
+            length: match layout {
+                FrameLayout::Nv12 => None,
+                FrameLayout::Planar10 { .. } => Some(layout.bytes(frame) as usize),
+            },
         })
     }
 

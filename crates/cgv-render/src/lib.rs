@@ -12,7 +12,8 @@ pub mod pattern;
 mod renderer;
 #[cfg(target_arch = "wasm32")]
 pub use compositor::{
-    EffectRun, FrameSource, LayerDraw, LayerStep, LutUse, PlaneFormat, Planes, Readback, Step,
+    EffectRun, FrameLayout, FrameSource, LayerDraw, LayerStep, LutUse, PlaneFormat, Planes,
+    Readback, Step,
 };
 #[cfg(target_arch = "wasm32")]
 pub use renderer::{now_ms, Renderer};

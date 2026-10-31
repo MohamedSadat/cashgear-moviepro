@@ -62,25 +62,58 @@ impl FrameColor {
 
 /// Rows of the 3×4 matrix that takes `(Y, Cb, Cr, 1)` samples (0 to 1) to R'G'B'.
 pub fn yuv_to_rgb(matrix: Matrix, full_range: bool) -> [[f32; 4]; 3] {
+    // Y' = y_scale·Y + y_offset, C' = c_scale·C + c_offset (8-bit code ranges).
+    if full_range {
+        ycc_rows(matrix, (1.0, 0.0), (1.0, -128.0 / 255.0), 1.0)
+    } else {
+        ycc_rows(
+            matrix,
+            (255.0 / 219.0, -16.0 / 219.0),
+            (255.0 / 224.0, -128.0 / 224.0),
+            1.0,
+        )
+    }
+}
+
+/// Rows of the 3×4 matrix that takes `(Y, Cb, Cr, 1)` code values of `bits`-bit
+/// samples (64 to 940 for 10-bit limited-range luma) to R'G'B'.
+pub fn codes_to_rgb(matrix: Matrix, full_range: bool, bits: u32) -> [[f32; 4]; 3] {
+    let top = f64::from((1u32 << bits) - 1);
+    if full_range {
+        let half = f64::from(1u32 << (bits - 1));
+        ycc_rows(
+            matrix,
+            (1.0 / top, 0.0),
+            (1.0 / top, -half / top),
+            1.0 / top,
+        )
+    } else {
+        // Limited-range codes are the 8-bit ones scaled by 2^(bits − 8).
+        let step = f64::from(1u32 << (bits - 8));
+        ycc_rows(
+            matrix,
+            (1.0 / (219.0 * step), -16.0 / 219.0),
+            (1.0 / (224.0 * step), -128.0 / 224.0),
+            1.0 / top,
+        )
+    }
+}
+
+/// The matrix rows for Y' = `y.0`·Y + `y.1` and C' = `c.0`·C + `c.1`; `rgb` scales
+/// R'G'B' samples, which are already R'G'B'.
+fn ycc_rows(matrix: Matrix, y: (f64, f64), c: (f64, f64), rgb: f64) -> [[f32; 4]; 3] {
     let (kr, kb) = match matrix {
         Matrix::Bt709 => (0.2126, 0.0722),
         Matrix::Bt601 => (0.299, 0.114),
         Matrix::Bt2020 => (0.2627, 0.0593),
         Matrix::Rgb => {
-            return [
-                [0.0, 0.0, 1.0, 0.0],
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-            ]
+            let k = rgb as f32;
+            return [[0.0, 0.0, k, 0.0], [k, 0.0, 0.0, 0.0], [0.0, k, 0.0, 0.0]];
         }
     };
     let kg = 1.0 - kr - kb;
-    // Y' = y_scale·Y + y_offset, C' = c_scale·C + c_offset (8-bit code ranges).
-    let (y_scale, y_offset, c_scale, c_offset): (f64, f64, f64, f64) = if full_range {
-        (1.0, 0.0, 1.0, -128.0 / 255.0)
-    } else {
-        (255.0 / 219.0, -16.0 / 219.0, 255.0 / 224.0, -128.0 / 224.0)
-    };
+    let (y_scale, y_offset) = y;
+    let (c_scale, c_offset) = c;
     let cr_r = 2.0 * (1.0 - kr);
     let cb_g = -2.0 * kb * (1.0 - kb) / kg;
     let cr_g = -2.0 * kr * (1.0 - kr) / kg;
@@ -219,6 +252,33 @@ mod tests {
 
     fn near(actual: [f64; 3], expected: [f64; 3]) {
         within(actual, expected, 1e-5);
+    }
+
+    #[test]
+    fn high_bit_depth_codes_match_their_8_bit_values() {
+        let codes = |m: [[f32; 4]; 3], y: f64, cb: f64, cr: f64| {
+            m.map(|row| row[0] as f64 * y + row[1] as f64 * cb + row[2] as f64 * cr + row[3] as f64)
+        };
+        for matrix in [Matrix::Bt709, Matrix::Bt601, Matrix::Bt2020] {
+            let ten = codes_to_rgb(matrix, false, 10);
+            near(codes(ten, 64.0, 512.0, 512.0), [0.0; 3]);
+            near(codes(ten, 940.0, 512.0, 512.0), [1.0; 3]);
+            // A 10-bit code four times an 8-bit one is the same colour.
+            let eight = yuv_to_rgb(matrix, false);
+            near(
+                codes(ten, 4.0 * 81.0, 4.0 * 90.0, 4.0 * 240.0),
+                apply(eight, 81.0, 90.0, 240.0),
+            );
+            let twelve = codes_to_rgb(matrix, false, 12);
+            near(codes(twelve, 3760.0, 2048.0, 2048.0), [1.0; 3]);
+            let full = codes_to_rgb(matrix, true, 10);
+            near(codes(full, 0.0, 512.0, 512.0), [0.0; 3]);
+            near(codes(full, 1023.0, 512.0, 512.0), [1.0; 3]);
+        }
+        // A step of one 10-bit code is a quarter of an 8-bit one.
+        let ten = codes_to_rgb(Matrix::Bt709, false, 10);
+        let step = codes(ten, 501.0, 512.0, 512.0)[1] - codes(ten, 500.0, 512.0, 512.0)[1];
+        assert!((step - 1.0 / 876.0).abs() < 1e-7, "{step}");
     }
 
     #[test]

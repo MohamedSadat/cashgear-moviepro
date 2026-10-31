@@ -5,7 +5,7 @@ use wasm_bindgen::JsCast;
 use web_sys::OffscreenCanvas;
 use wgpu::*;
 
-use crate::compositor::{Compositor, FrameSource, Readback, Step};
+use crate::compositor::{Compositor, FrameLayout, FrameSource, Readback, Step};
 use crate::geometry::letterbox;
 use crate::pattern::PatternUniforms;
 
@@ -514,6 +514,16 @@ impl Renderer {
     pub fn start_nv12_readback(&mut self, frame: (u32, u32)) -> Result<Readback, String> {
         self.compositor
             .start_nv12_readback(&self.device, &self.queue, frame)
+    }
+
+    /// Reads the latest composition back as an export frame of `frame` pixels.
+    pub fn start_frame_readback(
+        &mut self,
+        frame: (u32, u32),
+        layout: FrameLayout,
+    ) -> Result<Readback, String> {
+        self.compositor
+            .start_frame_readback(&self.device, &self.queue, frame, layout)
     }
 
     pub fn dispose(&mut self) {

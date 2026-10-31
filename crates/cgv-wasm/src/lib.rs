@@ -267,6 +267,44 @@ mod bridge {
                 Ok(result.into())
             }))
         }
+        /// Export: resolves with `{ width, height, data }`, the latest composition
+        /// as a planar 10-bit frame, BT.709 limited range, in FFmpeg's `format`:
+        /// `yuv420p10le`, `yuv422p10le`, `yuv444p10le` (centred over black) or
+        /// `yuva444p10le` (over transparency, colour not premultiplied).
+        pub fn read_yuv10(
+            &mut self,
+            width: u32,
+            height: u32,
+            format: &str,
+        ) -> Result<js_sys::Promise, JsValue> {
+            let layout = match format {
+                "yuv420p10le" => (2, 2, false),
+                "yuv422p10le" => (2, 1, false),
+                "yuv444p10le" => (1, 1, false),
+                "yuva444p10le" => (1, 1, true),
+                other => return Err(js_error(format!("{other} is not a 10-bit export format"))),
+            };
+            let readback = self
+                .inner
+                .start_frame_readback(
+                    width,
+                    height,
+                    cgv_render::FrameLayout::Planar10 {
+                        chroma: (layout.0, layout.1),
+                        alpha: layout.2,
+                    },
+                )
+                .map_err(js_error)?;
+            Ok(wasm_bindgen_futures::future_to_promise(async move {
+                let data = readback.wait().await.map_err(js_error)?;
+                let result = js_sys::Object::new();
+                js_sys::Reflect::set(&result, &"width".into(), &width.into())?;
+                js_sys::Reflect::set(&result, &"height".into(), &height.into())?;
+                let data = js_sys::Uint8Array::from(data.as_slice());
+                js_sys::Reflect::set(&result, &"data".into(), &data)?;
+                Ok(result.into())
+            }))
+        }
         /// The scale that fits a project of `project_width` × `project_height` in an
         /// export frame, keeping its shape.
         pub fn export_scale(
@@ -380,6 +418,16 @@ mod bridge {
             "I420" => cgv_render::PlaneFormat::I420,
             "NV12" => cgv_render::PlaneFormat::Nv12,
             "RGBA" | "RGBX" => cgv_render::PlaneFormat::Rgba,
+            "I420P10" | "I422P10" | "I444P10" | "I420P12" | "I422P12" | "I444P12" => {
+                cgv_render::PlaneFormat::Planar16 {
+                    bits: if format.ends_with("P10") { 10 } else { 12 },
+                    chroma: match &format[..4] {
+                        "I420" => (2, 2),
+                        "I422" => (2, 1),
+                        _ => (1, 1),
+                    },
+                }
+            }
             other => return Err(js_error(format!("{other} frames are not supported"))),
         };
         let plane = |i: usize| {
