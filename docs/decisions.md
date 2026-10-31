@@ -10,6 +10,13 @@ Dated entries, newest first. Every answer to a phase question is recorded here, 
   - With no updater key yet, the release has no `latest.json`, and 1.0.0 can never update itself: its users install later versions over it.
 - **Its other files:** `ffmpeg-source.tar.gz` and `third-party-notices.txt`, as `release-assets.mjs` makes them. The notes are the changelog's, after a note on the test certificate, the free edition and updates.
 - **Local installers (a finding):** an installer built here after a plain `pnpm build` is not a release build. It is Pro without a licence server, so it must never be shared: share the release's installer.
+- **Installing from Claude's shell (a finding):** the Claude desktop app is a packaged (MSIX) app, and Windows redirects what its shells write to `AppData` into `AppData\Local\Packages\Claude_…\LocalCache`, while `HKCU` and `%TEMP%` writes are real.
+  - A local installer test left its install (in `%TEMP%`) recorded in `HKCU\Software\CashGear\CashGear Video`, so the user's own 1.0.0 install went into that temp folder.
+  - An install run from the shell put its files in the package's copy of `AppData` but its registry entries and Desktop shortcut in the real ones.
+  - Fixed by uninstalling both and running the installer through `explorer.exe` (outside the package) with `/S /D=%LOCALAPPDATA%\CashGear Video`. The uninstaller keeps the recorded folder unless app data is deleted too, so a reinstall without `/D` returns to the old one.
+- **Templates (a finding):** placing a template overwrites, so two clips playing together on one template track cut each other. Three templates did this: Thanks for watching (its thank-you vanished after 0.9 s, cut by the subscribe button), Bold intro (the riser stopped at the impact) and Before and after (the After label replaced the Before one).
+  - Each clip of those now has a track of its own.
+  - `make-project-templates.mjs` and the template tests refuse overlapping clips on a track.
 
 ## 2026-10-30: Phase 11 findings and defaults
 
