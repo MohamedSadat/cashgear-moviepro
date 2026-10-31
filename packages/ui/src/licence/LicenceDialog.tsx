@@ -20,8 +20,10 @@ export function LicenceDialog({
   const [key, setKey] = useState('');
   const { status, busy, error } = licence;
   const machine = platform === 'desktop' ? 'computer' : 'browser';
-  const pro = status.edition === 'pro' && status.state !== 'development';
-  const canActivate = status.state !== 'development' && status.state !== 'unavailable' && !pro;
+  // Without a licence server there is nothing to activate: every feature is on.
+  const unlicensed = status.state === 'development' || status.state === 'included';
+  const pro = status.edition === 'pro' && !unlicensed;
+  const canActivate = !unlicensed && !pro;
   return (
     <Dialog
       title="Licence"
@@ -54,9 +56,7 @@ export function LicenceDialog({
         {status.state === 'development' && (
           <p>This is a development build: every feature is on. Release builds check a licence.</p>
         )}
-        {status.state === 'unavailable' && (
-          <p>Licensing is not set up in this build, so it is the free edition. {freeLimits}</p>
-        )}
+        {status.state === 'included' && <p>Every feature is included: no licence is needed.</p>}
         {pro && (
           <>
             <p>

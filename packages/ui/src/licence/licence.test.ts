@@ -66,15 +66,15 @@ describe('licence config', () => {
     });
   });
 
-  it('is Pro in development builds and free in releases without a server', () => {
+  it('has every feature without a licence server, in development builds and releases', () => {
     const empty = { server: null, keys: [] };
     expect(evaluate({ ...empty, release: false }, null, 'm', 0)).toMatchObject({
       edition: 'pro',
       state: 'development',
     });
     expect(evaluate({ ...empty, release: true }, payload, payload.machine, issued)).toMatchObject({
-      edition: 'free',
-      state: 'unavailable',
+      edition: 'pro',
+      state: 'included',
     });
   });
 });

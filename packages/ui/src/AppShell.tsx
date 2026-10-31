@@ -374,18 +374,21 @@ export function AppShell({ platform }: Props) {
             Update to {updates.available.version}
           </button>
         )}
-        <button
-          type="button"
-          className={
-            'cgv-licence-badge' + (licence.status.edition === 'pro' ? ' cgv-licence-pro' : '')
-          }
-          data-testid="open-licence"
-          data-edition={licence.status.edition}
-          title="Licence"
-          onClick={() => setDialog('licence')}
-        >
-          {licence.status.edition === 'pro' ? 'Pro' : 'Free'}
-        </button>
+        {/* A release without licensing has every feature, and nothing to show here. */}
+        {licence.status.state !== 'included' && (
+          <button
+            type="button"
+            className={
+              'cgv-licence-badge' + (licence.status.edition === 'pro' ? ' cgv-licence-pro' : '')
+            }
+            data-testid="open-licence"
+            data-edition={licence.status.edition}
+            title="Licence"
+            onClick={() => setDialog('licence')}
+          >
+            {licence.status.edition === 'pro' ? 'Pro' : 'Free'}
+          </button>
+        )}
         <button
           type="button"
           className="cgv-primary"

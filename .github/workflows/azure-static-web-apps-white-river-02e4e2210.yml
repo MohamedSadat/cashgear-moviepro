@@ -46,7 +46,7 @@ jobs:
       - run: pnpm build
         env:
           # The public web app is a release build: without a licence server and its
-          # keys (repository variables) it is the free edition, never Pro.
+          # keys (repository variables) it has every feature.
           VITE_CGV_RELEASE: '1'
           VITE_CGV_LICENCE_SERVER: ${{ vars.CGV_LICENCE_SERVER }}
           VITE_CGV_LICENCE_KEYS: ${{ vars.CGV_LICENCE_KEYS }}

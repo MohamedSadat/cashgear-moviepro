@@ -3,7 +3,7 @@
 // a signed envelope that the app checks offline with the public keys it was built
 // with. The token is refreshed while the app is online; without a refresh Pro keeps
 // working for 14 days after the last one, and then the app is the free edition
-// until a refresh succeeds.
+// until a refresh succeeds. A build without a licence server has every feature.
 
 export const PRODUCT = 'cashgear-video';
 /** A token older than this is refreshed when the server can be reached. */
@@ -18,7 +18,7 @@ export interface LicenceConfig {
   server: string | null;
   /** Public keys (SubjectPublicKeyInfo, base64) that tokens may be signed with. */
   keys: string[];
-  /** A release build: without a server and keys it is the free edition, never Pro. */
+  /** A release build: it takes no server or keys from the page's address. */
   release: boolean;
 }
 
@@ -104,8 +104,8 @@ export type Edition = 'free' | 'pro';
 export type LicenceState =
   /** A build that is not a release, with no licence server: every feature is on. */
   | 'development'
-  /** A release built without a licence server: the free edition only. */
-  | 'unavailable'
+  /** A release built without a licence server: every feature is included. */
+  | 'included'
   | 'free'
   | 'active'
   /** Pro, but not refreshed for over a week: the grace period is running out. */
@@ -132,9 +132,7 @@ const none = { licenceId: null, checkedAt: null, graceUntil: null, expiresAt: nu
 /** The status before any token is read. */
 export function baseStatus(config: LicenceConfig): LicenceStatus {
   if (config.server && config.keys.length) return { edition: 'free', state: 'free', ...none };
-  return config.release
-    ? { edition: 'free', state: 'unavailable', ...none }
-    : { edition: 'pro', state: 'development', ...none };
+  return { edition: 'pro', state: config.release ? 'included' : 'development', ...none };
 }
 
 /**

@@ -42,9 +42,11 @@ export function AboutDialog({
   const edition =
     licence.state === 'development'
       ? 'Development build'
-      : licence.edition === 'pro'
-        ? 'Pro'
-        : 'Free edition';
+      : licence.state === 'included'
+        ? 'Full edition'
+        : licence.edition === 'pro'
+          ? 'Pro'
+          : 'Free edition';
   return (
     <Dialog
       title="About CashGear Video"
