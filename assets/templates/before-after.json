@@ -76,7 +76,7 @@
       ]
     },
     {
-      "name": "Titles",
+      "name": "Before label",
       "clips": [
         {
           "type": "title",
@@ -92,7 +92,12 @@
               "scaleY": 0.6
             }
           }
-        },
+        }
+      ]
+    },
+    {
+      "name": "After label",
+      "clips": [
         {
           "type": "title",
           "template": "default",

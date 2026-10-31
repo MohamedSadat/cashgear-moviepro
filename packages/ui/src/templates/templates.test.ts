@@ -98,6 +98,13 @@ describe('project templates', () => {
           expect(from ?? to).toBeTruthy();
           if (from && to) expect(from.at + from.seconds).toBeCloseTo(to.at);
         }
+        // One clip at a time: placing overwrites, so a clip starting under another
+        // would cut it short.
+        const timed = [...track.clips].sort((a, b) => a.at - b.at);
+        for (let i = 1; i < timed.length; i++)
+          expect(timed[i - 1].at + timed[i - 1].seconds, track.name).toBeLessThanOrEqual(
+            timed[i].at + 1e-9,
+          );
       }
       // Slots count from 1 with no gaps, as the browser fills them.
       expect([...new Set(slots)].sort((a, b) => a - b)).toEqual(

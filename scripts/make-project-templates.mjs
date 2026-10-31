@@ -442,11 +442,12 @@ function template(id, body) {
         clips: [{ type: 'slot', slot: 2, at: 0, seconds: 5, properties: half(false) }],
       },
       {
-        name: 'Titles',
-        clips: [
-          title('default', 0.3, 4.2, ['Before'], place(-480, 380, 0.6)),
-          title('default', 0.3, 4.2, ['After'], place(480, 380, 0.6)),
-        ],
+        name: 'Before label',
+        clips: [title('default', 0.3, 4.2, ['Before'], place(-480, 380, 0.6))],
+      },
+      {
+        name: 'After label',
+        clips: [title('default', 0.3, 4.2, ['After'], place(480, 380, 0.6))],
       },
       {
         name: 'Music',
@@ -566,7 +567,8 @@ template('bold-intro', {
       ],
     },
     { name: 'Titles', clips: [title('neon', 0.6, 3.4, ['YOUR CHANNEL'])] },
-    { name: 'Sounds', clips: [sound('riser', 0, 1.2), sound('impact', 0.6, 2.5)] },
+    { name: 'Riser', clips: [sound('riser', 0, 1.2)] },
+    { name: 'Impact', clips: [sound('impact', 0.6, 2.5)] },
   ],
 });
 template('logo-reveal', {
@@ -634,11 +636,9 @@ template('thanks-outro', {
     },
     {
       name: 'Titles',
-      clips: [
-        title('default', 0.3, 4.4, ['Thanks for watching'], place(0, -120, 0.9)),
-        title('subscribe', 1.2, 3.5, undefined, place(0, 180, 0.8)),
-      ],
+      clips: [title('default', 0.3, 4.4, ['Thanks for watching'], place(0, -120, 0.9))],
     },
+    { name: 'Subscribe', clips: [title('subscribe', 1.2, 3.5, undefined, place(0, 180, 0.8))] },
     { name: 'Stickers', clips: [sticker('thumbs-up', 1.5, 3.2, place(560, 180, 0.3))] },
     { name: 'Sounds', clips: [sound('ding', 1.2, 1.8)] },
   ],
@@ -682,8 +682,16 @@ template('credits-outro', {
   ],
 });
 
-// Every template's length and slots, and a check that its slots are numbered from 1.
+// Every template's length and slots, and checks that its slots are numbered from 1
+// and that each track plays one clip at a time: placing a template overwrites, so a
+// clip starting under another would cut it short.
 for (const { id, body } of all) {
+  for (const track of body.tracks) {
+    const timed = [...track.clips].sort((a, b) => a.at - b.at);
+    for (let i = 1; i < timed.length; i++)
+      if (timed[i - 1].at + timed[i - 1].seconds > timed[i].at + 1e-9)
+        throw new Error(`${id}: clips overlap on the ${track.name} track`);
+  }
   const clips = body.tracks.flatMap((track) => track.clips);
   const end = Math.max(...clips.map((clip) => clip.at + clip.seconds));
   body.seconds = Math.round(end * 1000) / 1000;

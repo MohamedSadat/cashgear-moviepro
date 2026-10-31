@@ -2,6 +2,10 @@
 
 CashGear Video follows [semantic versioning](https://semver.org). Each release's notes come from its section here: the release workflow copies them into the GitHub release and the update the desktop app shows.
 
+## [Unreleased]
+
+- **Templates:** "Thanks for watching" keeps its thank-you on screen with the subscribe button, instead of losing it after a second. Bold intro plays its riser to the end under the impact, and Before and after shows both labels.
+
 ## [1.0.0] - 2026-10-30
 
 The first release: a video editor for Chrome and Edge, and for Windows as a desktop app, from one engine.

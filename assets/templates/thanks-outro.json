@@ -64,7 +64,12 @@
               "scaleY": 0.9
             }
           }
-        },
+        }
+      ]
+    },
+    {
+      "name": "Subscribe",
+      "clips": [
         {
           "type": "title",
           "template": "subscribe",

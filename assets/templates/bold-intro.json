@@ -45,14 +45,19 @@
       ]
     },
     {
-      "name": "Sounds",
+      "name": "Riser",
       "clips": [
         {
           "type": "sound",
           "sound": "riser",
           "at": 0,
           "seconds": 1.2
-        },
+        }
+      ]
+    },
+    {
+      "name": "Impact",
+      "clips": [
         {
           "type": "sound",
           "sound": "impact",
