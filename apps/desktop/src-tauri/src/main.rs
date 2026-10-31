@@ -2,6 +2,8 @@
 
 mod export;
 mod fonts;
+#[cfg(windows)]
+mod frames;
 mod licence;
 mod media;
 mod project;
@@ -39,6 +41,8 @@ fn main() {
             app.manage(media);
             app.manage(project::ProjectState::new(app.handle()));
             app.manage(export::ExportState::default());
+            #[cfg(windows)]
+            app.manage(frames::FrameState::default());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -61,6 +65,16 @@ fn main() {
             export::export_finish,
             export::export_cancel,
             fonts::fonts_installed,
+            #[cfg(windows)]
+            frames::frames_open,
+            #[cfg(windows)]
+            frames::frames_close,
+            #[cfg(windows)]
+            frames::frames_reset,
+            #[cfg(windows)]
+            frames::frames_fill,
+            #[cfg(windows)]
+            frames::frames_sum,
             licence::licence_machine,
             media::media_pick,
             media::media_register,

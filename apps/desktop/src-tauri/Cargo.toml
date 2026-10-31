@@ -20,5 +20,10 @@ tauri-plugin-dialog = "2"
 tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls"] }
 uuid = { version = "1", features = ["v4"] }
 
+# WebView2 shared buffers for raw frames (frames.rs): the versions wry already uses.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows-core = "0.62"
+
 [features]
 custom-protocol = ["tauri/custom-protocol"]
