@@ -2,6 +2,25 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-11-01: Phase 12 findings and defaults
+
+- **The 10-bit test set:** `tests/e2e/deep-colour.ts` draws a luma ramp through every limited-range 10-bit level (64 to 940, so 877 levels) on neutral chroma. The pinned FFmpeg encodes it during the tests:
+  - ProRes 422 HQ (`prores_ks`) and DNxHR HQX (`dnxhd`), in MOV.
+  - Lossless VP9 profile 2 in WebM, and lossless AV1 (`libaom-av1`) in MP4.
+  - Each clip takes 0.5 to 2.4 s to make at 1080p or 4K, and FFmpeg decodes all 877 levels back from every one. HEVC Main10 needs a GPU encoder, which CI lacks, so it is not in the set.
+- **10-bit decoding (measured in Chrome 156.0.8078.79 and Edge 156.0.4314.50, GTX 1650):** the same in both browsers.
+  - Software decoders give `I420P10` frames, whose planes keep all 877 levels (VP9 and AV1, 1080p and 4K).
+  - Hardware decoders give opaque GPU frames (VP9; this GPU has no AV1 decoder). Copying one to a texture keeps 255 levels, even into `rgba16float`. Software frames copied by the browser keep 255 too, and a `<video>` element turns AV1 10-bit into 8-bit NV12. The browser converts to 8 bits on every path except reading the planes.
+  - So 10-bit pictures keep their precision only as planes the compositor converts itself. Exports decode 10-bit media in software. Playback may still show hardware frames, at 8 bits.
+  - Browsers have no software HEVC decoder, so HEVC Main10 stays 8-bit on the web. On the desktop, FFmpeg decodes it for exports.
+  - ProRes and DNxHR do not decode on the web at all (they are "unsupported", as before).
+- **Frames between native code and the page (measured in the desktop app, WebView2 156.0.4314.50):**
+  - The cgv-media protocol carried 45 MB/s (whole files and 33 MB ranges).
+  - Tauri's IPC with raw bodies carried 11 MB/s (33 MB writes into an export file).
+  - WebView2 shared buffers carried 1,235 MB/s from native code to the page and 1,480 MB/s back, including filling, copying and reading each 33 MB frame.
+  - A 4K frame at 10-bit 4:2:2 is 33 MB, so frames go through shared buffers (`apps/desktop/src-tauri/src/frames.rs`), and only slot numbers cross the IPC. The protocol and the IPC would need 3.7 s a frame.
+- **Frame channels:** a channel is up to eight slots, each up to an 8K frame at 12-bit 4:4:4 with alpha. One side owns a slot at a time. The page resets every channel when it starts, so a reload leaves none mapped.
+
 ## 2026-11-01: Phase 12 answers
 
 - **Raw frames:** "Yes, for exports". On the desktop, raw frames may cross between the native side and the webview during exports. FFmpeg decodes originals the webview cannot (ProRes, DNxHR) for the export worker, and encodes masters from its frames. Playback stays on proxies. `CLAUDE.md`'s hard limit now says so.
