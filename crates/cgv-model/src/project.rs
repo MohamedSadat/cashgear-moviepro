@@ -47,6 +47,14 @@ id_type!(
     ElementId
 );
 id_type!(MaskId);
+id_type!(
+    /// A sequence: a timeline of its own, which sequence clips show.
+    SequenceId
+);
+
+/// Sequences nest at most this deep: a sequence clip inside a sequence clip, and
+/// so on.
+pub const MAX_NESTING: usize = 16;
 
 /// A project: settings, the media it uses, its tracks and markers.
 ///
@@ -71,9 +79,71 @@ pub struct Project {
     /// Colour lookup tables effects use, kept in the project so it travels whole.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub luts: Vec<Arc<Lut>>,
-    /// The next track, clip, marker, link, effect, transition or LUT id. Counting
-    /// within the project keeps replays and undo exact.
+    /// Timelines besides the main one, which sequence clips show, in the order
+    /// they were made.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sequences: Vec<Arc<Sequence>>,
+    /// The next track, clip, marker, link, effect, transition, LUT or sequence id.
+    /// Counting within the project keeps replays and undo exact.
     pub next_id: u64,
+    /// While a command runs inside a sequence, the main timeline's fields hold
+    /// that sequence's tracks and markers, and its entry in `sequences` holds the
+    /// main timeline's ([`Project::swap_timeline`]). Never saved.
+    #[serde(skip)]
+    pub swapped: Option<SequenceId>,
+}
+
+/// A timeline besides the project's main one: its own tracks, main track and
+/// markers, with the project's settings, media and LUTs. Sequence clips show it
+/// ([`ClipKind::Sequence`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Sequence {
+    pub id: SequenceId,
+    pub name: String,
+    /// Bottom track first, as the main timeline's.
+    pub tracks: Vec<Arc<Track>>,
+    pub main_track: TrackId,
+    pub magnetic: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub markers: Vec<Marker>,
+}
+
+fn tracks_duration(tracks: &[Arc<Track>]) -> Flicks {
+    tracks
+        .iter()
+        .filter_map(|track| track.end())
+        .max()
+        .unwrap_or(Flicks::ZERO)
+}
+
+/// Which timeline a set of tracks is, wherever it is stored for now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Node {
+    Main,
+    Sequence(SequenceId),
+}
+
+/// A timeline's tracks and markers: the main one or a sequence's.
+#[derive(Clone, Copy, Debug)]
+pub struct Timeline<'a> {
+    pub node: Node,
+    pub tracks: &'a [Arc<Track>],
+    pub main_track: TrackId,
+    pub magnetic: bool,
+    pub markers: &'a [Marker],
+}
+
+impl<'a> Timeline<'a> {
+    /// The end of the last clip on any track.
+    pub fn duration(&self) -> Flicks {
+        tracks_duration(self.tracks)
+    }
+
+    pub fn clips(&self) -> impl Iterator<Item = &'a Clip> + 'a {
+        let tracks: &'a [Arc<Track>] = self.tracks;
+        tracks.iter().flat_map(|track| track.clips.iter())
+    }
 }
 
 impl Project {
@@ -90,7 +160,9 @@ impl Project {
             magnetic: true,
             markers: Vec::new(),
             luts: Vec::new(),
+            sequences: Vec::new(),
             next_id: 1,
+            swapped: None,
         };
         for _ in 0..2 {
             let id = TrackId(project.alloc_id());
@@ -152,11 +224,106 @@ impl Project {
 
     /// The end of the last clip on any track.
     pub fn duration(&self) -> Flicks {
-        self.tracks
+        tracks_duration(&self.tracks)
+    }
+
+    /// The stored entry of sequence `id`. While a command runs inside a sequence,
+    /// that sequence's entry holds the main timeline: use [`Project::timeline`]
+    /// for tracks.
+    pub fn sequence(&self, id: SequenceId) -> Option<&Sequence> {
+        self.sequences
             .iter()
-            .filter_map(|track| track.end())
-            .max()
-            .unwrap_or(Flicks::ZERO)
+            .find(|sequence| sequence.id == id)
+            .map(|sequence| sequence.as_ref())
+    }
+
+    /// The tracks and markers of timeline `node`, wherever they are stored for now.
+    pub fn timeline(&self, node: Node) -> Option<Timeline<'_>> {
+        let root = || Timeline {
+            node,
+            tracks: &self.tracks,
+            main_track: self.main_track,
+            magnetic: self.magnetic,
+            markers: &self.markers,
+        };
+        let stored = |id: SequenceId| {
+            self.sequence(id).map(|sequence| Timeline {
+                node,
+                tracks: &sequence.tracks,
+                main_track: sequence.main_track,
+                magnetic: sequence.magnetic,
+                markers: &sequence.markers,
+            })
+        };
+        match (node, self.swapped) {
+            (Node::Main, None) => Some(root()),
+            (Node::Main, Some(open)) => stored(open),
+            (Node::Sequence(id), Some(open)) if id == open => Some(root()),
+            (Node::Sequence(id), _) => stored(id),
+        }
+    }
+
+    /// The tracks of sequence `id`, wherever they are stored for now.
+    pub fn sequence_tracks(&self, id: SequenceId) -> Option<&[Arc<Track>]> {
+        self.timeline(Node::Sequence(id))
+            .map(|timeline| timeline.tracks)
+    }
+
+    /// The timeline in the main timeline's fields: the main one, or the sequence
+    /// a command runs inside.
+    pub fn current(&self) -> Node {
+        self.swapped.map_or(Node::Main, Node::Sequence)
+    }
+
+    /// Every timeline: the one in the main fields first, then the others.
+    pub fn timelines(&self) -> impl Iterator<Item = Timeline<'_>> {
+        let others = self.sequences.iter().map(|sequence| {
+            if self.swapped == Some(sequence.id) {
+                Node::Main
+            } else {
+                Node::Sequence(sequence.id)
+            }
+        });
+        std::iter::once(self.current())
+            .chain(others)
+            .filter_map(|node| self.timeline(node))
+    }
+
+    /// Exchanges the main timeline's tracks, main track, magnetism and markers with
+    /// sequence `id`'s, so edits written for the main timeline apply to the
+    /// sequence. Swapping again with the same id swaps back.
+    pub fn swap_timeline(&mut self, id: SequenceId) -> Result<(), String> {
+        if self.swapped.is_some_and(|open| open != id) {
+            return Err("Another sequence is open".into());
+        }
+        let position = self
+            .sequences
+            .iter()
+            .position(|sequence| sequence.id == id)
+            .ok_or_else(|| format!("No sequence {id}"))?;
+        let sequence = Arc::make_mut(&mut self.sequences[position]);
+        std::mem::swap(&mut self.tracks, &mut sequence.tracks);
+        std::mem::swap(&mut self.main_track, &mut sequence.main_track);
+        std::mem::swap(&mut self.magnetic, &mut sequence.magnetic);
+        std::mem::swap(&mut self.markers, &mut sequence.markers);
+        self.swapped = match self.swapped {
+            Some(_) => None,
+            None => Some(id),
+        };
+        Ok(())
+    }
+
+    /// A copy of the project whose main fields hold timeline `node`, so planning
+    /// and queries read it as the main timeline. Sequences still resolve.
+    pub fn opened(&self, node: Node) -> Result<Project, String> {
+        let mut project = self.clone();
+        if let Some(open) = project.swapped {
+            project.swap_timeline(open)?;
+        }
+        if let Node::Sequence(id) = node {
+            project.swap_timeline(id)?;
+        }
+        Ok(project)
     }
 }
 
@@ -174,11 +341,39 @@ pub struct ProjectView<'a> {
     pub magnetic: bool,
     pub markers: &'a [Marker],
     pub luts: Vec<LutInfo<'a>>,
+    /// The project's sequences, described.
+    pub sequences: Vec<SequenceInfo<'a>>,
+    /// The sequence whose tracks and markers these are; None for the main timeline.
+    pub open_sequence: Option<SequenceId>,
     pub next_id: u64,
 }
 
+/// A sequence as the UI lists it.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SequenceInfo<'a> {
+    pub id: SequenceId,
+    pub name: &'a str,
+    pub duration: Flicks,
+    pub tracks: usize,
+}
+
 impl Project {
+    /// What the UI shows: the timeline in the main fields (see [`Project::opened`]).
     pub fn view(&self) -> ProjectView<'_> {
+        let sequences = self
+            .sequences
+            .iter()
+            .filter_map(|sequence| {
+                let timeline = self.timeline(Node::Sequence(sequence.id))?;
+                Some(SequenceInfo {
+                    id: sequence.id,
+                    name: &sequence.name,
+                    duration: timeline.duration(),
+                    tracks: timeline.tracks.len(),
+                })
+            })
+            .collect();
         ProjectView {
             id: &self.id,
             name: &self.name,
@@ -189,6 +384,8 @@ impl Project {
             magnetic: self.magnetic,
             markers: &self.markers,
             luts: self.luts.iter().map(|lut| lut.info()).collect(),
+            sequences,
+            open_sequence: self.swapped,
             next_id: self.next_id,
         }
     }
@@ -671,6 +868,9 @@ pub enum ClipKind {
     Adjustment,
     /// Text and shapes the engine draws ([`Clip::title`]).
     Title,
+    /// Another timeline of the project ([`Clip::sequence`]), drawn as one picture
+    /// and mixed as one sound.
+    Sequence,
 }
 
 impl ClipKind {
@@ -686,8 +886,11 @@ pub struct Clip {
     pub id: ClipId,
     #[serde(default, skip_serializing_if = "ClipKind::is_media")]
     pub kind: ClipKind,
-    /// The media file; empty for an adjustment layer or a title.
+    /// The media file; empty for an adjustment layer, a title or a sequence clip.
     pub media: String,
+    /// The sequence a sequence clip shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<SequenceId>,
     /// Timeline position of the first frame.
     pub start: Flicks,
     /// Timeline duration.
@@ -776,9 +979,13 @@ impl Clip {
         self.kind == ClipKind::Title
     }
 
+    pub fn is_sequence(&self) -> bool {
+        self.kind == ClipKind::Sequence
+    }
+
     /// Adjustment layers and titles: clips without media, timing or sound.
     pub fn is_generated(&self) -> bool {
-        self.kind != ClipKind::Media
+        matches!(self.kind, ClipKind::Adjustment | ClipKind::Title)
     }
 
     pub fn end(&self) -> Flicks {

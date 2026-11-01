@@ -8,7 +8,10 @@ use crate::command::Edge;
 use crate::edit::{check_crop, check_opacity, check_pan, check_transform, check_volume};
 use crate::effects::MAX_EFFECTS;
 use crate::masks::{mask_value_ok, MAX_MASKS};
-use crate::project::{Clip, ClipKind, Project, Speed, Track, MAX_BEATS, MAX_TIME};
+use crate::project::{
+    Clip, ClipKind, Node, Project, SequenceId, Speed, Timeline, Track, MAX_BEATS, MAX_NESTING,
+    MAX_TIME,
+};
 use crate::timing::check_ramp;
 use crate::title::{element_value_ok, Content};
 
@@ -267,10 +270,28 @@ pub fn valid_project_id(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
 }
 
+/// Ids must be unique and below the project's counter.
+struct Ids {
+    seen: BTreeSet<u64>,
+    next: u64,
+}
+
+impl Ids {
+    fn unique(&mut self, id: u64, what: &str) -> Result<(), String> {
+        if id == 0 || id >= self.next {
+            return Err(format!("{what} {id} is outside the id range"));
+        }
+        if !self.seen.insert(id) {
+            return Err(format!("Id {id} is used twice"));
+        }
+        Ok(())
+    }
+}
+
 /// Checks the structural rules: unique ids below `next_id`, clips sorted and not
 /// overlapping on each track, every clip's media in the bin, links with at least
-/// two clips, a main track (without gaps when magnetic), markers in time order and
-/// values in range.
+/// two clips, a main track (without gaps when magnetic), markers in time order,
+/// sequences that never contain themselves, and values in range.
 ///
 /// Edit-only rules (whole frames, source within the media) are not checked here:
 /// a changed frame rate or a relinked file can break them without corrupting anything.
@@ -289,27 +310,81 @@ pub fn validate(project: &Project) -> Result<(), String> {
         }
     }
 
-    if project.tracks.is_empty() {
-        return Err("A project needs at least one track".into());
-    }
-    let mut ids = BTreeSet::new();
-    let mut unique = |id: u64, what: &str| -> Result<(), String> {
-        if id == 0 || id >= project.next_id {
-            return Err(format!("{what} {id} is outside the id range"));
-        }
-        if !ids.insert(id) {
-            return Err(format!("Id {id} is used twice"));
-        }
-        Ok(())
+    let mut ids = Ids {
+        seen: BTreeSet::new(),
+        next: project.next_id,
     };
-    let mut links: BTreeMap<u64, usize> = BTreeMap::new();
-    for (index, track) in project.tracks.iter().enumerate() {
-        unique(track.id.0, "Track")?;
+    for sequence in &project.sequences {
+        ids.unique(sequence.id.0, "Sequence")?;
+        check_name(&sequence.name, "A sequence", 200)?;
+    }
+    if project
+        .swapped
+        .is_some_and(|id| project.sequence(id).is_none())
+    {
+        return Err("The open sequence is missing".into());
+    }
+    // Each link's timeline and clip count, and the sequences each timeline shows.
+    let mut links: BTreeMap<u64, (Node, usize)> = BTreeMap::new();
+    let mut shows: BTreeMap<Node, BTreeSet<SequenceId>> = BTreeMap::new();
+    for timeline in project.timelines() {
+        check_timeline(project, &timeline, &mut ids, &mut links, &mut shows)?;
+    }
+    for lut in &project.luts {
+        ids.unique(lut.id.0, "LUT")?;
+        lut.check()?;
+    }
+    for (&link, &(_, count)) in &links {
+        ids.unique(link, "Link")?;
+        if count < 2 {
+            return Err(format!("Link {link} has only one clip"));
+        }
+    }
+    for &node in shows.keys() {
+        check_nesting(&shows, node, &mut Vec::new())?;
+    }
+    Ok(())
+}
+
+/// The sequences timeline `node` shows, through every level, nest at most
+/// [`MAX_NESTING`] deep and never include one on the way there (`path`).
+fn check_nesting(
+    shows: &BTreeMap<Node, BTreeSet<SequenceId>>,
+    node: Node,
+    path: &mut Vec<Node>,
+) -> Result<(), String> {
+    if path.contains(&node) {
+        return Err("A sequence cannot contain itself".into());
+    }
+    if path.len() > MAX_NESTING {
+        return Err(format!("Sequences nest at most {MAX_NESTING} deep"));
+    }
+    path.push(node);
+    for &id in shows.get(&node).into_iter().flatten() {
+        check_nesting(shows, Node::Sequence(id), path)?;
+    }
+    path.pop();
+    Ok(())
+}
+
+fn check_timeline(
+    project: &Project,
+    timeline: &Timeline,
+    ids: &mut Ids,
+    links: &mut BTreeMap<u64, (Node, usize)>,
+    shows: &mut BTreeMap<Node, BTreeSet<SequenceId>>,
+) -> Result<(), String> {
+    if timeline.tracks.is_empty() {
+        return Err("A timeline needs at least one track".into());
+    }
+    let shown = shows.entry(timeline.node).or_default();
+    for (index, track) in timeline.tracks.iter().enumerate() {
+        ids.unique(track.id.0, "Track")?;
         check_volume(track.volume_db)?;
         check_pan(track.pan)?;
         track.ducking.check()?;
         for (position, clip) in track.clips.iter().enumerate() {
-            unique(clip.id.0, "Clip")?;
+            ids.unique(clip.id.0, "Clip")?;
             if clip.duration <= Flicks::ZERO || clip.start < Flicks::ZERO || clip.end() > MAX_TIME {
                 return Err(format!("Clip {} has an invalid time range", clip.id));
             }
@@ -317,6 +392,12 @@ pub fn validate(project: &Project) -> Result<(), String> {
                 return Err(format!(
                     "Clips overlap or are out of order on track {}",
                     index + 1
+                ));
+            }
+            if clip.sequence.is_some() != clip.is_sequence() {
+                return Err(format!(
+                    "Clip {} names a sequence but is not a sequence clip",
+                    clip.id
                 ));
             }
             match clip.kind {
@@ -349,6 +430,26 @@ pub fn validate(project: &Project) -> Result<(), String> {
                         ));
                     }
                 }
+                ClipKind::Sequence => {
+                    let id = clip.sequence.expect("checked above");
+                    if project.timeline(Node::Sequence(id)).is_none() {
+                        return Err(format!(
+                            "Clip {} shows a sequence that is not in the project",
+                            clip.id
+                        ));
+                    }
+                    let plain = clip.media.is_empty()
+                        && (clip.video || clip.audio)
+                        && clip.source_in >= Flicks::ZERO
+                        && !clip.retimed();
+                    if !plain {
+                        return Err(format!(
+                            "Sequence clip {} has media or timing of its own",
+                            clip.id
+                        ));
+                    }
+                    shown.insert(id);
+                }
             }
             match (&clip.title, clip.is_title()) {
                 (Some(title), true) => {
@@ -370,20 +471,20 @@ pub fn validate(project: &Project) -> Result<(), String> {
             }
             check_effects(clip)?;
             for effect in clip.effects.iter().chain(&clip.audio_effects) {
-                unique(effect.id.0, "Effect")?;
+                ids.unique(effect.id.0, "Effect")?;
             }
             if clip.slot.is_some_and(|slot| !(1..=999).contains(&slot)) {
                 return Err(format!("Clip {} has an invalid template slot", clip.id));
             }
             let beats_ok = clip.beats.is_empty()
-                || (!clip.is_generated()
+                || (clip.kind == ClipKind::Media
                     && clip.beats.len() <= MAX_BEATS
                     && clip.beats[0] >= Flicks::ZERO
                     && clip.beats.windows(2).all(|pair| pair[0] < pair[1]));
             if !beats_ok {
                 return Err(format!("Clip {} has invalid beats", clip.id));
             }
-            if clip.remove_background && (clip.is_generated() || !clip.video) {
+            if clip.remove_background && (clip.kind != ClipKind::Media || !clip.video) {
                 return Err(format!("Clip {} has no picture to cut out", clip.id));
             }
             if let Some(caption) = &clip.caption {
@@ -394,7 +495,7 @@ pub fn validate(project: &Project) -> Result<(), String> {
             }
             check_masks(clip)?;
             for mask in &clip.masks {
-                unique(mask.id.0, "Mask")?;
+                ids.unique(mask.id.0, "Mask")?;
             }
             check_keyframes(clip)?;
             check_transform(&clip.transform)?;
@@ -402,22 +503,24 @@ pub fn validate(project: &Project) -> Result<(), String> {
             check_opacity(clip.opacity)?;
             check_volume(clip.volume_db)?;
             if let Some(link) = clip.link {
-                *links.entry(link.0).or_default() += 1;
+                let entry = links.entry(link.0).or_insert((timeline.node, 0));
+                if entry.0 != timeline.node {
+                    return Err(format!("Link {link} joins clips of two timelines"));
+                }
+                entry.1 += 1;
             }
         }
         for transition in &track.transitions {
-            unique(transition.id.0, "Transition")?;
+            ids.unique(transition.id.0, "Transition")?;
         }
         check_transitions(track, project.settings.frame_duration())?;
     }
-    for lut in &project.luts {
-        unique(lut.id.0, "LUT")?;
-        lut.check()?;
-    }
-    let main = project
-        .track(project.main_track)
+    let main = timeline
+        .tracks
+        .iter()
+        .find(|track| track.id == timeline.main_track)
         .ok_or("The main track is missing")?;
-    if project.magnetic {
+    if timeline.magnetic {
         let mut end = Flicks::ZERO;
         for clip in &main.clips {
             if clip.start != end {
@@ -426,19 +529,13 @@ pub fn validate(project: &Project) -> Result<(), String> {
             end = clip.end();
         }
     }
-    for (&link, &count) in &links {
-        unique(link, "Link")?;
-        if count < 2 {
-            return Err(format!("Link {link} has only one clip"));
-        }
-    }
-    for (position, marker) in project.markers.iter().enumerate() {
-        unique(marker.id.0, "Marker")?;
+    for (position, marker) in timeline.markers.iter().enumerate() {
+        ids.unique(marker.id.0, "Marker")?;
         if marker.time < Flicks::ZERO || marker.time > MAX_TIME {
             return Err(format!("Marker {} is outside the timeline", marker.id));
         }
         if position > 0 {
-            let previous = &project.markers[position - 1];
+            let previous = &timeline.markers[position - 1];
             if (previous.time, previous.id) > (marker.time, marker.id) {
                 return Err("Markers are out of order".into());
             }

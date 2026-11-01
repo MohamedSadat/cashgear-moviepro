@@ -7,14 +7,16 @@ use crate::validate::validate;
 
 pub const FORMAT: &str = "cashgear-video-project";
 /// The format version this build writes. Older files are migrated when opened.
-pub const VERSION: u32 = 7;
+pub const VERSION: u32 = 8;
 pub const EXTENSION: &str = "cgvproj";
 
 /// Upgrades the `project` object of a file from one version to the next.
 type Migration = fn(Value) -> Result<Value, String>;
 
 /// `MIGRATIONS[n - 1]` upgrades version `n` to `n + 1`. Version 1 is the first.
-const MIGRATIONS: &[Migration] = &[main_track, effect_ids, titles, sound, creative, ai];
+const MIGRATIONS: &[Migration] = &[
+    main_track, effect_ids, titles, sound, creative, ai, sequences,
+];
 
 /// Format 2 adds the main track. A format 1 project's bottom track becomes its main
 /// track, with magnetism off, so the edit stays exactly as it was.
@@ -54,6 +56,11 @@ fn creative(project: Value) -> Result<Value, String> {
 /// Format 7 adds what the AI tools make: beats on clips, captions on titles and
 /// background removal. Their defaults change nothing.
 fn ai(project: Value) -> Result<Value, String> {
+    Ok(project)
+}
+
+/// Format 8 adds sequences and sequence clips. A format 7 project has none.
+fn sequences(project: Value) -> Result<Value, String> {
     Ok(project)
 }
 
@@ -159,7 +166,7 @@ mod tests {
     fn round_trips_a_new_project() {
         let project = Project::new("p-1", "Holiday");
         let text = to_json(&project);
-        assert!(text.starts_with("{\n  \"format\": \"cashgear-video-project\",\n  \"version\": 7,"));
+        assert!(text.starts_with("{\n  \"format\": \"cashgear-video-project\",\n  \"version\": 8,"));
         let loaded = from_json(&text).unwrap();
         assert_eq!(loaded, project);
         assert_eq!(to_json(&loaded), text);

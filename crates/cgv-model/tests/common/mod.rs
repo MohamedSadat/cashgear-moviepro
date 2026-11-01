@@ -663,7 +663,52 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
     let transition = rng.pick(&transitions).unwrap_or(TransitionId(0));
     let mask = rng.pick(&masks(project));
     let (mask_clip, mask_id) = mask.unwrap_or((any_clip, MaskId(0)));
-    match rng.below(146) {
+    let sequences: Vec<SequenceId> = project.sequences.iter().map(|s| s.id).collect();
+    let sequence = rng.pick(&sequences).unwrap_or(SequenceId(0));
+    match rng.below(156) {
+        146..=148 => {
+            let mut picked = vec![any_clip];
+            if rng.percent(50) {
+                picked.extend(rng.pick(&clips));
+            }
+            Command::Nest {
+                clips: picked,
+                name: rng.percent(30).then(|| "Nested".to_string()),
+            }
+        }
+        149 => {
+            let shown: Vec<ClipId> = project
+                .clips()
+                .filter(|clip| clip.is_sequence())
+                .map(|clip| clip.id)
+                .collect();
+            Command::BreakApart {
+                clip: rng.pick(&shown).unwrap_or(any_clip),
+            }
+        }
+        150..=153 => match project.opened(Node::Sequence(sequence)) {
+            // An edit inside a sequence, made for its own tracks.
+            Ok(opened) if !opened.tracks.is_empty() => Command::InSequence {
+                sequence,
+                command: Box::new(random_command(&opened, rng)),
+            },
+            _ => Command::AddSequence {
+                name: "Empty".into(),
+            },
+        },
+        154 => Command::AddSequence {
+            name: format!("Sequence {}", rng.below(9)),
+        },
+        155 => {
+            if rng.percent(50) {
+                Command::RemoveSequence { sequence }
+            } else {
+                Command::RenameSequence {
+                    sequence,
+                    name: "Renamed".into(),
+                }
+            }
+        }
         144..=145 => Command::SetCaption {
             clip: any_clip,
             caption: rng.percent(70).then(|| Caption {

@@ -554,7 +554,7 @@ fn format_6_saves_the_new_settings_and_opens_format_5() {
     })
     .unwrap();
     let text = file::to_json(s.project());
-    assert!(text.contains("\"version\": 7"));
+    assert!(text.contains(&format!("\"version\": {}", file::VERSION)));
     for field in [
         "\"ramp\"",
         "\"reverse\": true",

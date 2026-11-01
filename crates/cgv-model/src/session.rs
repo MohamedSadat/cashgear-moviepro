@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use serde::Serialize;
 
 use crate::command::{Command, Outcome};
-use crate::project::{MediaRef, Project, ProjectView};
+use crate::project::{MediaRef, Node, Project, ProjectView, SequenceId};
 
 /// Undo steps kept before the oldest is dropped.
 pub const HISTORY_LIMIT: usize = 10_000;
@@ -40,6 +40,9 @@ pub struct Session {
     group: Option<Group>,
     saved: Option<u64>,
     autosaved: Option<u64>,
+    /// The sequence open in the timeline, and the project with it in the main
+    /// timeline's fields, kept for planning and snapshots.
+    open: Option<(SequenceId, Project)>,
 }
 
 /// What the UI renders: the project plus the history and save state.
@@ -69,6 +72,7 @@ impl Session {
             group: None,
             saved: Some(0),
             autosaved: Some(0),
+            open: None,
         }
     }
 
@@ -84,9 +88,64 @@ impl Session {
         &self.state
     }
 
+    /// The project with the open sequence in the main timeline's fields: what the
+    /// monitor plays and the timeline shows.
+    pub fn timeline_project(&self) -> &Project {
+        self.open
+            .as_ref()
+            .map_or(&self.state, |(_, project)| project)
+    }
+
+    /// The sequence open in the timeline; None for the main timeline.
+    pub fn open_sequence(&self) -> Option<SequenceId> {
+        self.open.as_ref().map(|(id, _)| *id)
+    }
+
+    /// Opens sequence `id` in the timeline (None for the main one): commands then
+    /// apply to its tracks and markers. Not an undo step.
+    pub fn set_open_sequence(&mut self, id: Option<SequenceId>) -> Result<(), String> {
+        self.open = match id {
+            Some(id) => Some((id, self.state.opened(Node::Sequence(id))?)),
+            None => None,
+        };
+        Ok(())
+    }
+
+    /// Keeps the open sequence's view current; a sequence that is gone (after an
+    /// undo) closes, and the main timeline shows.
+    fn refresh(&mut self) {
+        let id = self.open_sequence();
+        self.open = id.and_then(|id| Some((id, self.state.opened(Node::Sequence(id)).ok()?)));
+    }
+
+    /// `command` addressed to the open sequence. Commands about the whole project
+    /// run as they are.
+    fn addressed(&self, command: &Command) -> Command {
+        let whole = matches!(
+            command,
+            Command::Rename { .. }
+                | Command::SetSettings { .. }
+                | Command::AddMedia { .. }
+                | Command::RemoveMedia { .. }
+                | Command::AddLut { .. }
+                | Command::RemoveLut { .. }
+                | Command::AddSequence { .. }
+                | Command::RenameSequence { .. }
+                | Command::RemoveSequence { .. }
+                | Command::InSequence { .. }
+        );
+        match self.open_sequence() {
+            Some(sequence) if !whole => Command::InSequence {
+                sequence,
+                command: Box::new(command.clone()),
+            },
+            _ => command.clone(),
+        }
+    }
+
     pub fn snapshot(&self) -> Snapshot<'_> {
         Snapshot {
-            project: self.state.view(),
+            project: self.timeline_project().view(),
             generation: self.generation,
             dirty: self.is_dirty(),
             needs_autosave: self.needs_autosave(),
@@ -100,6 +159,7 @@ impl Session {
 
     /// Applies `command`. A command that changes nothing leaves no undo step.
     pub fn execute(&mut self, command: &Command) -> Result<Outcome, String> {
+        let command = &self.addressed(command);
         let (next, outcome) = self.state.apply(command)?;
         if next == self.state {
             return Ok(outcome);
@@ -116,6 +176,7 @@ impl Session {
                 after_generation: generation,
             });
         }
+        self.refresh();
         Ok(outcome)
     }
 
@@ -138,6 +199,7 @@ impl Session {
     /// sends the whole gesture so far, so every step starts from where it began.
     /// When `command` fails, the previous step of the gesture stays.
     pub fn preview(&mut self, command: &Command) -> Result<Outcome, String> {
+        let command = &self.addressed(command);
         let group = self.group.as_ref().ok_or("No gesture is open")?;
         let (next, outcome) = group.before.apply(command)?;
         if next == group.before {
@@ -147,6 +209,7 @@ impl Session {
             self.generation = self.fresh_generation();
             self.state = next;
         }
+        self.refresh();
         Ok(outcome)
     }
 
@@ -179,6 +242,7 @@ impl Session {
             self.state = group.before;
             self.generation = group.before_generation;
         }
+        self.refresh();
     }
 
     /// Undoes the last step, closing an open group first. False when there is nothing to undo.
@@ -190,6 +254,7 @@ impl Session {
         self.state = step.before.clone();
         self.generation = step.before_generation;
         self.redo.push(step);
+        self.refresh();
         true
     }
 
@@ -201,6 +266,7 @@ impl Session {
         self.state = step.after.clone();
         self.generation = step.after_generation;
         self.undo.push_back(step);
+        self.refresh();
         true
     }
 
@@ -283,6 +349,7 @@ impl Session {
         }
         self.saved = None;
         self.autosaved = None;
+        self.refresh();
         Ok(())
     }
 

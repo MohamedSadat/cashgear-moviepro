@@ -13,7 +13,7 @@ use proptest::prelude::*;
 fn check_rules(project: &Project, frame_rate_changed: bool) {
     validate(project).unwrap_or_else(|error| panic!("invalid project: {error}"));
     let frame = project.settings.frame_duration().0;
-    for clip in project.clips() {
+    for clip in project.timelines().flat_map(|timeline| timeline.clips()) {
         if !frame_rate_changed {
             assert_eq!(
                 clip.start.0 % frame,
@@ -36,6 +36,12 @@ fn check_rules(project: &Project, frame_rate_changed: bool) {
         if clip.is_generated() {
             assert!(clip.media.is_empty() && clip.source_in == Flicks::ZERO);
             assert_eq!(clip.is_title(), clip.title.is_some());
+            continue;
+        }
+        if clip.is_sequence() {
+            let sequence = clip.sequence.expect("a sequence clip's sequence");
+            assert!(project.timeline(Node::Sequence(sequence)).is_some());
+            assert!(clip.source_in >= Flicks::ZERO && !clip.retimed());
             continue;
         }
         let media = project.media(&clip.media).unwrap();
@@ -123,6 +129,11 @@ fn check_sync(before: &Project, after: &Project, command: &Command) {
         | Command::DetachAudio { .. }
         | Command::SetSpeed { .. }
         | Command::SetRamp { .. } => true,
+        // These move clips between timelines.
+        Command::Nest { .. }
+        | Command::BreakApart { .. }
+        | Command::RemoveSequence { .. }
+        | Command::InSequence { .. } => true,
         // Edits that push later clips along another track may push a partner.
         Command::Insert { track, .. } => before.track_index(*track) != Some(main),
         Command::RippleDelete { clips } => !named(clips),

@@ -15,7 +15,8 @@ use crate::effects::{
 use crate::masks::{Mask, MAX_MASKS};
 use crate::project::{
     Clip, ClipId, ClipKind, Crop, EffectId, ElementId, LinkId, LutId, Marker, MarkerId, MaskId,
-    Project, Speed, Track, TrackId, Transform, TransitionId, MAX_BEATS, MAX_TIME,
+    Node, Project, Sequence, SequenceId, Speed, Track, TrackId, Transform, TransitionId, MAX_BEATS,
+    MAX_TIME,
 };
 use crate::timing::{check_shape, shape_mean, RampPoint, RampShape};
 use crate::title::Content;
@@ -32,23 +33,19 @@ impl Project {
     /// Applies `command` to a copy of the project. Either the whole command applies
     /// and the new project comes back, or nothing changes and the error says why.
     pub fn apply(&self, command: &Command) -> Result<(Project, Outcome), String> {
-        let mut edit = Edit {
-            frame: self.settings.frame_duration(),
-            project: self.clone(),
-            created: Vec::new(),
-            deferred: BTreeSet::new(),
-            required: None,
-        };
-        edit.run(command)?;
-        edit.settle()?;
-        edit.fit_fades();
-        edit.normalize_transitions();
-        if let Some(id) = edit.required {
-            if edit.find_transition(id).is_err() {
-                return Err("There is no room for a transition there".into());
+        if let Command::InSequence { sequence, command } = command {
+            if self.swapped.is_some() || matches!(**command, Command::InSequence { .. }) {
+                return Err("Commands run inside one sequence at a time".into());
             }
+            let mut opened = self.clone();
+            opened.swap_timeline(*sequence)?;
+            let (mut next, outcome) = opened.apply(command)?;
+            next.swap_timeline(*sequence)?;
+            return Ok((next, outcome));
         }
-        edit.normalize_links();
+        let mut edit = Edit::new(self.clone());
+        edit.run(command)?;
+        edit.finish()?;
         validate(&edit.project).map_err(|error| format!("Internal edit error: {error}"))?;
         Ok((
             edit.project,
@@ -80,6 +77,31 @@ fn div_round(numerator: i128, denominator: i128) -> i128 {
 }
 
 impl Edit {
+    fn new(project: Project) -> Edit {
+        Edit {
+            frame: project.settings.frame_duration(),
+            project,
+            created: Vec::new(),
+            deferred: BTreeSet::new(),
+            required: None,
+        }
+    }
+
+    /// What every edit ends with: the magnetic main track settles, and fades,
+    /// transitions and links fit what is left.
+    fn finish(&mut self) -> Result<(), String> {
+        self.settle()?;
+        self.fit_fades();
+        self.normalize_transitions();
+        if let Some(id) = self.required {
+            if self.find_transition(id).is_err() {
+                return Err("There is no room for a transition there".into());
+            }
+        }
+        self.normalize_links();
+        Ok(())
+    }
+
     fn run(&mut self, command: &Command) -> Result<(), String> {
         match command {
             Command::Rename { name } => {
@@ -204,7 +226,7 @@ impl Edit {
             }
             Command::SetBeats { clip, beats } => {
                 let (index, mut changed) = self.editable(*clip)?;
-                if changed.is_generated() {
+                if changed.kind != ClipKind::Media {
                     return Err("Only media clips have beats".into());
                 }
                 if beats.len() > MAX_BEATS {
@@ -513,10 +535,11 @@ impl Edit {
                     .position(|entry| entry.id == *lut)
                     .ok_or_else(|| format!("No LUT {lut}"))?;
                 let names = |value: &ParamValue| matches!(value, ParamValue::Text(text) if parse_lut_ref(text) == Some(*lut));
-                let used = self
-                    .project
-                    .clips()
-                    .any(|clip| clip.effects.iter().any(|e| e.params.values().any(names)));
+                let used = self.project.timelines().any(|timeline| {
+                    timeline
+                        .clips()
+                        .any(|clip| clip.effects.iter().any(|e| e.params.values().any(names)))
+                });
                 if used {
                     return Err(format!(
                         "{} is used by an effect",
@@ -591,6 +614,38 @@ impl Edit {
                     return Err(format!("No marker {marker}"));
                 }
             }
+            Command::AddSequence { name } => {
+                let name = check_name(name, "A sequence", MAX_NAME)?;
+                let id = SequenceId(self.alloc());
+                let tracks: Vec<Arc<Track>> = (0..2)
+                    .map(|_| Arc::new(Track::new(TrackId(self.alloc()))))
+                    .collect();
+                self.created.push(id.0);
+                self.project.sequences.push(Arc::new(Sequence {
+                    id,
+                    name,
+                    main_track: tracks[0].id,
+                    tracks,
+                    magnetic: true,
+                    markers: Vec::new(),
+                }));
+            }
+            Command::RenameSequence { sequence, name } => {
+                let name = check_name(name, "A sequence", MAX_NAME)?;
+                let entry = self
+                    .project
+                    .sequences
+                    .iter_mut()
+                    .find(|entry| entry.id == *sequence)
+                    .ok_or_else(|| format!("No sequence {sequence}"))?;
+                Arc::make_mut(entry).name = name;
+            }
+            Command::RemoveSequence { sequence } => self.remove_sequence(*sequence)?,
+            Command::Nest { clips, name } => self.nest(clips, name.as_deref())?,
+            Command::BreakApart { clip } => self.break_apart(*clip)?,
+            Command::InSequence { .. } => {
+                return Err("Commands run inside one sequence at a time".into())
+            }
         }
         Ok(())
     }
@@ -642,9 +697,16 @@ impl Edit {
         &mut track.clips[position]
     }
 
-    /// Stills and adjustment layers (no media) have no source position or speed.
-    fn is_still(&self, media: &str) -> bool {
-        media.is_empty() || self.project.media(media).is_some_and(|m| m.is_still())
+    /// Stills, adjustment layers and titles have no source position or speed.
+    fn is_still(&self, clip: &Clip) -> bool {
+        match clip.kind {
+            ClipKind::Media => self
+                .project
+                .media(&clip.media)
+                .is_some_and(|m| m.is_still()),
+            ClipKind::Sequence => false,
+            ClipKind::Adjustment | ClipKind::Title => true,
+        }
     }
 
     /// The track index and a copy of clip `id`, whose track must be unlocked.
@@ -754,6 +816,20 @@ impl Edit {
         if clip.is_generated() {
             return check_timing(clip, true);
         }
+        if clip.is_sequence() {
+            check_timing(clip, false)?;
+            if clip.retimed() {
+                return Err("Sequence clips play at normal speed".into());
+            }
+            if clip.source_in < Flicks::ZERO {
+                return Err("A sequence has nothing before its start".into());
+            }
+            let sequence = clip.sequence.ok_or("A sequence clip needs its sequence")?;
+            if self.project.timeline(Node::Sequence(sequence)).is_none() {
+                return Err(format!("No sequence {sequence}"));
+            }
+            return Ok(());
+        }
         let media = self
             .project
             .media(&clip.media)
@@ -818,7 +894,7 @@ impl Edit {
     ) -> Result<ClipId, String> {
         let right_id = ClipId(self.alloc());
         let (_, clip) = self.find(id)?;
-        let still = self.is_still(&clip.media);
+        let still = self.is_still(&clip);
         let offset = at - clip.start;
         if offset < self.frame || clip.duration - offset < self.frame {
             return Err(format!(
@@ -881,7 +957,7 @@ impl Edit {
 
     /// Moves the start of clip `id` to `start`, keeping its end and adjusting its source.
     fn set_start(&mut self, index: usize, id: ClipId, start: Flicks) {
-        let still = self.is_still(&self.find(id).expect("clip").1.media);
+        let still = self.is_still(&self.find(id).expect("clip").1);
         let clip = self.clip_mut(index, id);
         let delta = start - clip.start;
         clip.start = start;
@@ -903,7 +979,7 @@ impl Edit {
                 self.track_mut(index).clips.retain(|c| c.id != clip.id);
                 continue;
             }
-            let still = self.is_still(&clip.media);
+            let still = self.is_still(&clip);
             if clip.start < start && clip.end() > end {
                 let right = self.split_clip(index, clip.id, end, None)?;
                 self.created.push(right.0);
@@ -959,6 +1035,9 @@ impl Edit {
         if !spec.beats.is_empty() && spec.kind != ClipKind::Media {
             return Err("Only media clips have beats".into());
         }
+        if spec.sequence.is_some() != (spec.kind == ClipKind::Sequence) {
+            return Err("Only sequence clips show a sequence".into());
+        }
         if let Some(caption) = &spec.caption {
             if spec.kind != ClipKind::Title {
                 return Err("Only titles are captions".into());
@@ -1005,11 +1084,37 @@ impl Edit {
                 }
                 (media.id, video, audio)
             }
+            ClipKind::Sequence => {
+                let id = spec.sequence.expect("checked above");
+                let timeline = self
+                    .project
+                    .timeline(Node::Sequence(id))
+                    .ok_or_else(|| format!("No sequence {id}"))?;
+                if !spec.media.is_empty() {
+                    return Err("A sequence clip has no media".into());
+                }
+                if speed != Speed::NORMAL {
+                    return Err("Sequence clips play at normal speed".into());
+                }
+                // Its picture and sound by default when the sequence has them.
+                let empty = timeline.clips().next().is_none();
+                let video = spec
+                    .video
+                    .unwrap_or(empty || timeline.clips().any(|clip| clip.video));
+                let audio = spec
+                    .audio
+                    .unwrap_or(timeline.clips().any(|clip| clip.audio));
+                if !video && !audio {
+                    return Err("A clip needs its picture, its sound or both".into());
+                }
+                (String::new(), video, audio)
+            }
         };
         let mut clip = Clip {
             id: ClipId(self.alloc()),
             kind: spec.kind,
             media,
+            sequence: spec.sequence,
             start,
             duration: self.snap(spec.duration)?,
             source_in: spec.source_in,
@@ -1124,6 +1229,46 @@ impl Edit {
 
     // ---- Commands ----------------------------------------------------------------
 
+    /// Runs `change` on timeline `node` (not the one being edited) as if it were
+    /// the main timeline, then settles it as every edit does.
+    fn in_timeline(
+        &mut self,
+        node: Node,
+        change: impl FnOnce(&mut Edit) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let mut sub = Edit::new(self.project.opened(node)?);
+        change(&mut sub)?;
+        sub.finish()?;
+        let next = sub.project.opened(self.project.current())?;
+        self.project.next_id = next.next_id;
+        self.project.sequences = next.sequences;
+        Ok(())
+    }
+
+    /// Removes the clips `matches` picks from every timeline but the one being
+    /// edited.
+    fn remove_elsewhere(&mut self, matches: impl Fn(&Clip) -> bool) -> Result<(), String> {
+        let current = self.project.current();
+        let nodes: Vec<Node> = self
+            .project
+            .timelines()
+            .filter(|timeline| timeline.node != current && timeline.clips().any(&matches))
+            .map(|timeline| timeline.node)
+            .collect();
+        for node in nodes {
+            self.in_timeline(node, |edit| {
+                for index in 0..edit.project.tracks.len() {
+                    if edit.project.tracks[index].clips.iter().any(&matches) {
+                        edit.unlocked(index)?;
+                        edit.track_mut(index).clips.retain(|clip| !matches(clip));
+                    }
+                }
+                Ok(())
+            })?;
+        }
+        Ok(())
+    }
+
     fn remove_media(&mut self, id: &str) -> Result<(), String> {
         let position = self
             .project
@@ -1131,6 +1276,7 @@ impl Edit {
             .iter()
             .position(|media| media.id == id)
             .ok_or_else(|| format!("No media {id} in the project"))?;
+        self.remove_elsewhere(|clip| clip.media == id)?;
         for index in 0..self.project.tracks.len() {
             if self.project.tracks[index]
                 .clips
@@ -1320,7 +1466,7 @@ impl Edit {
                 (Edge::Start, false) if driven => {
                     // The clip keeps its place and settling moves the later ones, so a
                     // longer first clip never starts before 0.
-                    let still = self.is_still(&clip.media);
+                    let still = self.is_still(&clip);
                     let changed = self.clip_mut(index, target);
                     changed.cut_start(delta, still);
                     shift_keys(changed, -delta);
@@ -1335,7 +1481,7 @@ impl Edit {
                 (Edge::End, false) => self.lengthen(index, target, delta),
                 (Edge::Start, true) => {
                     // The clip keeps its place; its content and everything after move.
-                    let still = self.is_still(&clip.media);
+                    let still = self.is_still(&clip);
                     let changed = self.clip_mut(index, target);
                     changed.cut_start(delta, still);
                     shift_keys(changed, -delta);
@@ -1354,7 +1500,7 @@ impl Edit {
 
     /// Moves the end of clip `id` by `delta`, keeping its content where it plays.
     fn lengthen(&mut self, index: usize, id: ClipId, delta: Flicks) {
-        let still = self.is_still(&self.find(id).expect("clip").1.media);
+        let still = self.is_still(&self.find(id).expect("clip").1);
         let clip = self.clip_mut(index, id);
         let duration = clip.duration + delta;
         clip.set_end(duration, still);
@@ -1563,13 +1709,13 @@ impl Edit {
         if target.is_title() {
             return Err("Titles have nothing to slip".into());
         }
-        if self.is_still(&target.media) {
+        if self.is_still(&target) {
             return Err("Stills have nothing to slip".into());
         }
         let delta = self.snap(delta)?;
         for target in self.with_partners(&[id])? {
             let (index, clip) = self.find(target)?;
-            if self.is_still(&clip.media) {
+            if self.is_still(&clip) {
                 continue;
             }
             self.unlocked(index)?;
@@ -1747,15 +1893,18 @@ impl Edit {
         if target.is_title() {
             return Err("Titles have no speed".into());
         }
-        if self.is_still(&target.media) {
+        if self.is_still(&target) {
             return Err("Stills have no speed".into());
         }
         if target.freeze {
             return Err("Freeze frames have no speed".into());
         }
+        if target.is_sequence() {
+            return Err("Sequence clips play at normal speed".into());
+        }
         for target in self.with_partners(&[id])? {
             let (index, clip) = self.find(target)?;
-            if self.is_still(&clip.media) {
+            if self.is_still(&clip) || clip.is_sequence() {
                 continue;
             }
             self.unlocked(index)?;
@@ -1780,7 +1929,7 @@ impl Edit {
 
     fn set_ramp(&mut self, id: ClipId, shape: &[RampShape]) -> Result<(), String> {
         let (_, target) = self.find(id)?;
-        if target.is_generated() || self.is_still(&target.media) {
+        if target.is_generated() || target.is_sequence() || self.is_still(&target) {
             return Err("Only video and sound have a speed to ramp".into());
         }
         if target.freeze {
@@ -1788,7 +1937,7 @@ impl Edit {
         }
         for target in self.with_partners(&[id])? {
             let (index, clip) = self.find(target)?;
-            if clip.is_generated() || clip.freeze || self.is_still(&clip.media) {
+            if clip.is_generated() || clip.is_sequence() || clip.freeze || self.is_still(&clip) {
                 continue;
             }
             self.unlocked(index)?;
@@ -1825,7 +1974,7 @@ impl Edit {
 
     fn set_reverse(&mut self, id: ClipId, reverse: bool) -> Result<(), String> {
         let (_, target) = self.find(id)?;
-        if target.is_generated() || self.is_still(&target.media) {
+        if target.is_generated() || target.is_sequence() || self.is_still(&target) {
             return Err("Only video and sound play backwards".into());
         }
         if target.freeze {
@@ -1833,7 +1982,7 @@ impl Edit {
         }
         for target in self.with_partners(&[id])? {
             let (index, clip) = self.find(target)?;
-            if clip.is_generated() || clip.freeze || self.is_still(&clip.media) {
+            if clip.is_generated() || clip.is_sequence() || clip.freeze || self.is_still(&clip) {
                 continue;
             }
             self.unlocked(index)?;
@@ -1902,6 +2051,7 @@ impl Edit {
             id: frozen_id,
             kind: ClipKind::Media,
             media: clip.media.clone(),
+            sequence: None,
             start: at,
             duration,
             source_in: source,
@@ -1987,6 +2137,7 @@ impl Edit {
         let mut filled = Clip {
             kind: ClipKind::Media,
             media: media.id.clone(),
+            sequence: None,
             title: None,
             caption: None,
             source_in: if still {
@@ -2083,6 +2234,210 @@ impl Edit {
             track.insert_sorted(held);
         }
         self.check_track(index)
+    }
+
+    fn remove_sequence(&mut self, id: SequenceId) -> Result<(), String> {
+        if self.project.swapped == Some(id) {
+            return Err("Close a sequence before deleting it".into());
+        }
+        if self.project.sequence(id).is_none() {
+            return Err(format!("No sequence {id}"));
+        }
+        let shows = |clip: &Clip| clip.sequence == Some(id);
+        self.remove_elsewhere(shows)?;
+        for index in 0..self.project.tracks.len() {
+            if self.project.tracks[index].clips.iter().any(shows) {
+                self.unlocked(index)?;
+                self.track_mut(index).clips.retain(|clip| !shows(clip));
+            }
+        }
+        self.project.sequences.retain(|sequence| sequence.id != id);
+        Ok(())
+    }
+
+    /// Moves clips `ids` and their partners into a new sequence, and a sequence
+    /// clip showing it into their place.
+    fn nest(&mut self, ids: &[ClipId], name: Option<&str>) -> Result<(), String> {
+        if ids.is_empty() {
+            return Err("Nothing to nest".into());
+        }
+        let ids = self.with_partners(ids)?;
+        let mut by_track: BTreeMap<usize, Vec<Clip>> = BTreeMap::new();
+        for &id in &ids {
+            let (index, clip) = self.editable(id)?;
+            by_track.entry(index).or_default().push(clip);
+        }
+        let selected: BTreeSet<ClipId> = ids.iter().copied().collect();
+        let clips = || by_track.values().flatten();
+        let start = clips().map(|clip| clip.start).min().expect("clips");
+        let end = clips().map(Clip::end).max().expect("clips");
+        let video = clips().any(|clip| clip.video);
+        let audio = clips().any(|clip| clip.audio && !clip.freeze);
+        let default_name = format!("Sequence {}", self.project.sequences.len() + 1);
+        let name = check_name(name.unwrap_or(&default_name), "A sequence", MAX_NAME)?;
+        let sequence = SequenceId(self.alloc());
+        // Each track keeps its clips, from the sequence's start, and the
+        // transitions between them.
+        let mut tracks = Vec::new();
+        for (&index, moved) in &by_track {
+            let mut track = Track::new(TrackId(self.alloc()));
+            let source = &self.project.tracks[index];
+            track.name = source.name.clone();
+            for clip in moved {
+                let mut clip = clip.clone();
+                clip.start -= start;
+                track.insert_sorted(clip);
+            }
+            let inside = |id: Option<ClipId>| id.is_none_or(|id| selected.contains(&id));
+            track.transitions = source
+                .transitions
+                .iter()
+                .filter(|t| inside(t.from) && inside(t.to))
+                .cloned()
+                .collect();
+            tracks.push(Arc::new(track));
+        }
+        for &index in by_track.keys() {
+            let track = self.track_mut(index);
+            track.clips.retain(|clip| !selected.contains(&clip.id));
+            let outside = |id: Option<ClipId>| id.is_some_and(|id| selected.contains(&id));
+            track
+                .transitions
+                .retain(|t| !outside(t.from) && !outside(t.to));
+        }
+        let target = *by_track.keys().next().expect("clips");
+        if !self.project.tracks[target].is_free(start, end, &[]) {
+            return Err(format!(
+                "Other clips sit between those on {}: nest clips that are side by side",
+                self.track_name(target)
+            ));
+        }
+        let spec = ClipSpec {
+            kind: ClipKind::Sequence,
+            sequence: Some(sequence),
+            duration: end - start,
+            video: Some(video),
+            audio: Some(audio),
+            ..ClipSpec::default()
+        };
+        self.project.sequences.push(Arc::new(Sequence {
+            id: sequence,
+            name,
+            main_track: tracks[0].id,
+            tracks,
+            magnetic: false,
+            markers: Vec::new(),
+        }));
+        let clip = self.new_clip(&spec, start)?;
+        self.created.push(clip.id.0);
+        self.created.push(sequence.0);
+        self.track_mut(target).insert_sorted(clip);
+        self.check_track(target)
+    }
+
+    /// Replaces sequence clip `id` with copies of what it shows.
+    fn break_apart(&mut self, id: ClipId) -> Result<(), String> {
+        let (index, clip) = self.editable(id)?;
+        let sequence = clip
+            .sequence
+            .filter(|_| clip.is_sequence())
+            .ok_or("Only a sequence clip breaks apart")?;
+        let (from, to) = (clip.source_in, clip.source_out());
+        // The sequence, cut at the clip's edges.
+        let mut cut = Edit::new(self.project.opened(Node::Sequence(sequence))?);
+        for at in [from, to] {
+            for track in 0..cut.project.tracks.len() {
+                let under: Vec<ClipId> = cut.project.tracks[track]
+                    .clips
+                    .iter()
+                    .filter(|c| {
+                        c.spans(at) && at - c.start >= cut.frame && c.end() - at >= cut.frame
+                    })
+                    .map(|c| c.id)
+                    .collect();
+                for clip in under {
+                    let link = cut.find(clip)?.1.link;
+                    cut.split_clip(track, clip, at, link)?;
+                }
+            }
+        }
+        let layers: Vec<Arc<Track>> = cut.project.tracks.clone();
+        {
+            let track = self.track_mut(index);
+            track.clips.retain(|c| c.id != id);
+            track
+                .transitions
+                .retain(|t| t.from != Some(id) && t.to != Some(id));
+        }
+        let offset = clip.start - from;
+        let mut links: BTreeMap<LinkId, LinkId> = BTreeMap::new();
+        let mut target = index;
+        for (layer, source) in layers.iter().enumerate() {
+            let copies: Vec<&Clip> = source
+                .clips
+                .iter()
+                .filter(|c| c.start >= from && c.end() <= to)
+                .collect();
+            if copies.is_empty() && layer > 0 {
+                continue;
+            }
+            if layer > 0 {
+                target += 1;
+                let free = target < self.project.tracks.len()
+                    && !self.project.tracks[target].locked
+                    && self.project.tracks[target].is_free(clip.start, clip.end(), &[])
+                    && self.main_index() != Some(target);
+                if !free {
+                    let track = Track::new(TrackId(self.alloc()));
+                    self.created.push(track.id.0);
+                    self.project.tracks.insert(target, Arc::new(track));
+                }
+            }
+            if self.main_index() == Some(target) {
+                let mut end = clip.start;
+                for copy in &copies {
+                    if copy.start + offset != end {
+                        return Err("The sequence's bottom track has gaps: turn off the magnetic main track to break it apart".into());
+                    }
+                    end = copy.end() + offset;
+                }
+                if end != clip.end() {
+                    return Err("The sequence's bottom track has gaps: turn off the magnetic main track to break it apart".into());
+                }
+            }
+            let mut renamed: BTreeMap<ClipId, ClipId> = BTreeMap::new();
+            for copy in copies {
+                let mut placed = self.new_clip(&spec_of(copy), copy.start + offset)?;
+                placed.link = copy.link.map(|link| {
+                    *links
+                        .entry(link)
+                        .or_insert_with(|| LinkId(self.project.alloc_id()))
+                });
+                renamed.insert(copy.id, placed.id);
+                self.created.push(placed.id.0);
+                self.track_mut(target).insert_sorted(placed);
+            }
+            let moved = |id: Option<ClipId>| match id {
+                Some(id) => renamed.get(&id).copied().map(Some),
+                None => Some(None),
+            };
+            let transitions: Vec<_> = source
+                .transitions
+                .iter()
+                .filter_map(|t| {
+                    let (from, to) = (moved(t.from)?, moved(t.to)?);
+                    (from.is_some() || to.is_some()).then(|| (t.clone(), from, to))
+                })
+                .collect();
+            for (t, from, to) in transitions {
+                let id = TransitionId(self.alloc());
+                self.track_mut(target)
+                    .transitions
+                    .push(crate::effects::Transition { id, from, to, ..t });
+            }
+            self.check_track(target)?;
+        }
+        Ok(())
     }
 
     fn add_mask(&mut self, id: ClipId, spec: &Mask, index: Option<usize>) -> Result<(), String> {
@@ -2689,6 +3044,44 @@ fn check_marker_name(name: &str) -> Result<String, String> {
 }
 
 /// Checks and applies clip property changes.
+/// A spec that places a copy of `clip`, which gets new ids.
+fn spec_of(clip: &Clip) -> ClipSpec {
+    ClipSpec {
+        kind: clip.kind,
+        media: clip.media.clone(),
+        sequence: clip.sequence,
+        source_in: clip.source_in,
+        duration: clip.duration,
+        video: Some(clip.video),
+        audio: Some(clip.audio),
+        speed: Some(clip.speed),
+        properties: Some(ClipProperties {
+            transform: Some(clip.transform.into()),
+            crop: Some(clip.crop.into()),
+            opacity: Some(clip.opacity),
+            volume_db: Some(clip.volume_db),
+            fade_in: Some(clip.fade_in),
+            fade_out: Some(clip.fade_out),
+            denoise: Some(clip.denoise),
+            blend_mode: Some(clip.blend_mode),
+            keep_pitch: Some(clip.keep_pitch),
+            frame_blending: Some(clip.frame_blending),
+            remove_background: Some(clip.remove_background),
+        }),
+        effects: clip.effects.iter().map(EffectSpec::from).collect(),
+        audio_effects: clip.audio_effects.iter().map(EffectSpec::from).collect(),
+        keyframes: clip.keyframes.clone(),
+        title: clip.title.clone(),
+        ramp: clip.ramp.clone(),
+        reverse: clip.reverse,
+        freeze: clip.freeze,
+        masks: clip.masks.clone(),
+        slot: clip.slot,
+        beats: clip.beats.clone(),
+        caption: clip.caption.clone(),
+    }
+}
+
 fn apply_properties(clip: &mut Clip, properties: &ClipProperties) -> Result<(), String> {
     let transform = properties
         .transform

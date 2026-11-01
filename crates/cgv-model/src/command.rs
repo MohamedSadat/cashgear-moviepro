@@ -6,7 +6,7 @@ use crate::effects::{Alignment, EffectSpec, LutSpec, Params, TransitionSpec};
 use crate::masks::{BlendMode, Mask};
 use crate::project::{
     ClipId, ClipKind, Crop, Ducking, EffectId, LutId, MarkerColor, MarkerId, MaskId, MediaRef,
-    ProjectSettings, Speed, TrackId, TrackRole, Transform, TransitionId,
+    ProjectSettings, SequenceId, Speed, TrackId, TrackRole, Transform, TransitionId,
 };
 use crate::timing::{RampPoint, RampShape};
 use crate::title::{Caption, Title};
@@ -28,6 +28,9 @@ pub struct ClipSpec {
     pub kind: ClipKind,
     #[serde(default)]
     pub media: String,
+    /// The sequence a sequence clip shows (`kind` is sequence).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<SequenceId>,
     /// Source time of the first frame. Always zero for still images.
     #[serde(default)]
     pub source_in: Flicks,
@@ -604,6 +607,40 @@ pub enum Command {
     RemoveMarker {
         marker: MarkerId,
     },
+
+    /// Adds an empty sequence with two tracks, the bottom one its magnetic main
+    /// track, as a new project has.
+    AddSequence {
+        name: String,
+    },
+    RenameSequence {
+        sequence: SequenceId,
+        name: String,
+    },
+    /// Removes a sequence, with every sequence clip that shows it.
+    RemoveSequence {
+        sequence: SequenceId,
+    },
+    /// Moves clips (and their linked partners) into a new sequence, keeping their
+    /// places, and puts a sequence clip showing it where they were, on the lowest
+    /// of their tracks. Each of their tracks becomes one of the sequence's.
+    Nest {
+        clips: Vec<ClipId>,
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Replaces a sequence clip with copies of the clips it shows, trimmed to
+    /// it, on its track and the ones above (new tracks where those are in the
+    /// way). The sequence clip's own effects, transform and sound settings go.
+    BreakApart {
+        clip: ClipId,
+    },
+    /// Runs `command` on sequence `sequence`'s tracks and markers, as if it were
+    /// the main timeline.
+    InSequence {
+        sequence: SequenceId,
+        command: Box<Command>,
+    },
 }
 
 impl Command {
@@ -699,6 +736,12 @@ impl Command {
             Command::UpdateMarker { .. } => "Change marker",
             Command::RemoveMarker { .. } => "Delete marker",
             Command::Batch { commands } => commands.first().map_or("Change clip", Command::label),
+            Command::AddSequence { .. } => "New sequence",
+            Command::RenameSequence { .. } => "Rename sequence",
+            Command::RemoveSequence { .. } => "Delete sequence",
+            Command::Nest { .. } => "Nest",
+            Command::BreakApart { .. } => "Break apart",
+            Command::InSequence { command, .. } => command.label(),
         }
     }
 }
