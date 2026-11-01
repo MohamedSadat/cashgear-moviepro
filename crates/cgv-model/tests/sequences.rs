@@ -3,6 +3,7 @@
 mod common;
 
 use cgv_model::*;
+use cgv_time::FrameRate;
 use common::*;
 
 fn nest(s: &mut Session, clips: &[ClipId]) -> (ClipId, SequenceId) {
@@ -17,6 +18,46 @@ fn nest(s: &mut Session, clips: &[ClipId]) -> (ClipId, SequenceId) {
 
 fn tracks(project: &Project, id: SequenceId) -> Vec<std::sync::Arc<Track>> {
     project.sequence_tracks(id).unwrap().to_vec()
+}
+
+#[test]
+fn a_new_frame_rate_refits_the_transitions_inside_a_sequence() {
+    let mut s = session();
+    let a = append(&mut s, 0, "v", 0, 30);
+    let b = append(&mut s, 0, "v", 30, 1);
+    let (_, sequence) = nest(&mut s, &[a, b]);
+    let track = tracks(s.project(), sequence)[0].id;
+    // Two frames centred on the cut: one each side at 30 fps. At 25 fps the first
+    // half is under a frame, so all of it would fall after the cut, past `b`'s end.
+    s.execute(&Command::InSequence {
+        sequence,
+        command: Box::new(Command::AddTransition {
+            track,
+            from: Some(a),
+            to: Some(b),
+            transition: TransitionSpec {
+                kind: "cross-dissolve".into(),
+                pack: BUILTIN_PACK.into(),
+                version: 1,
+                duration: f(2),
+                alignment: None,
+                params: Params::new(),
+            },
+        }),
+    })
+    .unwrap();
+    assert_eq!(tracks(s.project(), sequence)[0].transitions.len(), 1);
+    let mut settings = s.project().settings;
+    settings.frame_rate = FrameRate::FPS_25;
+    s.execute(&Command::SetSettings { settings }).unwrap();
+    assert_eq!(s.project().settings.frame_rate, FrameRate::FPS_25);
+    let inside = tracks(s.project(), sequence);
+    assert!(inside[0].transitions.iter().all(|t| t.duration < f(2)));
+    assert!(s.undo());
+    assert_eq!(
+        tracks(s.project(), sequence)[0].transitions[0].duration,
+        f(2)
+    );
 }
 
 #[test]

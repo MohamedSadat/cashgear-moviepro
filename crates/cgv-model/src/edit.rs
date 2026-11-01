@@ -110,6 +110,17 @@ impl Edit {
             Command::SetSettings { settings } => {
                 settings.validate()?;
                 self.project.settings = *settings;
+                // Centred transitions sit by whole frames, in every timeline.
+                let current = self.project.current();
+                let others: Vec<Node> = self
+                    .project
+                    .timelines()
+                    .map(|timeline| timeline.node)
+                    .filter(|&node| node != current)
+                    .collect();
+                for node in others {
+                    self.in_timeline(node, |_| Ok(()))?;
+                }
             }
             // Turning magnetism on closes the main track's gaps as the edit settles.
             Command::SetMagnetic { magnetic } => self.project.magnetic = *magnetic,
