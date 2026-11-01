@@ -90,6 +90,8 @@ test('a timeline Premiere wrote opens with its clips and nested sequence', async
       !!Reflect.get(window, '__cgv')?.client &&
       document.querySelector<HTMLElement>('[data-testid="project-bar"]')?.dataset.busy === 'false',
   );
+  // The project opens after the client starts, and disables the button while it does.
+  await expect(page.getByTestId('export-timeline')).toBeEnabled();
   const [chooser] = await Promise.all([
     page.waitForEvent('filechooser'),
     page.getByTestId('import-timeline').click(),

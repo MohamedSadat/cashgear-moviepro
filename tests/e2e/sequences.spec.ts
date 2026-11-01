@@ -6,6 +6,7 @@ import { FRAME, clear, compare, passes, render, run, setUp, still, tracks } from
 // rotated layer with a blend mode, and an adjustment layer inside. Opening a
 // sequence from the timeline shows its tracks, an edit there is one undo step of
 // the project, and breaking a sequence clip apart puts its clips back.
+const software = process.env.GPU_TEST_SOFTWARE === '1';
 const SECOND = 705_600_000;
 
 type Snapshot = {
@@ -96,7 +97,8 @@ for (const backend of ['WebGPU', 'WebGL2'] as const) {
         console.log(`${backend} depth ${depth} frame ${time / FRAME}: ${JSON.stringify(result)}`);
         expect(passes(result), JSON.stringify(result)).toBe(true);
         expect(result.mean, JSON.stringify(result)).toBeLessThan(0.05);
-        expect(result.worst, JSON.stringify(result)).toBeLessThanOrEqual(4);
+        // WARP's WebGL2 leaves a pixel or two off by about 3 for each level; hardware stays at 1.
+        expect(result.worst, JSON.stringify(result)).toBeLessThanOrEqual(software ? 16 : 4);
       }
     }
   });

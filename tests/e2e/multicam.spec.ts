@@ -218,6 +218,12 @@ test('the angle viewer shows four angles, keys cut on the frame showing, and it 
   await page.getByTestId('timeline-canvas').hover();
   for (const key of ['2', '3', '4']) {
     await page.waitForTimeout(500);
+    // A software GPU can show one frame for longer than that, and a cut needs a new frame.
+    await page.waitForFunction(() => {
+      const shown = document.querySelector<HTMLElement>('[data-testid="transport"]')!;
+      const pressed = Reflect.get(window, '__pressed') as number[];
+      return Number(shown.dataset.frame) > (pressed[pressed.length - 1] ?? -1);
+    });
     await page.keyboard.press(key);
   }
   await page.waitForTimeout(300);
