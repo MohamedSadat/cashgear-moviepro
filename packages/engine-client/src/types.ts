@@ -20,7 +20,13 @@ import type {
   ProjectSnapshot,
   SavedText,
 } from './project/types';
-import type { Pixels, PlaybackState, PlaybackStatsReport, QualityMode } from './playback/types';
+import type {
+  Pixels,
+  PlaybackState,
+  PlaybackStatsReport,
+  QualityMode,
+  ScopeData,
+} from './playback/types';
 import type { CatalogEntry, LookInfo } from './effects/types';
 
 export type BackendPreference = 'auto' | 'webgl2';
@@ -154,6 +160,8 @@ export interface EngineApi {
    * `yuv444p10le` or `yuva444p10le`): 16-bit little-endian samples.
    */
   renderYuv10(time: number, width: number, height: number, format: string): Promise<Pixels>;
+  /** Scopes of the monitor's latest picture, with `columns` waveform columns; null before one. */
+  readScopes(columns: number): Promise<ScopeData | null>;
   /** Diagnostics: the latest composition as it is, without drawing again. */
   readComposition(): Promise<Pixels>;
   /**

@@ -3,10 +3,13 @@
 import type { FrameRate } from '../media/types';
 import { FLICKS_PER_SECOND } from '../project/types';
 
-export type ExportFormat = 'mp4' | 'webm' | 'mov' | 'mkv' | 'wav' | 'gif' | 'mp3';
-/** Mediabunny's codec names. */
-export type ExportVideoCodec = 'avc' | 'hevc' | 'vp9' | 'av1';
-export type ExportAudioCodec = 'aac' | 'opus' | 'pcm-s16';
+export type ExportFormat =
+  'mp4' | 'webm' | 'mov' | 'mkv' | 'wav' | 'gif' | 'mp3' | 'prores-422-hq' | 'prores-4444';
+/** Mediabunny's codec names, and ProRes, which FFmpeg encodes for masters. */
+export type ExportVideoCodec = 'avc' | 'hevc' | 'vp9' | 'av1' | 'prores';
+export type ExportAudioCodec = 'aac' | 'opus' | 'pcm-s16' | 'pcm-s24';
+/** The ProRes masters FFmpeg makes from 10-bit frames on the desktop. */
+export type MasterProfile = 'prores-422-hq' | 'prores-4444';
 export type ExportQuality = 'high' | 'medium' | 'low';
 
 export interface ExportSettings {
@@ -71,6 +74,11 @@ export interface FormatInfo {
   audio: ExportAudioCodec[];
   /** Made by FFmpeg from an intermediate file, so only the desktop app has it. */
   convertedFrom?: 'mp4' | 'wav';
+  /**
+   * A ProRes master: FFmpeg encodes the engine's 10-bit frames, read back in
+   * `pixelFormat` (FFmpeg's name), so only the desktop app has it.
+   */
+  master?: { profile: MasterProfile; pixelFormat: 'yuv422p10le' | 'yuva444p10le' };
 }
 
 export const formats: FormatInfo[] = [
@@ -116,6 +124,24 @@ export const formats: FormatInfo[] = [
     convertedFrom: 'mp4',
   },
   {
+    id: 'prores-422-hq',
+    label: 'ProRes 422 HQ (MOV)',
+    extension: 'mov',
+    mimeType: 'video/quicktime',
+    video: ['prores'],
+    audio: ['pcm-s24'],
+    master: { profile: 'prores-422-hq', pixelFormat: 'yuv422p10le' },
+  },
+  {
+    id: 'prores-4444',
+    label: 'ProRes 4444 (MOV, with alpha)',
+    extension: 'mov',
+    mimeType: 'video/quicktime',
+    video: ['prores'],
+    audio: ['pcm-s24'],
+    master: { profile: 'prores-4444', pixelFormat: 'yuva444p10le' },
+  },
+  {
     id: 'wav',
     label: 'WAV (audio)',
     extension: 'wav',
@@ -138,9 +164,9 @@ export function formatInfo(format: ExportFormat): FormatInfo {
   return formats.find((info) => info.id === format)!;
 }
 
-/** The formats a platform offers: FFmpeg conversions need the desktop app. */
+/** The formats a platform offers: FFmpeg conversions and masters need the desktop app. */
 export function formatsFor(platform: 'web' | 'desktop'): FormatInfo[] {
-  return formats.filter((info) => platform === 'desktop' || !info.convertedFrom);
+  return formats.filter((info) => platform === 'desktop' || !(info.convertedFrom || info.master));
 }
 
 export const videoCodecLabels: Record<ExportVideoCodec, string> = {
@@ -148,11 +174,13 @@ export const videoCodecLabels: Record<ExportVideoCodec, string> = {
   hevc: 'HEVC (H.265)',
   vp9: 'VP9',
   av1: 'AV1',
+  prores: 'Apple ProRes',
 };
 export const audioCodecLabels: Record<ExportAudioCodec, string> = {
   aac: 'AAC',
   opus: 'Opus',
   'pcm-s16': 'PCM 16-bit',
+  'pcm-s24': 'PCM 24-bit',
 };
 
 export interface ExportPreset {
@@ -206,7 +234,25 @@ const codecEfficiency: Record<ExportVideoCodec, number> = {
   hevc: 0.65,
   vp9: 0.7,
   av1: 0.55,
+  // ProRes has no bitrate setting: `masterBitrate` says what it takes.
+  prores: 1,
 };
+
+/** Apple's ProRes data rates (about 220 and 330 Mbit/s at 1080p30), in bits per pixel. */
+const masterBitsPerPixel: Record<MasterProfile, number> = {
+  'prores-422-hq': 3.54,
+  'prores-4444': 5.31,
+};
+
+/** About how many bits a second a ProRes master takes, for size estimates. */
+export function masterBitrate(
+  profile: MasterProfile,
+  width: number,
+  height: number,
+  fps: number,
+): number {
+  return Math.round((masterBitsPerPixel[profile] * width * height * fps) / 1e5) * 1e5;
+}
 
 /** A video bitrate (bits per second) for `quality`, rounded to 100 kbit/s. */
 export function qualityBitrate(
@@ -230,7 +276,7 @@ export function presetBitrate(preset: ExportPreset, codec: ExportVideoCodec, fps
  * takes at most 192 kbit/s, so stereo AAC gets exactly that.
  */
 export function audioBitrate(codec: ExportAudioCodec, channels: number): number {
-  if (codec === 'pcm-s16') return 0;
+  if (codec === 'pcm-s16' || codec === 'pcm-s24') return 0;
   return 96_000 * Math.max(1, Math.min(2, channels));
 }
 
@@ -416,6 +462,8 @@ export function videoCodecString(
       const id = level(av1Levels, samples, samples * frameRate, bitrate);
       return `av01.0.${String(id).padStart(2, '0')}M.08`;
     }
+    case 'prores':
+      return 'prores';
   }
 }
 

@@ -1,5 +1,5 @@
 import type { ManagedFrame } from '../media/frames';
-import { copyPlanes } from '../media/planes';
+import { copyPlanes, type FramePlanes } from '../media/planes';
 import { ReverseStream } from '../media/reverse-stream';
 import type { MediaService } from '../media/service';
 import { StreamDecoders } from '../media/stream-decoders';
@@ -23,6 +23,16 @@ function picture(item: StreamFrame): FramePicture {
  * in playback, but every frame is waited for: nothing is dropped. Clips about
  * to start get their streams early, so their first frames are decoded by then.
  */
+/**
+ * Desktop: frames of originals the webview plays only through proxies, decoded
+ * by FFmpeg at their own size and bit depth.
+ */
+export interface Originals {
+  has(media: string): boolean;
+  /** Frame `frame`, which starts at `seconds` and lasts `duration`, as planes. */
+  frame(media: string, frame: number, seconds: number, duration: number): Promise<FramePlanes>;
+}
+
 export class ExportFrames {
   private streams = new Map<number, { media: string; stream: LayerStream; reverse: boolean }>();
   private decoders = new StreamDecoders();
@@ -36,6 +46,7 @@ export class ExportFrames {
     private readonly media: MediaService,
     /** Copy every frame to planes (WebGL2 and software GPUs cannot draw decoder frames). */
     private readonly planes: boolean,
+    private readonly originals: Originals | null = null,
   ) {}
 
   /** The sources of `plan`, bottom layer first; starts decoding the clips in `upcoming`. */
@@ -60,6 +71,7 @@ export class ExportFrames {
         void this.still(layer.media).catch(() => {});
         continue;
       }
+      if (this.originals?.has(layer.media)) continue;
       if (this.stream(layer)) keep.add(layer.clip);
     }
     for (const [clip, { stream }] of this.streams) {
@@ -133,6 +145,18 @@ export class ExportFrames {
     if (number < 0) return null;
     const rotation = media.rotation(layer.media);
     const blend = layer.blendFrames ? media.blendAt(layer.media, layer.sourceTime) : null;
+    const originals = this.originals;
+    if (originals?.has(layer.media)) {
+      const read = async (frame: number) => {
+        const { seconds, duration } = media.frameSpan(layer.media, frame);
+        return originals.frame(layer.media, frame, seconds, duration);
+      };
+      const planes = await read(number);
+      const next = blend
+        ? { kind: 'planes' as const, planes: await read(blend.next), weight: blend.weight }
+        : undefined;
+      return { kind: 'planes', planes, rotation, next };
+    }
     const stream = this.stream(layer);
     if (stream) {
       try {

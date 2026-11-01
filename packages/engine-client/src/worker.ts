@@ -8,7 +8,7 @@ import { MediaService, type DecodePreference } from './media/service';
 import { AudioPlayer } from './playback/audio-player';
 import { PlaybackController } from './playback/controller';
 import { ProjectService } from './project/service';
-import type { Pixels } from './playback/types';
+import type { Pixels, ScopeData } from './playback/types';
 import type { EngineApi, EngineEvent, EngineInfo, GpuFault, InitOptions } from './types';
 import initWasm, { Engine, MediaLibrary, effects_catalog } from './pkg/cgv_wasm';
 
@@ -275,6 +275,11 @@ const api: EngineApi = {
   async readComposition() {
     await requireDiagnostics();
     return (await engine!.read_pixels()) as Pixels;
+  },
+  async readScopes(columns) {
+    if (!engine) return null;
+    // Counted from a picture 480 pixels across: enough for every scope's detail.
+    return (await engine.read_scopes(480, columns).catch(() => null)) as ScopeData | null;
   },
 };
 expose(api);

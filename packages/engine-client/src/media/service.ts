@@ -143,8 +143,22 @@ export class MediaService {
   private pool = new DecoderPool<VideoDecoderSession>(decoderCapacity);
   /** Told the id of a medium that was removed or now decodes differently. */
   onChange: (id: string) => void = () => {};
-  /** Diagnostics: force playback to software or hardware decoders where possible. */
-  decode: DecodePreference = 'auto';
+  private preference: DecodePreference = 'auto';
+
+  /**
+   * Diagnostics: force playback to software or hardware decoders where possible.
+   * Media imported before the engine started takes it too.
+   */
+  get decode(): DecodePreference {
+    return this.preference;
+  }
+
+  set decode(value: DecodePreference) {
+    if (value === this.preference) return;
+    this.preference = value;
+    for (const media of this.media.values())
+      media.reader?.reconfigure(this.readerConfig(media.reader.config, media.decoders));
+  }
 
   constructor(private readonly library: MediaLibrary) {}
 
@@ -368,6 +382,18 @@ export class MediaService {
 
   rotation(id: string): number {
     return this.media.get(id)?.rotation ?? 0;
+  }
+
+  /** Where frame `frame` of `id` starts and how long it lasts, in seconds. */
+  frameSpan(id: string, frame: number): { seconds: number; duration: number } {
+    const index = this.media.get(id)?.reader?.index;
+    if (!index || frame < 0 || frame >= index.frameCount) return { seconds: 0, duration: 0 };
+    const start = index.timestampOf(frame);
+    const end =
+      frame + 1 < index.frameCount
+        ? index.timestampOf(frame + 1)
+        : start + 1e6 / index.meanFrameRate();
+    return { seconds: start / 1e6, duration: (end - start) / 1e6 };
   }
 
   audioTrack(id: string): InputAudioTrack | null {

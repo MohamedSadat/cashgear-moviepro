@@ -94,6 +94,7 @@ export {
   loudnessCeiling,
   loudnessGain,
   loudnessTargets,
+  masterBitrate,
   presetBitrate,
   presets as exportPresets,
   qualityBitrate,
@@ -107,6 +108,7 @@ export {
   type ExportVideoCodec,
   type FormatInfo,
   type LoudnessPlan,
+  type MasterProfile,
 } from './export/settings';
 export type * from './effects/types';
 export type * from './export/types';

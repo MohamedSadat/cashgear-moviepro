@@ -6,7 +6,9 @@ import { MediaService } from '../media/service';
 import initWasm, { Engine, MediaLibrary, ProjectSession } from '../pkg/cgv_wasm';
 import { drawsGpuFrames } from '../playback/draw';
 import { cancelled, runExport } from './job';
-import { withinFreeSize } from './settings';
+import { runMaster } from './master';
+import { nativeOriginals } from './originals';
+import { formatInfo, withinFreeSize } from './settings';
 import { openTarget } from './targets';
 import { addWatermark } from './watermark';
 import type { ExportWorkerApi } from './types';
@@ -41,6 +43,7 @@ const api: ExportWorkerApi = {
     // Exports wait for every frame, so the decoders' stalls at clip ends cost nothing.
     media.decode = job.decode && job.decode !== 'auto' ? job.decode : 'fastest';
     let session: ProjectSession | null = null;
+    const originals = nativeOriginals(job, events);
     try {
       const outcomes = await media.import(job.media.map(({ id, source }) => ({ id, source })));
       for (const outcome of outcomes)
@@ -58,7 +61,8 @@ const api: ExportWorkerApi = {
       }
       const blocks = new AudioBlocks((id) => media.audioTrack(id));
       const file = await openTarget(target, events);
-      return await runExport(
+      const run = formatInfo(settings.format).master ? runMaster : runExport;
+      return await run(
         {
           engine,
           fonts: new FontLoader(engine, fontCatalog()),
@@ -66,6 +70,7 @@ const api: ExportWorkerApi = {
           session,
           blocks,
           planes: !drawsGpuFrames(engine),
+          originals,
           signal: stop.signal,
         },
         job,
@@ -73,6 +78,7 @@ const api: ExportWorkerApi = {
         (progress) => void events.progress(progress),
       );
     } finally {
+      await originals?.close();
       session?.free();
       media.clear();
       await media.releaseFrames().catch(() => {});

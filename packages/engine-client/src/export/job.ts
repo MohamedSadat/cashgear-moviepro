@@ -27,7 +27,7 @@ import {
   VideoTrackEncoder,
   type AudioTrackSink,
 } from './encoders';
-import { ExportFrames } from './frames';
+import { ExportFrames, type Originals } from './frames';
 import { ProgressClock } from './progress';
 import {
   audioCodecString,
@@ -62,6 +62,8 @@ export interface ExportDeps {
   blocks: AudioBlocks;
   /** Copy decoder frames to planes (WebGL2, software GPUs). */
   planes: boolean;
+  /** Desktop: originals of media that plays through proxies. */
+  originals?: Originals | null;
   /** Set when the user cancels. */
   signal: AbortSignal;
 }
@@ -78,7 +80,7 @@ export function cancelled(): DOMException {
 }
 
 /** Why the export stopped: a cancel, or a GPU failure the engine reported. */
-function stopped(signal: AbortSignal): unknown {
+export function stopped(signal: AbortSignal): unknown {
   return signal.reason ?? cancelled();
 }
 
@@ -217,7 +219,7 @@ export async function runExport(
   const mixer = sink ? new Mixer(sampleRate, channels) : null;
   const sound =
     sink && mixer ? new ExportAudio(session, mixer, deps.blocks, sink, totalSamples) : null;
-  const sources = new ExportFrames(engine, deps.media, deps.planes);
+  const sources = new ExportFrames(engine, deps.media, deps.planes, deps.originals);
   let finished = false;
   let loudness: LoudnessPlan | null = null;
   try {

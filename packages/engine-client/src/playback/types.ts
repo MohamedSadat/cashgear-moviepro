@@ -154,3 +154,18 @@ export interface Pixels {
   height: number;
   data: Uint8Array;
 }
+
+/**
+ * Scopes of the monitor's picture (crates/cgv-render/src/scopes.rs): counts,
+ * bottom row first. The waveforms are 256 rows of `columns`, the vectorscope
+ * 256 by 256 (Cb across, Cr up), and the histogram R', G', B' and luma, 256 each.
+ */
+export interface ScopeData {
+  columns: number;
+  luma: Uint32Array;
+  red: Uint32Array;
+  green: Uint32Array;
+  blue: Uint32Array;
+  vector: Uint32Array;
+  histogram: Uint32Array;
+}

@@ -27,9 +27,12 @@ export type ExportTarget =
   /** Web elsewhere: into the browser's private storage, downloaded afterwards. */
   | { kind: 'opfs'; name: string }
   /** Desktop: the bytes go back to the page, which hands them to the native side. */
-  | { kind: 'sink' };
+  | { kind: 'sink' }
+  /** Desktop ProRes masters: the sound, then 10-bit frames, go to FFmpeg through the page. */
+  | { kind: 'master' };
 
-export type ExportPhase = 'preparing' | 'measuring' | 'rendering' | 'finishing' | 'converting';
+export type ExportPhase =
+  'preparing' | 'measuring' | 'mixing' | 'rendering' | 'finishing' | 'converting';
 
 export interface ExportProgress {
   phase: ExportPhase;
@@ -62,11 +65,38 @@ export interface ExportResult {
   loudness: LoudnessPlan | null;
 }
 
+/** Desktop: an original FFmpeg decodes for an export, as `originals_open` describes it. */
+export interface OriginalInfo {
+  id: string;
+  /** The frame size before rotation. */
+  width: number;
+  height: number;
+  /** The WebCodecs name of the frames' layout: `I420`, `I422P10`, `I444P12`… */
+  format: string;
+  frameBytes: number;
+  /** Offset and stride in bytes of each plane. */
+  planes: [number, number][];
+}
+
 /** The page's side of a running export. */
 export interface ExportEvents {
   progress(progress: ExportProgress): void;
   /** Desktop sink: writes `data` at byte `position` of the file. */
   write?(position: number, data: Uint8Array): Promise<void>;
+  /** Desktop masters: the next interleaved 32-bit float samples, all before the first frame. */
+  masterSound?(data: Float32Array): Promise<void>;
+  /** Desktop masters: the next frame, as planar 10-bit Y'CbCr. */
+  masterFrame?(data: Uint8Array): Promise<void>;
+  /** Desktop: opens registered media `id` for FFmpeg to decode. */
+  originalOpen?(id: string): Promise<OriginalInfo>;
+  /** Desktop: frame `frame` of an opened original, which starts at `seconds` and lasts `duration`. */
+  originalFrame?(
+    session: string,
+    frame: number,
+    seconds: number,
+    duration: number,
+  ): Promise<Uint8Array>;
+  originalClose?(session: string): Promise<void>;
 }
 
 export interface ExportWorkerApi {

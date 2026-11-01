@@ -45,6 +45,14 @@ export class VideoReader {
     private readonly padded = false,
   ) {}
 
+  /** Decodes with `config` from the next read; frames decoded before are dropped. */
+  reconfigure(config: VideoDecoderConfig) {
+    this.config = config;
+    this.epoch++;
+    this.pool.release(this.key);
+    this.cache.deletePrefix(this.key + ':');
+  }
+
   /** Reads are serialized: one decoder, one position. */
   frame(frameNumber: number): Promise<FrameResult> {
     const result = this.queue.then(() => this.read(frameNumber));

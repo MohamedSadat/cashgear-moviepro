@@ -1,4 +1,4 @@
-import { proxy, releaseProxy, wrap } from 'comlink';
+import { proxy, releaseProxy, transfer, wrap } from 'comlink';
 import { fontCatalog } from '../fonts/loader';
 import { opfsExportFolder } from './targets';
 import type {
@@ -7,6 +7,7 @@ import type {
   ExportResult,
   ExportTarget,
   ExportWorkerApi,
+  OriginalInfo,
 } from './types';
 
 export interface RunningExport {
@@ -19,6 +20,15 @@ export interface ExportHandlers {
   progress(progress: ExportProgress): void;
   /** Desktop (`sink` target): writes `data` at byte `position` of the native file. */
   write?(position: number, data: Uint8Array): Promise<void>;
+  /** Desktop masters (`master` target): the sound, then each frame. */
+  masterSound?(data: Float32Array): Promise<void>;
+  masterFrame?(data: Uint8Array): Promise<void>;
+  /** Desktop: originals FFmpeg decodes for media that plays through proxies. */
+  originals?: {
+    open(id: string): Promise<OriginalInfo>;
+    frame(session: string, frame: number, seconds: number, duration: number): Promise<Uint8Array>;
+    close(session: string): Promise<void>;
+  };
 }
 
 /** Starts an export in a fresh worker, which is terminated when it ends. */
@@ -42,6 +52,16 @@ export function startExport(
     progress: (progress: ExportProgress) => handlers.progress(progress),
     write:
       handlers.write && ((position: number, data: Uint8Array) => handlers.write!(position, data)),
+    masterSound: handlers.masterSound && ((data: Float32Array) => handlers.masterSound!(data)),
+    masterFrame: handlers.masterFrame && ((data: Uint8Array) => handlers.masterFrame!(data)),
+    originalOpen: handlers.originals && ((id: string) => handlers.originals!.open(id)),
+    originalFrame:
+      handlers.originals &&
+      (async (session: string, frame: number, seconds: number, duration: number) => {
+        const data = await handlers.originals!.frame(session, frame, seconds, duration);
+        return transfer(data, [data.buffer]);
+      }),
+    originalClose: handlers.originals && ((session: string) => handlers.originals!.close(session)),
   });
   const result = Promise.race([
     api.run({ ...job, fonts: job.fonts ?? fontCatalog().extras() }, target, events),

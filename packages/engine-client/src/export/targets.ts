@@ -11,6 +11,11 @@ export interface OpenTarget {
   commit(): void;
   /** Drops the partial file (after a failure or a cancel). */
   discard(): Promise<void>;
+  /** Masters: where the sound and the frames go. */
+  master?: {
+    sound(data: Float32Array): Promise<void>;
+    frame(data: Uint8Array): Promise<void>;
+  };
 }
 
 /** The folder in OPFS for exports on their way to a download. */
@@ -119,6 +124,26 @@ export async function openTarget(target: ExportTarget, events: ExportEvents): Pr
         commit: () => (committed = true),
         // The page removes the native file.
         discard: async () => {},
+      };
+    }
+    case 'master': {
+      const { masterSound, masterFrame } = events;
+      if (!masterSound || !masterFrame) throw new Error('Masters are made by the desktop app');
+      return {
+        writable: new WritableStream<StreamTargetChunk>({
+          write: () => {
+            throw new Error('A master takes frames, not file bytes');
+          },
+        }),
+        // Only the native side knows; the page fills it in when the file is done.
+        bytes: () => 0,
+        commit: () => {},
+        // The page removes the native file.
+        discard: async () => {},
+        master: {
+          sound: (data) => masterSound(transfer(data, [data.buffer])),
+          frame: (data) => masterFrame(transfer(data, [data.buffer])),
+        },
       };
     }
   }
