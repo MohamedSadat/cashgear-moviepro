@@ -166,7 +166,7 @@ pub fn media_forget(state: State<'_, MediaState>, id: String) -> Result<(), Stri
     state.registry.forget(&id);
     state.registry.forget(&format!("{id}.proxy"));
     state.probes.lock().expect("probes").remove(&id);
-    let _ = std::fs::remove_file(proxy_path(&state, &id)?);
+    let _ = remove_proxies(&state, &id);
     Ok(())
 }
 
@@ -177,15 +177,27 @@ pub fn media_drop_proxy(state: State<'_, MediaState>, id: String) -> Result<(), 
         cancel.store(true, Ordering::Relaxed);
     }
     state.registry.forget(&format!("{id}.proxy"));
-    match std::fs::remove_file(proxy_path(&state, &id)?) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(format!("Could not remove the old proxy: {error}")),
-    }
+    remove_proxies(&state, &id)
 }
 
-fn proxy_path(state: &MediaState, id: &str) -> Result<PathBuf, String> {
-    cache::key_path(&state.cache_root, &format!("proxies/{id}.mp4"))
+/// Removes every proxy made of `id`: each size, and one from before sizes (`<id>.mp4`).
+fn remove_proxies(state: &MediaState, id: &str) -> Result<(), String> {
+    let folder = cache::key_path(&state.cache_root, "proxies")?;
+    let Ok(entries) = std::fs::read_dir(&folder) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name == format!("{id}.mp4") || name.starts_with(&format!("{id}-")) {
+            std::fs::remove_file(entry.path())
+                .map_err(|error| format!("Could not remove the old proxy: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn proxy_path(state: &MediaState, id: &str, height: u32) -> Result<PathBuf, String> {
+    cache::key_path(&state.cache_root, &format!("proxies/{id}-{height}.mp4"))
 }
 
 #[derive(Clone, Serialize)]
@@ -194,24 +206,20 @@ pub enum ProxyEvent {
     Progress { progress: f32 },
 }
 
-/// Transcodes a registered file to its 720p H.264 proxy (reusing one made earlier).
+/// Transcodes a registered file to its H.264 proxy at `size` (`half`, the
+/// default, `quarter` or `full` of its height, but at least 720 rows), reusing
+/// one made earlier.
 #[tauri::command]
 pub async fn media_make_proxy(
     state: State<'_, MediaState>,
     id: String,
+    size: Option<String>,
     events: Channel<ProxyEvent>,
 ) -> Result<RegisteredMedia, String> {
     let input = state
         .registry
         .path(&id)
         .ok_or_else(|| format!("No media with id {id}"))?;
-    let output = proxy_path(&state, &id)?;
-    let proxy_id = format!("{id}.proxy");
-    if output.is_file() {
-        let _ = events.send(ProxyEvent::Progress { progress: 1.0 });
-        return state.registry.register(&proxy_id, &output);
-    }
-    let tools = state.tools()?.clone();
     let probe = state
         .probes
         .lock()
@@ -221,7 +229,16 @@ pub async fn media_make_proxy(
         .ok_or("This file could not be probed, so no proxy can be made")?;
     let video = probe
         .video
+        .clone()
         .ok_or("This file has no video to make a proxy of")?;
+    let height = proxy::proxy_height(video.coded_height, size.as_deref().unwrap_or("half"));
+    let output = proxy_path(&state, &id, height)?;
+    let proxy_id = format!("{id}.proxy");
+    if output.is_file() {
+        let _ = events.send(ProxyEvent::Progress { progress: 1.0 });
+        return state.registry.register(&proxy_id, &output);
+    }
+    let tools = state.tools()?.clone();
     let encoder = tools
         .h264_encoder()
         .ok_or("No H.264 encoder works on this computer")?;
@@ -242,6 +259,7 @@ pub async fn media_make_proxy(
                 frame_rate: video.frame_rate,
                 duration_seconds: probe.duration_seconds,
                 has_audio: probe.audio.is_some(),
+                height,
             },
             &cancel,
             |progress| {

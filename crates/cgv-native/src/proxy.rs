@@ -1,4 +1,5 @@
-//! Proxies for media WebCodecs cannot decode: 720p H.264 MP4, a key frame every
+//! Proxies for media WebCodecs cannot decode, and for media too big to play
+//! smoothly: H.264 MP4 at most `height` rows high (720 by default), a key frame every
 //! 0.5 s, AAC audio, same frame timing and orientation as the original so
 //! frame N of the proxy is frame N of the source.
 use std::path::Path;
@@ -13,6 +14,19 @@ pub struct ProxyRequest<'a> {
     pub frame_rate: f64,
     pub duration_seconds: f64,
     pub has_audio: bool,
+    /// The proxy's largest height in rows; never more than the original's.
+    pub height: u32,
+}
+
+/// A proxy's height for an original `source` rows high at `size` (`full`,
+/// `half` or `quarter`): never under 720 rows unless the original is, and even.
+pub fn proxy_height(source: u32, size: &str) -> u32 {
+    let divisor = match size {
+        "full" => 1,
+        "quarter" => 4,
+        _ => 2,
+    };
+    ((source / divisor).max(source.min(720)) / 2 * 2).max(2)
 }
 
 /// FFmpeg arguments for one proxy (without the program name).
@@ -43,8 +57,11 @@ pub fn arguments(request: &ProxyRequest) -> Vec<String> {
         "-map",
         "0:v:0",
         "-vf",
-        // 720p at most (never upscaled), even width, square pixels.
-        "scale=w=-2:h='min(720,ih)':flags=bicubic,setsar=1",
+        // `height` at most (never upscaled), even width, square pixels.
+        &format!(
+            "scale=w=-2:h='min({},ih)':flags=bicubic,setsar=1",
+            request.height
+        ),
         "-fps_mode",
         "passthrough",
         "-pix_fmt",
@@ -52,7 +69,11 @@ pub fn arguments(request: &ProxyRequest) -> Vec<String> {
         "-c:v",
         request.encoder,
         "-b:v",
-        "6M",
+        // 6 Mbit/s at 720p, more for bigger proxies.
+        &format!(
+            "{}k",
+            6000 * request.height.max(720) / 720 * request.height.max(720) / 720
+        ),
         "-g",
         &gop,
         "-keyint_min",
@@ -130,7 +151,19 @@ mod tests {
             frame_rate: 30000.0 / 1001.0,
             duration_seconds: 3.003,
             has_audio: true,
+            height: 720,
         }
+    }
+
+    #[test]
+    fn proxies_are_half_size_but_never_under_720_rows() {
+        assert_eq!(proxy_height(2160, "half"), 1080);
+        assert_eq!(proxy_height(2160, "quarter"), 720);
+        assert_eq!(proxy_height(2160, "full"), 2160);
+        assert_eq!(proxy_height(1080, "half"), 720);
+        assert_eq!(proxy_height(720, "half"), 720);
+        assert_eq!(proxy_height(480, "quarter"), 480);
+        assert_eq!(proxy_height(4320, "half"), 2160);
     }
 
     #[test]

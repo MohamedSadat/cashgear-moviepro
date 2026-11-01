@@ -82,6 +82,7 @@ fn makes_a_720p_proxy_with_half_second_key_frames() {
             frame_rate: 30000.0 / 1001.0,
             duration_seconds: 3.003,
             has_audio: true,
+            height: 720,
         },
         &AtomicBool::new(false),
         |progress| last = progress,
