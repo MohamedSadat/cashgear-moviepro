@@ -6,7 +6,8 @@ use crate::effects::{Alignment, EffectSpec, LutSpec, Params, TransitionSpec};
 use crate::masks::{BlendMode, Mask};
 use crate::project::{
     Angles, ClipId, ClipKind, Crop, Ducking, EffectId, LutId, MarkerColor, MarkerId, MaskId,
-    MediaRef, ProjectSettings, SequenceId, Speed, TrackId, TrackRole, Transform, TransitionId,
+    MediaColour, MediaRef, ProjectSettings, SequenceId, Speed, TrackId, TrackRole, Transform,
+    TransitionId,
 };
 use crate::timing::{RampPoint, RampShape};
 use crate::title::{Caption, Title};
@@ -252,6 +253,13 @@ pub enum Command {
     /// Removes media from the bin, with every clip that uses it.
     RemoveMedia {
         media: String,
+    },
+    /// Reads a media file's colour as `colour` in place of its tags, or (with
+    /// none) by its tags again.
+    SetMediaColour {
+        media: String,
+        #[serde(default)]
+        colour: Option<MediaColour>,
     },
 
     /// Adds an empty track at `index` (0 is the bottom).
@@ -688,6 +696,7 @@ impl Command {
             Command::SetMagnetic { .. } => "Magnetic main track off",
             Command::AddMedia { .. } => "Import media",
             Command::RemoveMedia { .. } => "Remove media",
+            Command::SetMediaColour { .. } => "Change file colour",
             Command::AddTrack { .. } => "Add track",
             Command::RemoveTrack { .. } => "Delete track",
             Command::MoveTrack { .. } => "Move track",

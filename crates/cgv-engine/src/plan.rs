@@ -64,6 +64,9 @@ pub struct LayerPlan {
     /// draws them itself, and the layer has no media.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<Title>,
+    /// How to read its media's colour, in place of the file's tags.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colour: Option<cgv_model::MediaColour>,
     /// A sequence clip's picture: the composition of its [`Step::Nest`], and the
     /// layer has no media.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -200,6 +203,7 @@ fn visual_layer(project: &Project, track: TrackId, clip: &Clip, time: Flicks) ->
             // transform does.
             moving: !clip.keyframes.is_empty(),
             title: Some(title.at(&clip.keyframes, offset)),
+            colour: None,
             nest: false,
             reverse: false,
             blend_frames: false,
@@ -249,6 +253,7 @@ fn visual_layer(project: &Project, track: TrackId, clip: &Clip, time: Flicks) ->
         effects: effect_plans(clip, offset),
         moving: clip.has_moving_keyframes(),
         title: None,
+        colour: project.media_colour.get(&clip.media).copied(),
         nest: false,
         reverse: clip.reverse && !clip.freeze,
         blend_frames,
@@ -447,6 +452,7 @@ impl Planner<'_> {
             effects: effect_plans(clip, offset),
             moving: clip.has_moving_keyframes(),
             title: None,
+            colour: None,
             nest: true,
             reverse: false,
             blend_frames: false,
@@ -517,6 +523,7 @@ pub fn plan_angles(project: &Project, time: Flicks) -> Option<FramePlan> {
             seed: seed(clip.id),
             effects: Vec::new(),
             moving: false,
+            colour: None,
             nest: title.is_none(),
             title,
             reverse: false,

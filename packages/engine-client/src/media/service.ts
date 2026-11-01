@@ -61,6 +61,8 @@ interface OpenMedia {
     padded: boolean;
     /** More than 8 bits a sample, which only software decoders keep. */
     deep: boolean;
+    /** Read in place of its tags, which needs a software decoder's samples. */
+    samples?: boolean;
   };
   /** The decodable sound track, from the original or else the proxy. */
   audio: InputAudioTrack | null;
@@ -309,6 +311,18 @@ export class MediaService {
     if (media) media.decoders = { ...media.decoders, hardware: false };
   }
 
+  /**
+   * A file read in place of its tags needs its samples, and a hardware decoder may
+   * hand over opaque frames only the browser can convert: `id` decodes in software
+   * from now on, where the browser has it.
+   */
+  readSamples(id: string) {
+    const media = this.media.get(id);
+    if (!media?.decoders.hardware || !media.decoders.software) return;
+    media.decoders = { ...media.decoders, hardware: false, samples: true };
+    media.reader?.reconfigure(this.readerConfig(media.reader.config, media.decoders));
+  }
+
   /** The decoder policy: software up to 1080p where the browser has it. */
   private useHardware({ hardware, software, pixels, padded, deep }: OpenMedia['decoders']) {
     // Padded hardware frames are read back to be drawn right: software is quicker.
@@ -331,6 +345,7 @@ export class MediaService {
   private readerConfig(config: VideoDecoderConfig, decoders: OpenMedia['decoders']) {
     const software =
       this.decode === 'software' ||
+      decoders.samples ||
       (this.decode === 'fastest' && decoders.deep && decoders.software);
     const hardware = decoders.hardware && !software;
     return {

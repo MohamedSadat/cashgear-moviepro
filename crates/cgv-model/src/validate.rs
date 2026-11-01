@@ -310,6 +310,16 @@ pub fn validate(project: &Project) -> Result<(), String> {
         }
     }
 
+    if let Some(id) = project
+        .media_colour
+        .keys()
+        .find(|id| !media_ids.contains(id.as_str()))
+    {
+        return Err(format!(
+            "Media {id} has a colour setting but is not in the project"
+        ));
+    }
+
     let mut ids = Ids {
         seen: BTreeSet::new(),
         next: project.next_id,

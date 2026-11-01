@@ -80,7 +80,10 @@ export class PlaybackController {
   private clock: Clock | null = null;
   /** Why the latest playback left the audio clock, if it did. */
   private fallback: string | null = null;
-  private streams = new Map<number, { media: string; stream: LayerStream; reverse: boolean }>();
+  private streams = new Map<
+    number,
+    { media: string; stream: LayerStream; reverse: boolean; planes: boolean }
+  >();
   private stillSizes = new Map<string, { width: number; height: number }>();
   /** Background removal's mattes, loaded ahead of the playhead. */
   private mattes = new MatteReader();
@@ -643,9 +646,18 @@ export class PlaybackController {
     const media = this.deps.media();
     let entry = this.streams.get(layer.key);
     const reverse = !!layer.reverse;
+    // A file read in place of its tags draws from planes: the browser would go by the tags.
+    const planes = !this.gpuFrames || !!layer.colour;
+    if (layer.colour) media?.readSamples(layer.media);
     // A hardware decoder that fails is not used for this medium again.
     if (entry?.stream.error && entry.stream.hardware) media?.noHardware(entry.media);
-    if (entry && (entry.stream.error || entry.media !== layer.media || entry.reverse !== reverse)) {
+    if (
+      entry &&
+      (entry.stream.error ||
+        entry.media !== layer.media ||
+        entry.reverse !== reverse ||
+        entry.planes !== planes)
+    ) {
       entry.stream.close();
       this.streams.delete(layer.key);
       entry = undefined;
@@ -656,9 +668,9 @@ export class PlaybackController {
     const start = Math.max(0, media.frameNumber(layer.media, layer.sourceTime));
     const stream = reverse
       ? new ReverseStream(source, start)
-      : new VideoStream(source, start, this.decoders, !this.gpuFrames);
+      : new VideoStream(source, start, this.decoders, planes);
     this.created++;
-    this.streams.set(layer.key, { media: layer.media, stream, reverse });
+    this.streams.set(layer.key, { media: layer.media, stream, reverse, planes });
     return stream;
   }
 
@@ -781,9 +793,10 @@ export class PlaybackController {
           }
           const number = media.frameNumber(layer.media, layer.sourceTime);
           if (number < 0) return null;
+          if (layer.colour) media.readSamples(layer.media);
           const read = async (number: number): Promise<FramePicture> => {
             const { frame, gpu } = await media.readFrame(layer.media, number);
-            if (gpu && this.gpuFrames) {
+            if (gpu && this.gpuFrames && !layer.colour) {
               opened.push(frame);
               return { kind: 'gpu', frame: frame.raw };
             }

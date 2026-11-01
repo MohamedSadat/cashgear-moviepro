@@ -127,6 +127,7 @@ impl Session {
                 | Command::SetSettings { .. }
                 | Command::AddMedia { .. }
                 | Command::RemoveMedia { .. }
+                | Command::SetMediaColour { .. }
                 | Command::AddLut { .. }
                 | Command::RemoveLut { .. }
                 | Command::AddSequence { .. }

@@ -13,6 +13,7 @@ import { AiSection } from './AiSection';
 import { AnimatedField, Section, type PropertyField } from './AnimatedField';
 import { EffectStack } from './EffectStack';
 import { ScrubField, keyContext, usePausedTime } from './fields';
+import { FileColourSection } from './FileColourSection';
 import { LayoutSection } from './LayoutSection';
 import { MaskSection } from './MaskSection';
 import { SpeedSection } from './SpeedSection';
@@ -395,6 +396,7 @@ export function Inspector({ editor, ai }: { editor: EditorState; ai: AiToolsStat
       {clip.video && !adjustment && (
         <MaskSection editor={editor} context={context} disabled={locked} />
       )}
+      {media?.kind === 'video' && <FileColourSection editor={editor} media={media.id} />}
       {!adjustment && !title && !sequence && (
         <AiSection editor={editor} ai={ai} clip={clip} disabled={locked} />
       )}

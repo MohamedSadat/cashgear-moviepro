@@ -673,7 +673,7 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
         .map(|clip| clip.id)
         .collect();
     let multicam = rng.pick(&multicams).unwrap_or(any_clip);
-    match rng.below(162) {
+    match rng.below(165) {
         156..=157 => {
             let count = 2 + rng.below(2) as usize;
             let picked: Vec<ClipId> = (0..count).filter_map(|_| rng.pick(&clips)).collect();
@@ -695,6 +695,22 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
             clip: multicam,
             picture: rng.percent(70).then(|| rng.below(4) as u32),
             sound: rng.percent(50).then(|| rng.below(4) as u32),
+        },
+        162 => {
+            let ids: Vec<&str> = project.media.iter().map(|m| m.id.as_str()).collect();
+            Command::SetMediaColour {
+                media: rng.pick(&ids).unwrap_or("none").to_string(),
+                colour: rng.percent(70).then(|| MediaColour {
+                    matrix: rng.percent(50).then_some(ColourMatrix::Bt601),
+                    full_range: rng.percent(50).then(|| rng.percent(50)),
+                    transfer: rng.percent(20).then_some(ColourTransfer::Hlg),
+                }),
+            }
+        }
+        163..=164 => Command::SetEffectMasks {
+            clip: effect_clip,
+            effect: effect_id,
+            masks: (0..rng.below(3)).map(|_| random_mask(rng)).collect(),
         },
         146..=148 => {
             let mut picked = vec![any_clip];

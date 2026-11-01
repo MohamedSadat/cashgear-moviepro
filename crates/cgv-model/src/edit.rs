@@ -121,6 +121,19 @@ impl Edit {
                 self.project.media.push(media.clone());
             }
             Command::RemoveMedia { media } => self.remove_media(media)?,
+            Command::SetMediaColour { media, colour } => {
+                if self.project.media(media).is_none() {
+                    return Err(format!("No media {media} in the project"));
+                }
+                match colour.filter(|colour| *colour != Default::default()) {
+                    Some(colour) => {
+                        self.project.media_colour.insert(media.clone(), colour);
+                    }
+                    None => {
+                        self.project.media_colour.remove(media);
+                    }
+                }
+            }
             Command::AddTrack { .. } | Command::RemoveTrack { .. } | Command::MoveTrack { .. }
                 if self.in_multicam() =>
             {
@@ -1348,6 +1361,7 @@ impl Edit {
             }
         }
         self.project.media.remove(position);
+        self.project.media_colour.remove(id);
         Ok(())
     }
 

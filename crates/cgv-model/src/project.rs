@@ -85,6 +85,9 @@ pub struct Project {
     /// they were made.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sequences: Vec<Arc<Sequence>>,
+    /// How to read the colour of media whose tags are wrong or missing, by media id.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub media_colour: BTreeMap<String, MediaColour>,
     /// The next track, clip, marker, link, effect, transition, LUT or sequence id.
     /// Counting within the project keeps replays and undo exact.
     pub next_id: u64,
@@ -93,6 +96,37 @@ pub struct Project {
     /// main timeline's ([`Project::swap_timeline`]). Never saved.
     #[serde(skip)]
     pub swapped: Option<SequenceId>,
+}
+
+/// The matrix a file's Y'CbCr was made with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ColourMatrix {
+    Bt601,
+    Bt709,
+    Bt2020,
+}
+
+/// How a file's values map to light.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ColourTransfer {
+    Sdr,
+    Pq,
+    Hlg,
+}
+
+/// What to read a media file's colour as, in place of its tags; what is missing
+/// goes by the tags.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaColour {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matrix: Option<ColourMatrix>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_range: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transfer: Option<ColourTransfer>,
 }
 
 /// A timeline besides the project's main one: its own tracks, main track and
@@ -169,6 +203,7 @@ impl Project {
             markers: Vec::new(),
             luts: Vec::new(),
             sequences: Vec::new(),
+            media_colour: BTreeMap::new(),
             next_id: 1,
             swapped: None,
         };
@@ -361,6 +396,8 @@ pub struct ProjectView<'a> {
     pub sequences: Vec<SequenceInfo<'a>>,
     /// The sequence whose tracks and markers these are; None for the main timeline.
     pub open_sequence: Option<SequenceId>,
+    /// How to read the colour of media whose tags are wrong or missing.
+    pub media_colour: &'a BTreeMap<String, MediaColour>,
     pub next_id: u64,
 }
 
@@ -405,6 +442,7 @@ impl Project {
             luts: self.luts.iter().map(|lut| lut.info()).collect(),
             sequences,
             open_sequence: self.swapped,
+            media_colour: &self.media_colour,
             next_id: self.next_id,
         }
     }

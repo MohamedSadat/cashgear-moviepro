@@ -350,9 +350,18 @@ export interface Project {
   luts: LutInfo[];
   /** Timelines besides the main one, which sequence clips show. */
   sequences?: SequenceInfo[];
+  /** How to read the colour of media whose tags are wrong or missing, by media id. */
+  mediaColour?: Record<string, MediaColour>;
   /** The sequence these tracks and markers belong to; null for the main timeline. */
   openSequence?: number | null;
   nextId: number;
+}
+
+/** What to read a media file's colour as; what is missing goes by its tags. */
+export interface MediaColour {
+  matrix?: 'bt601' | 'bt709' | 'bt2020';
+  fullRange?: boolean;
+  transfer?: 'sdr' | 'pq' | 'hlg';
 }
 
 /** A sequence as the bin lists it. */
@@ -442,6 +451,8 @@ export type Command =
   | { type: 'setMagnetic'; magnetic: boolean }
   | { type: 'addMedia'; media: MediaRef }
   | { type: 'removeMedia'; media: string }
+  /** Reads a file's colour as `colour` in place of its tags; none goes back to the tags. */
+  | { type: 'setMediaColour'; media: string; colour?: MediaColour | null }
   | { type: 'addTrack'; index: number; name?: string }
   | { type: 'removeTrack'; track: number }
   | { type: 'moveTrack'; track: number; index: number }

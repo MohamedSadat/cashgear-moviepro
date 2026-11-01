@@ -1,5 +1,6 @@
 use cgv_effects::Registry;
 use cgv_model::{parse_lut_ref, LutShape, ParamValue};
+use cgv_render::color::{Matrix, Transfer};
 use cgv_render::geometry::{output_size, CropRect, LayerTransform, Picture};
 use cgv_render::{EffectRun, FrameSource, LayerDraw, LayerStep, LutUse, Readback, Renderer, Step};
 use web_sys::OffscreenCanvas;
@@ -81,6 +82,34 @@ fn transform(value: &cgv_model::Transform) -> LayerTransform {
         anchor_x: value.anchor_x,
         anchor_y: value.anchor_y,
     }
+}
+
+/// `source` read as `colour` says, in place of its tags: planes only, since the
+/// browser has already converted anything else.
+fn read_as<'s>(
+    mut source: FrameSource<'s>,
+    colour: Option<cgv_model::MediaColour>,
+) -> FrameSource<'s> {
+    let (FrameSource::Planes(planes), Some(colour)) = (&mut source, colour) else {
+        return source;
+    };
+    let frame = &mut planes.color;
+    if frame.matrix != Matrix::Rgb {
+        frame.matrix = match colour.matrix {
+            Some(cgv_model::ColourMatrix::Bt601) => Matrix::Bt601,
+            Some(cgv_model::ColourMatrix::Bt709) => Matrix::Bt709,
+            Some(cgv_model::ColourMatrix::Bt2020) => Matrix::Bt2020,
+            None => frame.matrix,
+        };
+        frame.full_range = colour.full_range.unwrap_or(frame.full_range);
+    }
+    frame.transfer = match colour.transfer {
+        Some(cgv_model::ColourTransfer::Sdr) => Transfer::Sdr,
+        Some(cgv_model::ColourTransfer::Pq) => Transfer::Pq,
+        Some(cgv_model::ColourTransfer::Hlg) => Transfer::Hlg,
+        None => frame.transfer,
+    };
+    source
 }
 
 fn crop(value: &cgv_model::Crop) -> CropRect {
@@ -254,7 +283,11 @@ impl Engine {
         if index >= self.pictures.len() {
             return Err(format!("Layer {index} is not in the planned frame"));
         }
-        self.renderer.set_source(index, source)?;
+        let colour = self
+            .plan
+            .as_ref()
+            .and_then(|plan| plan.layers[index].colour);
+        self.renderer.set_source(index, read_as(source, colour))?;
         self.pictures[index] = Some(Picture {
             width,
             height,
@@ -288,7 +321,12 @@ impl Engine {
         if self.pictures.get(index).is_none_or(Option::is_none) {
             return Err(format!("Layer {index} has no picture to blend with"));
         }
-        self.renderer.set_next_source(index, source, weight)
+        let colour = self
+            .plan
+            .as_ref()
+            .and_then(|plan| plan.layers[index].colour);
+        self.renderer
+            .set_next_source(index, read_as(source, colour), weight)
     }
 
     /// Composes the planned frame at `scale` of the project resolution (layers

@@ -1,6 +1,14 @@
 // Mirrors the JSON of crates/cgv-engine (plan::FramePlan, stats::StatsSummary).
 import type { Title } from '../project/title';
-import type { BlendMode, Crop, Mask, Params, Speed, Transform } from '../project/types';
+import type {
+  BlendMode,
+  Crop,
+  Mask,
+  MediaColour,
+  Params,
+  Speed,
+  Transform,
+} from '../project/types';
 import type { AudioReport } from './audio-player';
 
 export type QualityMode = 'auto' | 'full' | 'half' | 'quarter';
@@ -37,6 +45,8 @@ export interface LayerPlan {
   moving?: boolean;
   /** A title at this frame: the engine draws it, and the layer has no media. */
   title?: Title;
+  /** How to read its media's colour, in place of the file's tags. It then draws from planes. */
+  colour?: MediaColour;
   /** A sequence clip's picture: its `nest` step composes it, and the layer has no media. */
   nest?: boolean;
   /** The clip plays backwards: its source frames come in falling order. */

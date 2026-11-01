@@ -34,7 +34,10 @@ export interface Originals {
 }
 
 export class ExportFrames {
-  private streams = new Map<number, { media: string; stream: LayerStream; reverse: boolean }>();
+  private streams = new Map<
+    number,
+    { media: string; stream: LayerStream; reverse: boolean; planes: boolean }
+  >();
   private decoders = new StreamDecoders();
   private stills = new Map<string, Promise<{ width: number; height: number }>>();
   /** Frames read through the seek path, closed once the frame is composed. */
@@ -100,7 +103,16 @@ export class ExportFrames {
   private stream(layer: LayerPlan): LayerStream | null {
     let entry = this.streams.get(layer.key);
     const reverse = !!layer.reverse;
-    if (entry && (entry.stream.error || entry.media !== layer.media || entry.reverse !== reverse)) {
+    // A file read in place of its tags draws from planes: the browser would go by the tags.
+    const planes = this.planes || !!layer.colour;
+    if (layer.colour) this.media.readSamples(layer.media);
+    if (
+      entry &&
+      (entry.stream.error ||
+        entry.media !== layer.media ||
+        entry.reverse !== reverse ||
+        entry.planes !== planes)
+    ) {
       entry.stream.close();
       this.streams.delete(layer.key);
       entry = undefined;
@@ -111,8 +123,8 @@ export class ExportFrames {
     const start = Math.max(0, this.media.frameNumber(layer.media, layer.sourceTime));
     const stream = reverse
       ? new ReverseStream(source, start)
-      : new VideoStream(source, start, this.decoders, this.planes);
-    this.streams.set(layer.key, { media: layer.media, stream, reverse });
+      : new VideoStream(source, start, this.decoders, planes);
+    this.streams.set(layer.key, { media: layer.media, stream, reverse, planes });
     return stream;
   }
 
@@ -186,7 +198,7 @@ export class ExportFrames {
   /** Frame `number` of a layer's media through the seek path. */
   private async read(layer: LayerPlan, number: number): Promise<FramePicture> {
     const { frame, gpu } = await this.media.readFrame(layer.media, number);
-    if (gpu && !this.planes) {
+    if (gpu && !this.planes && !layer.colour) {
       this.opened.push(frame);
       return { kind: 'gpu', frame: frame.raw };
     }
