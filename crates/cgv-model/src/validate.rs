@@ -441,7 +441,9 @@ fn check_timeline(
                     let plain = clip.media.is_empty()
                         && (clip.video || clip.audio)
                         && clip.source_in >= Flicks::ZERO
-                        && !clip.retimed();
+                        && !clip.retimed()
+                        && clip.audio_effects.is_empty()
+                        && clip.denoise == 0.0;
                     if !plain {
                         return Err(format!(
                             "Sequence clip {} has media or timing of its own",

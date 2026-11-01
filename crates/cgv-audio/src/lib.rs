@@ -128,6 +128,9 @@ pub struct AudioClip {
     pub source_start: i64,
     /// Linear gain.
     pub gain: f32,
+    /// -1 (left) to 1 (right), before the track's own pan: a sequence's track
+    /// inside a sequence clip keeps its pan.
+    pub pan: f32,
     /// Linear gains at timeline samples, in order, joined by straight lines and
     /// held beyond the ends: animated volume. Empty means `gain` throughout.
     pub envelope: Vec<(i64, f32)>,
@@ -158,6 +161,7 @@ impl AudioClip {
             end,
             source_start,
             gain: 1.0,
+            pan: 0.0,
             envelope: Vec::new(),
             fade_in: 0,
             fade_out: 0,

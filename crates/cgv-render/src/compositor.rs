@@ -149,6 +149,13 @@ pub enum Step<'a> {
         effects: Vec<EffectRun<'a>>,
         opacity: f64,
     },
+    /// A sequence clip's sequence: `steps` composed on their own into a texture,
+    /// which becomes layer `index`'s picture. It comes before the steps that draw
+    /// that layer.
+    Nest {
+        index: usize,
+        steps: Vec<Step<'a>>,
+    },
 }
 
 /// Where a layer is drawn from: its source slot, a texture its effects left, or a
@@ -1814,11 +1821,13 @@ impl Compositor {
             output,
         };
         let mut frame = self.frame.take().ok_or("No frame is being built")?;
-        let result = self.compose_steps(device, queue, &mut frame, &scene, steps);
+        let target = self.comp.as_ref().expect("composition target").view.clone();
+        let result = self.compose_steps(device, queue, &mut frame, &scene, steps, &target);
         self.frame = Some(frame);
         result
     }
 
+    /// Draws `steps` into `target`, a texture of the scene's output size.
     fn compose_steps(
         &mut self,
         device: &Device,
@@ -1826,6 +1835,7 @@ impl Compositor {
         frame: &mut FrameBuild,
         scene: &Scene,
         steps: &[Step],
+        target: &TextureView,
     ) -> Result<(), String> {
         // Everything that depends only on the sources is drawn first.
         let mut ops = Vec::new();
@@ -1890,6 +1900,20 @@ impl Compositor {
                         ops.push(Op::Adjust(effects, opacity.min(1.0)));
                     }
                 }
+                Step::Nest { index, steps } => {
+                    let nest = self.pool.acquire(device, self.target_key(scene.output));
+                    self.compose_steps(device, queue, frame, scene, steps, &nest.view)?;
+                    match frame.layers.get_mut(*index) {
+                        Some(slot) => {
+                            if let Some(LayerTexture::Pooled(old)) =
+                                slot.replace(LayerTexture::Pooled(nest))
+                            {
+                                self.pool.release(old);
+                            }
+                        }
+                        None => self.pool.release(nest),
+                    }
+                }
             }
         }
         // Then the composition, in passes split where an adjustment layer or a
@@ -1898,13 +1922,15 @@ impl Compositor {
         let mut rest = &ops[..];
         loop {
             let split = rest.iter().position(Op::isolated).unwrap_or(rest.len());
-            self.draw_ops(device, frame, &rest[..split], clear);
+            self.draw_ops(device, frame, &rest[..split], clear, target);
             clear = false;
             match rest.get(split) {
                 Some(Op::Adjust(effects, opacity)) => {
-                    self.adjust(device, frame, scene.output, effects, *opacity)?
+                    self.adjust(device, frame, scene.output, effects, *opacity, target)?
                 }
-                Some(Op::Draw(drawable)) => self.blend_draw(device, frame, scene.output, *drawable),
+                Some(Op::Draw(drawable)) => {
+                    self.blend_draw(device, frame, scene.output, *drawable, target)
+                }
                 _ => break,
             }
             rest = &rest[split + 1..];
@@ -1956,9 +1982,10 @@ impl Compositor {
         frame: &mut FrameBuild,
         output: (u32, u32),
         drawable: Drawable,
+        target: &TextureView,
     ) {
         let backdrop = self.pool.acquire(device, self.target_key(output));
-        let comp_binding = self.copy_binding(device, &self.comp.as_ref().expect("target").view);
+        let comp_binding = self.copy_binding(device, target);
         {
             let mut pass = begin_pass(&mut frame.encoder, "Blend backdrop", &backdrop.view, true);
             pass.set_pipeline(&self.copy_pipeline);
@@ -1968,8 +1995,7 @@ impl Compositor {
         let backdrop_binding = self.copy_binding(device, &backdrop.view);
         let layer_binding = self.binding(frame, drawable.source).clone();
         {
-            let comp = self.comp.as_ref().expect("target");
-            let mut pass = begin_pass(&mut frame.encoder, "Blend", &comp.view, false);
+            let mut pass = begin_pass(&mut frame.encoder, "Blend", target, false);
             pass.set_pipeline(&self.blend_pipeline);
             pass.set_bind_group(0, &self.layer_uniforms, &[drawable.offset]);
             pass.set_bind_group(1, &layer_binding, &[]);
@@ -2585,8 +2611,15 @@ impl Compositor {
         Ok(target)
     }
 
-    /// Draws `ops` into the composition in one pass, clearing it first if asked.
-    fn draw_ops(&self, device: &Device, frame: &mut FrameBuild, ops: &[Op], clear: bool) {
+    /// Draws `ops` into `target` in one pass, clearing it first if asked.
+    fn draw_ops(
+        &self,
+        device: &Device,
+        frame: &mut FrameBuild,
+        ops: &[Op],
+        clear: bool,
+        target: &TextureView,
+    ) {
         let bindings: Vec<BindGroup> = ops
             .iter()
             .map(|op| match op {
@@ -2595,8 +2628,7 @@ impl Compositor {
                 Op::Adjust(..) => unreachable!("adjustments split the passes"),
             })
             .collect();
-        let comp = self.comp.as_ref().expect("composition target");
-        let mut pass = begin_pass(&mut frame.encoder, "Composition", &comp.view, clear);
+        let mut pass = begin_pass(&mut frame.encoder, "Composition", target, clear);
         for (op, binding) in ops.iter().zip(&bindings) {
             match op {
                 Op::Draw(drawable) => {
@@ -2624,9 +2656,10 @@ impl Compositor {
         output: (u32, u32),
         effects: &[EffectRun],
         opacity: f64,
+        target: &TextureView,
     ) -> Result<(), String> {
         let copy = self.pool.acquire(device, self.target_key(output));
-        let comp_binding = self.copy_binding(device, &self.comp.as_ref().expect("target").view);
+        let comp_binding = self.copy_binding(device, target);
         {
             let mut pass = begin_pass(&mut frame.encoder, "Adjustment input", &copy.view, true);
             pass.set_pipeline(&self.copy_pipeline);
@@ -2637,8 +2670,7 @@ impl Compositor {
         let adjusted = self.run_effects(device, frame, copy, aspect, effects)?;
         let binding = self.copy_binding(device, &adjusted.view);
         {
-            let comp = self.comp.as_ref().expect("target");
-            let mut pass = begin_pass(&mut frame.encoder, "Adjustment", &comp.view, false);
+            let mut pass = begin_pass(&mut frame.encoder, "Adjustment", target, false);
             pass.set_pipeline(&self.mix_pipeline);
             let k = opacity.clamp(0.0, 1.0);
             pass.set_blend_constant(Color {

@@ -378,6 +378,7 @@ fn render_timed(
         varispeed_into(&mut raw, &reader, timing, from, to);
     }
     let ramp = (rate as f64 * FADE_SECONDS).round().max(1.0) as f32;
+    let pan = clip_pan(clip, out.len());
     let mut cursor = 0;
     for t in from..to {
         let gain = gain_at(clip, t, ramp, &mut cursor);
@@ -386,16 +387,25 @@ fn render_timed(
         match (channels > 1, out.len()) {
             (false, _) => {
                 let v = gain * raw[0][i];
-                for channel in out.iter_mut() {
-                    channel[frame] += v;
+                for (channel, side) in out.iter_mut().zip(pan) {
+                    channel[frame] += v * side;
                 }
             }
             (true, 1) => out[0][frame] += gain * 0.5 * (raw[0][i] + raw[1][i]),
             (true, _) => {
-                out[0][frame] += gain * raw[0][i];
-                out[1][frame] += gain * raw[1][i];
+                out[0][frame] += gain * pan[0] * raw[0][i];
+                out[1][frame] += gain * pan[1] * raw[1][i];
             }
         }
+    }
+}
+
+/// A clip's own pan into `channels` outputs: none unless they are stereo.
+fn clip_pan(clip: &AudioClip, channels: usize) -> [f32; 2] {
+    if channels == 2 && clip.pan != 0.0 {
+        pan_gains(clip.pan)
+    } else {
+        [1.0, 1.0]
     }
 }
 
@@ -431,6 +441,7 @@ fn render_clip(
         Some((key, amount)) => (Some(key.as_str()), amount.clamp(0.0, 1.0)),
         None => (None, 0.0),
     };
+    let pan = clip_pan(clip, out_channels);
     let mut cursor = 0;
     let mut at = from;
     while at < to {
@@ -471,14 +482,14 @@ fn render_clip(
                 match (stereo, out_channels) {
                     (false, _) => {
                         let v = gain * value(0);
-                        for channel in out.iter_mut() {
-                            channel[frame] += v;
+                        for (channel, side) in out.iter_mut().zip(pan) {
+                            channel[frame] += v * side;
                         }
                     }
                     (true, 1) => out[0][frame] += gain * 0.5 * (value(0) + value(1)),
                     (true, _) => {
-                        out[0][frame] += gain * value(0);
-                        out[1][frame] += gain * value(1);
+                        out[0][frame] += gain * pan[0] * value(0);
+                        out[1][frame] += gain * pan[1] * value(1);
                     }
                 }
             }

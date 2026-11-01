@@ -77,6 +77,7 @@ async function sample(draw: typeof drawWarm, w: number, h: number): Promise<Imag
 function layer(clip: number, media: string): LayerPlan {
   return {
     clip,
+    key: clip,
     track: 1,
     media,
     still: true,

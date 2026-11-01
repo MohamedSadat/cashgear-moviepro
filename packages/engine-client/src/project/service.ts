@@ -145,6 +145,13 @@ export class ProjectService {
     return this.snapshot();
   }
 
+  /** Opens a sequence in the timeline (null for the main one). Not an undo step. */
+  openSequence(id: number | null): ProjectSnapshot {
+    this.require().open_sequence(id ?? undefined);
+    this.onChange(false);
+    return this.snapshot();
+  }
+
   clipsAt(time: number): ClipAt[] {
     return JSON.parse(this.require().clips_at(time));
   }

@@ -2493,6 +2493,11 @@ impl Edit {
         if audio && !clip.audio {
             return Err(format!("Clip {id} has no sound for effects to change"));
         }
+        if audio && clip.is_sequence() {
+            return Err(
+                "Sequence clips have no sound effects; add them inside the sequence".into(),
+            );
+        }
         if !audio && !clip.video {
             return Err(format!("Clip {id} has no picture for effects to change"));
         }
@@ -3110,6 +3115,9 @@ fn apply_properties(clip: &mut Clip, properties: &ClipProperties) -> Result<(), 
     }
     if !(0.0..=1.0).contains(&denoise) {
         return Err("Noise reduction is from 0 to 1".into());
+    }
+    if denoise != 0.0 && clip.is_sequence() {
+        return Err("Sequence clips have no noise reduction; use it inside the sequence".into());
     }
     if !clip.audio && (fade_in != Flicks::ZERO || fade_out != Flicks::ZERO || denoise != 0.0) {
         return Err(format!("Clip {} has no sound", clip.id));

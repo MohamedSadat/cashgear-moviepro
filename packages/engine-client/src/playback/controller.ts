@@ -275,16 +275,32 @@ export class PlaybackController {
     await this.whenSettled();
     const at = session.frame_time(session.frame_at(time));
     const plan = JSON.parse(session.plan_frame(at)) as FramePlan;
-    const layer = plan.layers.find((candidate) => candidate.clip === clip);
+    const index = plan.layers.findIndex((candidate) => candidate.clip === clip);
+    const layer = plan.layers[index];
     if (!layer) return null;
-    const alone: FramePlan = {
-      ...plan,
-      layers: [
-        { ...layer, effects: [], masks: [], opacity: 1, blendMode: 'normal', blendFrames: false },
-      ],
-      steps: [{ kind: 'layer', layer: 0 }],
-      luts: [],
+    const plain: Partial<LayerPlan> = {
+      effects: [],
+      masks: [],
+      opacity: 1,
+      blendMode: 'normal',
+      blendFrames: false,
     };
+    // A sequence clip keeps the layers its sequence draws, and the step that composes them.
+    const nest = layer.nest
+      ? plan.steps.find((step) => step.kind === 'nest' && step.layer === index)
+      : undefined;
+    const alone: FramePlan = nest
+      ? {
+          ...plan,
+          layers: plan.layers.map((other, at) => (at === index ? { ...other, ...plain } : other)),
+          steps: [nest, { kind: 'layer', layer: index }],
+        }
+      : {
+          ...plan,
+          layers: [{ ...layer, ...plain }],
+          steps: [{ kind: 'layer', layer: 0 }],
+          luts: [],
+        };
     const json = JSON.stringify(alone);
     const opened: ManagedFrame[] = [];
     this.rendering = true;
@@ -625,13 +641,13 @@ export class PlaybackController {
 
   private stream(layer: LayerPlan): LayerStream | null {
     const media = this.deps.media();
-    let entry = this.streams.get(layer.clip);
+    let entry = this.streams.get(layer.key);
     const reverse = !!layer.reverse;
     // A hardware decoder that fails is not used for this medium again.
     if (entry?.stream.error && entry.stream.hardware) media?.noHardware(entry.media);
     if (entry && (entry.stream.error || entry.media !== layer.media || entry.reverse !== reverse)) {
       entry.stream.close();
-      this.streams.delete(layer.clip);
+      this.streams.delete(layer.key);
       entry = undefined;
     }
     if (entry) return entry.stream;
@@ -642,7 +658,7 @@ export class PlaybackController {
       ? new ReverseStream(source, start)
       : new VideoStream(source, start, this.decoders, !this.gpuFrames);
     this.created++;
-    this.streams.set(layer.clip, { media: layer.media, stream, reverse });
+    this.streams.set(layer.key, { media: layer.media, stream, reverse });
     return stream;
   }
 
@@ -658,7 +674,7 @@ export class PlaybackController {
         void this.ensureStill(layer.media);
         continue;
       }
-      if (this.stream(layer)) keep.add(layer.clip);
+      if (this.stream(layer)) keep.add(layer.key);
     }
     for (const [clip, { stream }] of this.streams) {
       if (keep.has(clip)) void stream.pump(true);
@@ -693,7 +709,7 @@ export class PlaybackController {
     return plan.layers.every((layer) => {
       if (!media?.hasPicture(layer.media)) return true;
       if (layer.still) return this.stillSizes.has(media.stillKey(layer.media, layer.sourceTime));
-      const entry = this.streams.get(layer.clip);
+      const entry = this.streams.get(layer.key);
       entry?.stream.hurry();
       return !entry || entry.stream.primed(media.frameNumber(layer.media, layer.sourceTime));
     });

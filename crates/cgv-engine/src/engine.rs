@@ -91,6 +91,82 @@ fn crop(value: &cgv_model::Crop) -> CropRect {
     }
 }
 
+/// The plan's `steps` as the renderer draws them, sequences' included. Layers
+/// without a picture are left out.
+fn render_steps<'a>(
+    registry: &'a Registry,
+    plan: &'a FramePlan,
+    pictures: &[Option<Picture>],
+    steps: &'a [plan::Step],
+) -> Vec<Step<'a>> {
+    let layer = |index: usize| -> Option<LayerStep> {
+        let layer = plan.layers.get(index)?;
+        Some(LayerStep {
+            index,
+            key: layer.key,
+            draw: LayerDraw {
+                picture: (*pictures.get(index)?)?,
+                transform: transform(&layer.transform),
+                crop: crop(&layer.crop),
+                opacity: layer.opacity,
+            },
+            effects: layer
+                .effects
+                .iter()
+                .filter_map(|e| effect_run(registry, &plan.luts, e, layer.clip_seconds, layer.seed))
+                .collect(),
+            moving: layer.moving,
+            blend: layer.blend_mode,
+            masks: layer.masks.clone(),
+        })
+    };
+    steps
+        .iter()
+        .filter_map(|step| match step {
+            plan::Step::Layer { layer: index } => layer(*index).map(Step::Layer),
+            plan::Step::Transition {
+                from,
+                to,
+                transition,
+                progress,
+            } => {
+                let (from, to) = (from.and_then(layer), to.and_then(layer));
+                match effect_run(registry, &plan.luts, transition, 0.0, 0.0) {
+                    Some(transition) => Some(Step::Transition {
+                        from,
+                        to,
+                        transition,
+                        progress: *progress,
+                    }),
+                    // A transition this build lacks cuts at its middle.
+                    None if *progress < 0.5 => from.map(Step::Layer),
+                    None => to.map(Step::Layer),
+                }
+            }
+            plan::Step::Adjustment {
+                effects,
+                opacity,
+                clip_seconds,
+                seed,
+                ..
+            } => Some(Step::Adjustment {
+                effects: effects
+                    .iter()
+                    .filter_map(|e| effect_run(registry, &plan.luts, e, *clip_seconds, *seed))
+                    .collect(),
+                opacity: *opacity,
+            }),
+            plan::Step::Nest {
+                layer: index,
+                steps,
+            } => Some(Step::Nest {
+                index: *index,
+                steps: render_steps(registry, plan, pictures, steps),
+            }),
+        })
+        .collect()
+}
+
 impl Engine {
     pub async fn new(
         canvas: OffscreenCanvas,
@@ -121,14 +197,18 @@ impl Engine {
         self.renderer.begin_frame(plan.layers.len());
         self.pictures = vec![None; plan.layers.len()];
         // Titles need no source: their canvas is the frame, drawn at compose time.
+        // Nor do sequence clips, whose sequence is composed into the frame's size.
+        let frame = Picture {
+            width: plan.width as f64,
+            height: plan.height as f64,
+            rotation: 0,
+        };
         for (index, layer) in plan.layers.iter().enumerate() {
             if let Some(title) = &layer.title {
                 self.renderer.set_title(index, title.clone())?;
-                self.pictures[index] = Some(Picture {
-                    width: plan.width as f64,
-                    height: plan.height as f64,
-                    rotation: 0,
-                });
+                self.pictures[index] = Some(frame);
+            } else if layer.nest {
+                self.pictures[index] = Some(frame);
             }
         }
         self.plan = Some(plan);
@@ -215,69 +295,7 @@ impl Engine {
     /// Returns whether the monitor shows it now.
     pub fn compose(&mut self, scale: f64, present: bool) -> Result<bool, String> {
         let plan = self.plan.take().ok_or("No frame is planned")?;
-        let (registry, pictures) = (&self.registry, &self.pictures);
-        let layer = |index: usize| -> Option<LayerStep> {
-            let layer = plan.layers.get(index)?;
-            Some(LayerStep {
-                index,
-                key: layer.clip.0,
-                draw: LayerDraw {
-                    picture: (*pictures.get(index)?)?,
-                    transform: transform(&layer.transform),
-                    crop: crop(&layer.crop),
-                    opacity: layer.opacity,
-                },
-                effects: layer
-                    .effects
-                    .iter()
-                    .filter_map(|e| {
-                        effect_run(registry, &plan.luts, e, layer.clip_seconds, layer.seed)
-                    })
-                    .collect(),
-                moving: layer.moving,
-                blend: layer.blend_mode,
-                masks: layer.masks.clone(),
-            })
-        };
-        let steps: Vec<Step> = plan
-            .steps
-            .iter()
-            .filter_map(|step| match step {
-                plan::Step::Layer { layer: index } => layer(*index).map(Step::Layer),
-                plan::Step::Transition {
-                    from,
-                    to,
-                    transition,
-                    progress,
-                } => {
-                    let (from, to) = (from.and_then(layer), to.and_then(layer));
-                    match effect_run(registry, &plan.luts, transition, 0.0, 0.0) {
-                        Some(transition) => Some(Step::Transition {
-                            from,
-                            to,
-                            transition,
-                            progress: *progress,
-                        }),
-                        // A transition this build lacks cuts at its middle.
-                        None if *progress < 0.5 => from.map(Step::Layer),
-                        None => to.map(Step::Layer),
-                    }
-                }
-                plan::Step::Adjustment {
-                    effects,
-                    opacity,
-                    clip_seconds,
-                    seed,
-                    ..
-                } => Some(Step::Adjustment {
-                    effects: effects
-                        .iter()
-                        .filter_map(|e| effect_run(registry, &plan.luts, e, *clip_seconds, *seed))
-                        .collect(),
-                    opacity: *opacity,
-                }),
-            })
-            .collect();
+        let steps = render_steps(&self.registry, &plan, &self.pictures, &plan.steps);
         let output = output_size(plan.width, plan.height, scale);
         self.renderer
             .compose((plan.width, plan.height), output, &steps)?;

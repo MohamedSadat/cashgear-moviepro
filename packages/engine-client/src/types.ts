@@ -114,6 +114,11 @@ export interface EngineApi {
   projectMarkAutosaved(generation: number): ProjectSnapshot;
   /** Records a relinked or changed media file. Not an undo step. */
   projectUpdateMedia(media: MediaRef): ProjectSnapshot;
+  /**
+   * Opens a sequence in the timeline, or the main timeline with null: snapshots,
+   * playback, queries and commands then address it. Not an undo step.
+   */
+  projectOpenSequence(id: number | null): ProjectSnapshot;
   projectClipsAt(time: number): ClipAt[];
   projectSnapPoints(playhead: number | null, exclude: number[]): number[];
   projectPresets(): Promise<Preset[]>;

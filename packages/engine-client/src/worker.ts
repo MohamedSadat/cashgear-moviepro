@@ -215,6 +215,7 @@ const api: EngineApi = {
   projectMarkSaved: (generation) => project.markSaved(generation),
   projectMarkAutosaved: (generation) => project.markAutosaved(generation),
   projectUpdateMedia: (ref) => project.updateMedia(ref),
+  projectOpenSequence: (id) => project.openSequence(id),
   projectClipsAt: (time) => project.clipsAt(time),
   projectSnapPoints: (playhead, exclude) => project.snapPoints(playhead, exclude),
   async projectPresets() {

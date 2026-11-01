@@ -649,17 +649,27 @@ mod bridge {
         pub fn update_media(&mut self, media: &str) -> Result<(), JsValue> {
             self.inner.update_media(parse(media)?).map_err(js_error)
         }
+        /// Opens sequence `id` in the timeline, or the main timeline without one:
+        /// planning, queries, snapshots and commands then address it.
+        pub fn open_sequence(&mut self, id: Option<f64>) -> Result<(), JsValue> {
+            let id = id.map(|id| cgv_model::SequenceId(id as u64));
+            self.inner.set_open_sequence(id).map_err(js_error)
+        }
+        /// The sequence open in the timeline, if any.
+        pub fn open_sequence_id(&self) -> Option<f64> {
+            self.inner.open_sequence().map(|id| id.0 as f64)
+        }
         /// The clips at `time` (flicks), bottom track first.
         pub fn clips_at(&self, time: f64) -> Result<String, JsValue> {
             let time = cgv_time::Flicks(time as i64);
-            let clips = cgv_model::query::clips_at(self.inner.project(), time);
+            let clips = cgv_model::query::clips_at(self.inner.timeline_project(), time);
             serde_json::to_string(&clips).map_err(js_error)
         }
         /// Snap targets. `exclude` is a JSON array of the clip ids being dragged.
         pub fn snap_points(&self, playhead: Option<f64>, exclude: &str) -> Result<String, JsValue> {
             let exclude: Vec<cgv_model::ClipId> = parse(exclude)?;
             let points = cgv_model::query::snap_points(
-                self.inner.project(),
+                self.inner.timeline_project(),
                 playhead.map(|time| cgv_time::Flicks(time as i64)),
                 &exclude,
             );
@@ -673,7 +683,7 @@ mod bridge {
         /// (`cgv_engine::plan::FramePlan`): the pure half of `renderFrame(t)`.
         pub fn plan_frame(&self, time: f64) -> Result<String, JsValue> {
             let time = cgv_time::Flicks(time as i64);
-            let plan = cgv_engine::plan::plan_frame(self.inner.project(), time);
+            let plan = cgv_engine::plan::plan_frame(self.inner.timeline_project(), time);
             serde_json::to_string(&plan).map_err(js_error)
         }
         pub fn sample_rate(&self) -> u32 {
@@ -686,9 +696,9 @@ mod bridge {
         pub fn frame_duration(&self) -> f64 {
             self.inner.project().settings.frame_duration().0 as f64
         }
-        /// The end of the last clip, in flicks.
+        /// The end of the last clip of the open timeline, in flicks.
         pub fn duration(&self) -> f64 {
-            self.inner.project().duration().0 as f64
+            self.inner.timeline_project().duration().0 as f64
         }
         /// The project frame showing at `time` (flicks).
         pub fn frame_at(&self, time: f64) -> f64 {
@@ -709,7 +719,7 @@ mod bridge {
         /// first frame (JSON `LayerPlan[]`), so their decoders can start early.
         pub fn upcoming_layers(&self, from: f64, horizon: f64) -> Result<String, JsValue> {
             let layers = cgv_engine::plan::upcoming_layers(
-                self.inner.project(),
+                self.inner.timeline_project(),
                 cgv_time::Flicks(from as i64),
                 cgv_time::Flicks(horizon as i64),
             );
@@ -726,7 +736,7 @@ mod bridge {
     /// The mixer's plan around a stretch, with room for effect warm-up, ducking
     /// and the limiter's look-ahead.
     fn audio_plan(session: &ProjectSession, start: f64, frames: usize) -> cgv_audio::AudioPlan {
-        let project = session.inner.project();
+        let project = session.inner.timeline_project();
         let rate = project.settings.sample_rate as f64;
         let start = start as i64;
         cgv_engine::sound::audio_plan(

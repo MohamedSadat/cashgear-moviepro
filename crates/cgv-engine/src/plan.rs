@@ -1,6 +1,9 @@
 //! What the timeline holds at a time: the pure half of `renderFrame(t)`. Same
 //! project and time, same plan, at any seek position. (`sound` plans the mix.)
+use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use cgv_model::{
     parse_lut_ref, BlendMode, Clip, ClipId, Crop, LutId, LutShape, Mask, ParamValue, Params,
@@ -24,6 +27,9 @@ pub struct EffectPlan {
 #[serde(rename_all = "camelCase")]
 pub struct LayerPlan {
     pub clip: ClipId,
+    /// What readers keep its stream by: the clip's id, or for a clip inside
+    /// sequence clips a number for that path.
+    pub key: u64,
     pub track: TrackId,
     pub media: String,
     pub still: bool,
@@ -53,6 +59,10 @@ pub struct LayerPlan {
     /// draws them itself, and the layer has no media.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<Title>,
+    /// A sequence clip's picture: the composition of its [`Step::Nest`], and the
+    /// layer has no media.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub nest: bool,
     /// The clip plays backwards, so its source frames come in falling order.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub reverse: bool,
@@ -90,6 +100,9 @@ pub enum Step {
         /// From 0 to 1, at the middle of the frame.
         progress: f64,
     },
+    /// A sequence clip's sequence: `steps` composed on their own become layer
+    /// `layer`'s picture. It comes before the steps that draw that layer.
+    Nest { layer: usize, steps: Vec<Step> },
     /// Effects applied to everything below, mixed in by `opacity`.
     Adjustment {
         clip: ClipId,
@@ -162,6 +175,7 @@ fn visual_layer(project: &Project, track: TrackId, clip: &Clip, time: Flicks) ->
         }
         return Some(LayerPlan {
             clip: clip.id,
+            key: clip.id.0,
             track,
             media: String::new(),
             still: false,
@@ -180,6 +194,7 @@ fn visual_layer(project: &Project, track: TrackId, clip: &Clip, time: Flicks) ->
             // transform does.
             moving: !clip.keyframes.is_empty(),
             title: Some(title.at(&clip.keyframes, offset)),
+            nest: false,
             reverse: false,
             blend_frames: false,
             blend_mode: clip.blend_mode,
@@ -210,6 +225,7 @@ fn visual_layer(project: &Project, track: TrackId, clip: &Clip, time: Flicks) ->
         && clip.speed_at(offset) < 1.0;
     Some(LayerPlan {
         clip: clip.id,
+        key: clip.id.0,
         track,
         media: clip.media.clone(),
         // Animated images are drawn from their frames, each kept as a still.
@@ -227,6 +243,7 @@ fn visual_layer(project: &Project, track: TrackId, clip: &Clip, time: Flicks) ->
         effects: effect_plans(clip, offset),
         moving: clip.has_moving_keyframes(),
         title: None,
+        nest: false,
         reverse: clip.reverse && !clip.freeze,
         blend_frames,
         blend_mode: clip.blend_mode,
@@ -247,68 +264,19 @@ fn window(track: &Track, t: &Transition, frame: Flicks) -> Option<(Flicks, Flick
 
 /// The plan of the frame showing at `time`: the pure half of `renderFrame(t)`.
 /// Hidden tracks, sound-only clips and invisible clips draw nothing; a transition
-/// draws in place of its clips while it runs.
+/// draws in place of its clips while it runs. A sequence clip draws its sequence
+/// at its source time, composed first as one picture.
 pub fn plan_frame(project: &Project, time: Flicks) -> FramePlan {
     let rate = project.settings.frame_rate;
-    let frame_length = rate.frame_duration();
     let frame = frame_at(project, time);
     let time = rate.time_of_frame(frame);
-    let mut layers = Vec::new();
-    let mut steps = Vec::new();
-    let add = |layer: Option<LayerPlan>, layers: &mut Vec<LayerPlan>| {
-        layer.map(|layer| {
-            layers.push(layer);
-            layers.len() - 1
-        })
+    let mut planner = Planner {
+        project,
+        frame_length: rate.frame_duration(),
+        layers: Vec::new(),
     };
-    for track in project.tracks.iter().filter(|track| !track.hidden) {
-        let running = track.transitions.iter().find_map(|t| {
-            let (start, end) = window(track, t, frame_length)?;
-            (start <= time && time < end).then_some((t, start))
-        });
-        if let Some((t, start)) = running {
-            let side = |id: Option<ClipId>| {
-                id.and_then(|id| track.clip(id))
-                    .and_then(|clip| visual_layer(project, track.id, clip, time))
-            };
-            let from = add(side(t.from), &mut layers);
-            let to = add(side(t.to), &mut layers);
-            let middle = (time - start).0 as f64 + frame_length.0 as f64 / 2.0;
-            steps.push(Step::Transition {
-                from,
-                to,
-                transition: EffectPlan {
-                    pack: t.pack.clone(),
-                    kind: t.kind.clone(),
-                    params: t.params.clone(),
-                },
-                progress: (middle / t.duration.0 as f64).clamp(0.0, 1.0),
-            });
-            continue;
-        }
-        let next = track.clips.partition_point(|clip| clip.start <= time);
-        let Some(clip) = track.clips[..next].last().filter(|c| c.contains(time)) else {
-            continue;
-        };
-        let offset = time - clip.start;
-        if clip.is_adjustment() {
-            let effects = effect_plans(clip, offset);
-            let opacity = clip.opacity_at(offset);
-            if !effects.is_empty() && opacity > 0.0 {
-                steps.push(Step::Adjustment {
-                    clip: clip.id,
-                    effects,
-                    opacity,
-                    clip_seconds: offset.as_seconds(),
-                    seed: seed(clip.id),
-                });
-            }
-            continue;
-        }
-        if let Some(layer) = add(visual_layer(project, track.id, clip, time), &mut layers) {
-            steps.push(Step::Layer { layer });
-        }
-    }
+    let steps = planner.tracks(&project.tracks, time, 0, 0);
+    let layers = planner.layers;
     let luts = frame_luts(project, &layers, &steps);
     FramePlan {
         frame,
@@ -321,12 +289,168 @@ pub fn plan_frame(project: &Project, time: Flicks) -> FramePlan {
     }
 }
 
+/// What readers keep a clip's stream by: its id on the timeline that plays, or
+/// for a clip inside sequence clips, a number for that path (two sequence clips
+/// showing one sequence read its media apart). Below 2^53, so JSON numbers keep it.
+fn layer_key(path: u64, clip: ClipId) -> u64 {
+    if path == 0 {
+        return clip.0;
+    }
+    let mut hasher = DefaultHasher::new();
+    (path, clip.0).hash(&mut hasher);
+    (hasher.finish() & ((1 << 53) - 1)) | (1 << 52)
+}
+
+struct Planner<'p> {
+    project: &'p Project,
+    frame_length: Flicks,
+    layers: Vec<LayerPlan>,
+}
+
+impl Planner<'_> {
+    /// The steps that draw `tracks` at `time` of their timeline, bottom first.
+    /// `path` names the sequence clips around them (0 for the top timeline).
+    fn tracks(
+        &mut self,
+        tracks: &[Arc<Track>],
+        time: Flicks,
+        path: u64,
+        depth: usize,
+    ) -> Vec<Step> {
+        let mut steps = Vec::new();
+        for track in tracks.iter().filter(|track| !track.hidden) {
+            let running = track.transitions.iter().find_map(|t| {
+                let (start, end) = window(track, t, self.frame_length)?;
+                (start <= time && time < end).then_some((t, start))
+            });
+            if let Some((t, start)) = running {
+                let mut side = |id: Option<ClipId>, steps: &mut Vec<Step>| {
+                    let clip = track.clip(id?)?;
+                    self.picture(track.id, clip, time, path, depth, steps)
+                };
+                let from = side(t.from, &mut steps);
+                let to = side(t.to, &mut steps);
+                let middle = (time - start).0 as f64 + self.frame_length.0 as f64 / 2.0;
+                steps.push(Step::Transition {
+                    from,
+                    to,
+                    transition: EffectPlan {
+                        pack: t.pack.clone(),
+                        kind: t.kind.clone(),
+                        params: t.params.clone(),
+                    },
+                    progress: (middle / t.duration.0 as f64).clamp(0.0, 1.0),
+                });
+                continue;
+            }
+            let next = track.clips.partition_point(|clip| clip.start <= time);
+            let Some(clip) = track.clips[..next].last().filter(|c| c.contains(time)) else {
+                continue;
+            };
+            let offset = time - clip.start;
+            if clip.is_adjustment() {
+                let effects = effect_plans(clip, offset);
+                let opacity = clip.opacity_at(offset);
+                if !effects.is_empty() && opacity > 0.0 {
+                    steps.push(Step::Adjustment {
+                        clip: clip.id,
+                        effects,
+                        opacity,
+                        clip_seconds: offset.as_seconds(),
+                        seed: seed(clip.id),
+                    });
+                }
+                continue;
+            }
+            if let Some(layer) = self.picture(track.id, clip, time, path, depth, &mut steps) {
+                steps.push(Step::Layer { layer });
+            }
+        }
+        steps
+    }
+
+    /// Plans the picture of `clip` at `time` and returns its layer. A sequence
+    /// clip's sequence is planned first, and the step that composes it goes into
+    /// `steps`.
+    fn picture(
+        &mut self,
+        track: TrackId,
+        clip: &Clip,
+        time: Flicks,
+        path: u64,
+        depth: usize,
+        steps: &mut Vec<Step>,
+    ) -> Option<usize> {
+        let key = layer_key(path, clip.id);
+        if !clip.is_sequence() {
+            let mut layer = visual_layer(self.project, track, clip, time)?;
+            layer.key = key;
+            self.layers.push(layer);
+            return Some(self.layers.len() - 1);
+        }
+        let offset = time - clip.start;
+        let opacity = clip.opacity_at(offset);
+        let inner = clip
+            .sequence
+            .and_then(|id| self.project.sequence_tracks(id))?;
+        if !clip.video || opacity <= 0.0 || depth >= cgv_model::MAX_NESTING {
+            return None;
+        }
+        let source_time = clip.source_at(offset, self.frame_length);
+        let inside = self.tracks(inner, source_time, key, depth + 1);
+        if inside.is_empty() {
+            return None;
+        }
+        self.layers.push(LayerPlan {
+            clip: clip.id,
+            key,
+            track,
+            media: String::new(),
+            still: false,
+            source_time,
+            transform: clip.transform_at(offset),
+            crop: clip.crop_at(offset),
+            opacity,
+            clip_start: clip.start,
+            clip_end: clip.end(),
+            source_in: clip.source_in,
+            speed: clip.speed,
+            clip_seconds: offset.as_seconds(),
+            seed: seed(clip.id),
+            effects: effect_plans(clip, offset),
+            moving: clip.has_moving_keyframes(),
+            title: None,
+            nest: true,
+            reverse: false,
+            blend_frames: false,
+            blend_mode: clip.blend_mode,
+            masks: clip.masks_at(offset),
+            remove_background: false,
+        });
+        let layer = self.layers.len() - 1;
+        steps.push(Step::Nest {
+            layer,
+            steps: inside,
+        });
+        Some(layer)
+    }
+}
+
+/// The effects of every adjustment layer among `steps`, sequences' included.
+fn adjustment_effects<'s>(steps: &'s [Step], out: &mut Vec<&'s [EffectPlan]>) {
+    for step in steps {
+        match step {
+            Step::Adjustment { effects, .. } => out.push(effects),
+            Step::Nest { steps, .. } => adjustment_effects(steps, out),
+            _ => {}
+        }
+    }
+}
+
 /// The project LUTs the frame's effects name.
 fn frame_luts(project: &Project, layers: &[LayerPlan], steps: &[Step]) -> Vec<LutPlan> {
-    let adjustments = steps.iter().filter_map(|step| match step {
-        Step::Adjustment { effects, .. } => Some(effects.as_slice()),
-        _ => None,
-    });
+    let mut adjustments = Vec::new();
+    adjustment_effects(steps, &mut adjustments);
     let mut luts = BTreeMap::new();
     for effects in layers
         .iter()
@@ -355,11 +479,45 @@ fn frame_luts(project: &Project, layers: &[LayerPlan], steps: &[Step]) -> Vec<Lu
 
 /// Pictures that start after `from` and no later than `from + horizon`, planned at
 /// their first frame, so their decoders can start early. A clip a transition
-/// brings in starts where the transition does.
+/// brings in starts where the transition does; a clip inside a sequence clip
+/// starts where the sequence clip shows it first.
 pub fn upcoming_layers(project: &Project, from: Flicks, horizon: Flicks) -> Vec<LayerPlan> {
-    let frame = project.settings.frame_duration();
     let mut upcoming: Vec<(Flicks, LayerPlan)> = Vec::new();
-    for track in project.tracks.iter().filter(|track| !track.hidden) {
+    let span = Upcoming {
+        from,
+        to: from + horizon,
+        low: Flicks(i64::MIN / 2),
+        high: Flicks(i64::MAX / 2),
+        shift: Flicks::ZERO,
+        path: 0,
+        depth: 0,
+    };
+    upcoming_in(project, &project.tracks, &span, &mut upcoming);
+    upcoming.sort_by_key(|(first, layer)| (*first, layer.key));
+    upcoming.into_iter().map(|(_, layer)| layer).collect()
+}
+
+/// A stretch of a timeline to look ahead in: `from..=to` of its own times, of
+/// which only `low..high` shows (inside a sequence clip), `shift` before the
+/// top timeline's.
+struct Upcoming {
+    from: Flicks,
+    to: Flicks,
+    low: Flicks,
+    high: Flicks,
+    shift: Flicks,
+    path: u64,
+    depth: usize,
+}
+
+fn upcoming_in(
+    project: &Project,
+    tracks: &[Arc<Track>],
+    span: &Upcoming,
+    upcoming: &mut Vec<(Flicks, LayerPlan)>,
+) {
+    let frame = project.settings.frame_duration();
+    for track in tracks.iter().filter(|track| !track.hidden) {
         let mut early: BTreeMap<ClipId, Flicks> = BTreeMap::new();
         for t in &track.transitions {
             if let (Some(to), Some((start, _))) = (t.to, window(track, t, frame)) {
@@ -371,16 +529,40 @@ pub fn upcoming_layers(project: &Project, from: Flicks, horizon: Flicks) -> Vec<
                 .get(&clip.id)
                 .copied()
                 .unwrap_or(clip.start)
-                .min(clip.start);
-            if first > from && first <= from + horizon && !clip.is_generated() {
-                if let Some(layer) = visual_layer(project, track.id, clip, first) {
-                    upcoming.push((first, layer));
+                .min(clip.start)
+                .max(span.low);
+            let last = clip.end().min(span.high);
+            if clip.is_sequence() {
+                // What it shows from the stretch, in its sequence's times.
+                let (Some(inner), true) = (
+                    clip.sequence.and_then(|id| project.sequence_tracks(id)),
+                    clip.video && span.depth < cgv_model::MAX_NESTING && first < last,
+                ) else {
+                    continue;
+                };
+                let offset = clip.source_in - clip.start;
+                let inside = Upcoming {
+                    from: span.from.max(first - frame) + offset,
+                    to: span.to.min(last) + offset,
+                    low: first + offset,
+                    high: last + offset,
+                    shift: span.shift - offset,
+                    path: layer_key(span.path, clip.id),
+                    depth: span.depth + 1,
+                };
+                if inside.from < inside.to {
+                    upcoming_in(project, inner, &inside, upcoming);
+                }
+                continue;
+            }
+            if first > span.from && first <= span.to && first < last && !clip.is_generated() {
+                if let Some(mut layer) = visual_layer(project, track.id, clip, first) {
+                    layer.key = layer_key(span.path, clip.id);
+                    upcoming.push((first + span.shift, layer));
                 }
             }
         }
     }
-    upcoming.sort_by_key(|(first, layer)| (*first, layer.clip));
-    upcoming.into_iter().map(|(_, layer)| layer).collect()
 }
 
 #[cfg(test)]
@@ -916,5 +1098,131 @@ mod tests {
             upcoming_layers(session.project(), Flicks(FRAME * 46), Flicks(FRAME * 30)).is_empty(),
             "b is already drawn by then"
         );
+    }
+
+    fn nest(session: &mut Session, clips: Vec<ClipId>) -> ClipId {
+        let outcome = session
+            .execute(&Command::Nest { clips, name: None })
+            .unwrap();
+        ClipId(outcome.created[0])
+    }
+
+    /// A layer with its stream key and track set aside, which nesting changes.
+    fn unplaced(layer: &LayerPlan) -> LayerPlan {
+        LayerPlan {
+            key: 0,
+            track: TrackId(0),
+            ..layer.clone()
+        }
+    }
+
+    #[test]
+    fn a_sequence_clip_plans_its_sequence_as_one_picture() {
+        let mut session = session();
+        let (bottom, top) = (track(&session, 0), track(&session, 1));
+        let video = append(&mut session, bottom, "video", 60);
+        let still = append(&mut session, top, "still", 30);
+        let at = Flicks(FRAME * 10);
+        let flat = plan_frame(session.project(), at);
+        let outer = nest(&mut session, vec![video, still]);
+        let plan = plan_frame(session.project(), at);
+        // The sequence's layers first, then the sequence clip's own.
+        assert_eq!(plan.layers.len(), 3);
+        let inner: Vec<LayerPlan> = plan.layers[..2].iter().map(unplaced).collect();
+        let expected: Vec<LayerPlan> = flat.layers.iter().map(unplaced).collect();
+        assert_eq!(inner, expected);
+        let own = &plan.layers[2];
+        assert!(own.nest && own.media.is_empty());
+        assert_eq!((own.clip, own.key, own.source_time), (outer, outer.0, at));
+        let [Step::Nest { layer: 2, steps }, Step::Layer { layer: 2 }] = &plan.steps[..] else {
+            panic!("{:?}", plan.steps)
+        };
+        assert_eq!(steps, &flat.steps);
+        // Readers keep the inner clips' streams apart from the top timeline's.
+        assert!(plan.layers[..2].iter().all(|layer| layer.key >= 1 << 52));
+    }
+
+    #[test]
+    fn nested_sequences_follow_their_clips_timing_three_deep() {
+        let mut session = session();
+        let bottom = track(&session, 0);
+        let video = append(&mut session, bottom, "video", 90);
+        let mut outer = video;
+        for _ in 0..3 {
+            outer = nest(&mut session, vec![outer]);
+        }
+        // Show from frame 20, a second later.
+        session
+            .execute(&Command::Trim {
+                clip: outer,
+                edge: cgv_model::Edge::Start,
+                delta: Flicks(FRAME * 20),
+                ripple: false,
+            })
+            .unwrap();
+        session
+            .execute(&Command::Move {
+                clips: vec![outer],
+                delta: Flicks(FRAME * 10),
+                tracks: 0,
+                overwrite: false,
+            })
+            .unwrap();
+        let plan = plan_frame(session.project(), Flicks(FRAME * 35));
+        assert_eq!(plan.layers.len(), 4);
+        assert_eq!(plan.layers[0].clip, video);
+        assert_eq!(plan.layers[0].source_time, Flicks(FRAME * 25));
+        let mut depth = 0;
+        let mut steps = &plan.steps;
+        while let Some(Step::Nest { steps: inside, .. }) = steps.first() {
+            depth += 1;
+            steps = inside;
+        }
+        assert_eq!(depth, 3);
+        // Before the clip's first frame shown, nothing.
+        assert!(plan_frame(session.project(), Flicks(FRAME * 29))
+            .layers
+            .is_empty());
+        // The media inside starts early enough to decode ahead.
+        let upcoming = upcoming_layers(session.project(), Flicks(FRAME * 20), Flicks(FRAME * 15));
+        assert_eq!(upcoming.len(), 1);
+        assert_eq!(upcoming[0].clip, video);
+        assert_eq!(upcoming[0].source_time, Flicks(FRAME * 20));
+        assert_eq!(upcoming[0].key, plan.layers[0].key);
+    }
+
+    #[test]
+    fn two_sequence_clips_of_one_sequence_read_their_media_apart() {
+        let mut session = session();
+        let (bottom, top) = (track(&session, 0), track(&session, 1));
+        let video = append(&mut session, bottom, "video", 60);
+        let outer = nest(&mut session, vec![video]);
+        let sequence = session.project().clip(outer).unwrap().1.sequence;
+        session
+            .execute(&Command::Append {
+                track: top,
+                clip: ClipSpec {
+                    kind: cgv_model::ClipKind::Sequence,
+                    sequence,
+                    source_in: Flicks(FRAME * 30),
+                    duration: Flicks(FRAME * 30),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        let plan = plan_frame(session.project(), Flicks(FRAME * 5));
+        let media: Vec<(ClipId, Flicks, u64)> = plan
+            .layers
+            .iter()
+            .filter(|layer| !layer.nest)
+            .map(|layer| (layer.clip, layer.source_time, layer.key))
+            .collect();
+        assert_eq!(media.len(), 2);
+        assert_eq!((media[0].0, media[1].0), (video, video));
+        assert_eq!(
+            (media[0].1, media[1].1),
+            (Flicks(FRAME * 5), Flicks(FRAME * 35))
+        );
+        assert_ne!(media[0].2, media[1].2);
     }
 }

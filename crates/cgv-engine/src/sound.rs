@@ -250,9 +250,8 @@ pub const MARGIN_AFTER: f64 = 1.0;
 /// The audible tracks and clips between timeline samples `from` and `to`, at the
 /// project rate. A clip a transition crosses into or out of extends over the
 /// transition, fading at equal power, so the sound crossfades with the picture.
+/// A sequence clip's sound is its sequence's clips, on the sequence clip's track.
 pub fn audio_plan(project: &Project, from: i64, to: i64) -> AudioPlan {
-    let rate = project.settings.sample_rate;
-    let frame = project.settings.frame_duration();
     let soloing = project.tracks.iter().any(|track| track.solo);
     let mut tracks = Vec::new();
     for track in project.tracks.iter() {
@@ -260,77 +259,7 @@ pub fn audio_plan(project: &Project, from: i64, to: i64) -> AudioPlan {
             continue;
         }
         let mut clips: Vec<AudioClip> = Vec::new();
-        let mut chain = 0;
-        for (index, clip) in track.clips.iter().enumerate() {
-            if !audible(project, clip) {
-                continue;
-            }
-            let before = index.checked_sub(1).map(|i| &track.clips[i]);
-            let after = track.clips.get(index + 1);
-            let seamless_in = before
-                .is_some_and(|before| audible(project, before) && continues(track, before, clip));
-            let seamless_out =
-                after.is_some_and(|after| audible(project, after) && continues(track, clip, after));
-            if !seamless_in {
-                chain = clip.id.0;
-            }
-            let mut start = clip.start.to_samples(rate);
-            let mut end = clip.end().to_samples(rate);
-            let mut source_start = clip.source_in.to_samples(rate);
-            let mut fade_in = clip.fade_in.to_samples(rate);
-            let mut fade_out = clip.fade_out.to_samples(rate);
-            // Crossfades over the transitions at the clip's cuts.
-            for t in &track.transitions {
-                let (Some(t_from), Some(t_to)) = (t.from, t.to) else {
-                    continue;
-                };
-                let Some(cut) = track.cut(t) else {
-                    continue;
-                };
-                let (a, b) = t.window(cut, frame);
-                let (a, b) = (a.to_samples(rate), b.to_samples(rate));
-                if t_from == clip.id {
-                    end = end.max(b);
-                    fade_out = b - a;
-                }
-                if t_to == clip.id {
-                    let earlier = start - a.min(start);
-                    start -= earlier;
-                    source_start -= earlier;
-                    fade_in = b - a;
-                }
-            }
-            if end <= from || start >= to {
-                continue;
-            }
-            let effects: Vec<Settings> = clip
-                .audio_effects
-                .iter()
-                .filter_map(sound_settings)
-                .collect();
-            // The map reaches over the transitions too, from the clip's own start.
-            let timing = clip.retimed().then(|| {
-                let own = clip.start.to_samples(rate);
-                timing(clip, rate, own, start.max(from), end.min(to))
-            });
-            clips.push(AudioClip {
-                media: clip.media.clone(),
-                start,
-                end,
-                source_start,
-                gain: db_to_gain(clip.volume_db),
-                envelope: envelope(clip, rate, from, to),
-                fade_in,
-                fade_out,
-                seamless_in,
-                seamless_out,
-                denoised: (clip.denoise > 0.0)
-                    .then(|| (denoised_key(&clip.media), clip.denoise as f32)),
-                effects,
-                chain,
-                timing,
-            });
-        }
+        track_clips(project, track, from, to, &Nesting::default(), &mut clips);
 
         let role = match track.role {
             TrackRole::Dialogue => Role::Dialogue,
@@ -356,6 +285,312 @@ pub fn audio_plan(project: &Project, from: i64, to: i64) -> AudioPlan {
     // Tracks with nothing to play stay only while they may duck or be ducked,
     // so the meters list every audible track.
     AudioPlan { tracks }
+}
+
+/// Where a clip's sound plays on its track: its samples with the crossfades of
+/// the transitions at its cuts, its source sample at `start`, and its fades.
+struct Extent {
+    start: i64,
+    end: i64,
+    source_start: i64,
+    fade_in: i64,
+    fade_out: i64,
+}
+
+fn extent(track: &Track, clip: &Clip, rate: u32, frame: Flicks) -> Extent {
+    let mut extent = Extent {
+        start: clip.start.to_samples(rate),
+        end: clip.end().to_samples(rate),
+        source_start: clip.source_in.to_samples(rate),
+        fade_in: clip.fade_in.to_samples(rate),
+        fade_out: clip.fade_out.to_samples(rate),
+    };
+    for t in &track.transitions {
+        let (Some(t_from), Some(t_to)) = (t.from, t.to) else {
+            continue;
+        };
+        let Some(cut) = track.cut(t) else {
+            continue;
+        };
+        let (a, b) = t.window(cut, frame);
+        let (a, b) = (a.to_samples(rate), b.to_samples(rate));
+        if t_from == clip.id {
+            extent.end = extent.end.max(b);
+            extent.fade_out = b - a;
+        }
+        if t_to == clip.id {
+            let earlier = extent.start - a.min(extent.start);
+            extent.start -= earlier;
+            extent.source_start -= earlier;
+            extent.fade_in = b - a;
+        }
+    }
+    extent
+}
+
+/// The equal-power rise of a fade, `p` from 0 to 1, as the mixer plays it.
+fn rise(p: f64) -> f64 {
+    (p.clamp(0.0, 1.0) * std::f64::consts::FRAC_PI_2).sin()
+}
+
+/// A sequence clip that a timeline plays inside: its volume and fades, and
+/// where it sits among the top timeline's samples.
+#[derive(Clone)]
+struct Outer<'a> {
+    clip: &'a Clip,
+    /// The top timeline's sample of the sequence clip's timeline's sample 0.
+    shift: i64,
+    extent: (i64, i64, i64, i64),
+}
+
+impl Outer<'_> {
+    /// The sequence clip's gain at top-level sample `t`.
+    fn gain(&self, t: i64, rate: u32) -> f64 {
+        let at = t - self.shift;
+        let (start, end, fade_in, fade_out) = self.extent;
+        let own = self.clip.start.to_samples(rate);
+        let offset = Flicks::from_samples(at - own, rate);
+        let mut gain = db_to_gain(self.clip.volume_db_at(offset)) as f64;
+        if fade_in > 0 {
+            gain *= rise((at - start) as f64 / fade_in as f64);
+        }
+        if fade_out > 0 {
+            gain *= rise((end - at) as f64 / fade_out as f64);
+        }
+        gain
+    }
+}
+
+/// How a timeline inside sequence clips reaches the top one. The top timeline
+/// itself has none of it.
+#[derive(Clone, Default)]
+struct Nesting<'a> {
+    /// The top timeline's sample of this timeline's sample 0.
+    shift: i64,
+    /// The top timeline's samples it plays in, when inside a sequence clip.
+    window: Option<(i64, i64)>,
+    /// The sequence clips around it, outermost first.
+    outer: Vec<Outer<'a>>,
+    /// The pans of the sequence tracks it is on, added up.
+    pan: f64,
+    /// Tells apart two sequence clips that show the same sequence.
+    key: u64,
+}
+
+/// The audible clips of `track` between samples `from` and `to` of its own
+/// timeline, as the top timeline plays them.
+fn track_clips<'a>(
+    project: &'a Project,
+    track: &'a Track,
+    from: i64,
+    to: i64,
+    nesting: &Nesting<'a>,
+    clips: &mut Vec<AudioClip>,
+) {
+    let rate = project.settings.sample_rate;
+    let frame = project.settings.frame_duration();
+    let mut chain = 0;
+    for (index, clip) in track.clips.iter().enumerate() {
+        if clip.is_sequence() {
+            sequence_clips(project, track, clip, from, to, nesting, clips);
+            continue;
+        }
+        if !audible(project, clip) {
+            continue;
+        }
+        let before = index.checked_sub(1).map(|i| &track.clips[i]);
+        let after = track.clips.get(index + 1);
+        let seamless_in =
+            before.is_some_and(|before| audible(project, before) && continues(track, before, clip));
+        let seamless_out =
+            after.is_some_and(|after| audible(project, after) && continues(track, clip, after));
+        if !seamless_in {
+            chain = clip.id.0;
+        }
+        let Extent {
+            start,
+            end,
+            source_start,
+            fade_in,
+            fade_out,
+        } = extent(track, clip, rate, frame);
+        if end <= from || start >= to {
+            continue;
+        }
+        let effects: Vec<Settings> = clip
+            .audio_effects
+            .iter()
+            .filter_map(sound_settings)
+            .collect();
+        // The map reaches over the transitions too, from the clip's own start.
+        let timing = clip.retimed().then(|| {
+            let own = clip.start.to_samples(rate);
+            timing(clip, rate, own, start.max(from), end.min(to))
+        });
+        let mut sound = AudioClip {
+            media: clip.media.clone(),
+            start,
+            end,
+            source_start,
+            gain: db_to_gain(clip.volume_db),
+            pan: 0.0,
+            envelope: envelope(clip, rate, from, to),
+            fade_in,
+            fade_out,
+            seamless_in,
+            seamless_out,
+            denoised: (clip.denoise > 0.0)
+                .then(|| (denoised_key(&clip.media), clip.denoise as f32)),
+            effects,
+            chain,
+            timing,
+        };
+        if nesting.window.is_some() && !place_nested(&mut sound, clip, rate, (from, to), nesting) {
+            continue;
+        }
+        clips.push(sound);
+    }
+}
+
+/// Moves a clip of a sequence to the top timeline's samples, keeps the part
+/// its sequence clips show, and gives it their volume and fades. False when
+/// nothing of it plays.
+fn place_nested(
+    sound: &mut AudioClip,
+    clip: &Clip,
+    rate: u32,
+    (from, to): (i64, i64),
+    nesting: &Nesting,
+) -> bool {
+    let shift = nesting.shift;
+    let (low, high) = nesting.window.expect("inside a sequence clip");
+    sound.start += shift;
+    sound.end += shift;
+    if let Some(timing) = &mut sound.timing {
+        for point in &mut timing.map {
+            point.0 += shift;
+        }
+        let mut hasher = DefaultHasher::new();
+        (timing.key, shift, nesting.key).hash(&mut hasher);
+        timing.key = hasher.finish();
+    }
+    if sound.start < low {
+        sound.source_start += low - sound.start;
+        sound.start = low;
+        sound.fade_in = 0;
+        sound.seamless_in = false;
+    }
+    if sound.end > high {
+        sound.end = high;
+        sound.fade_out = 0;
+        sound.seamless_out = false;
+    }
+    if sound.start >= sound.end {
+        return false;
+    }
+    let mut hasher = DefaultHasher::new();
+    (sound.chain, nesting.key).hash(&mut hasher);
+    sound.chain = hasher.finish();
+    sound.pan = nesting.pan.clamp(-1.0, 1.0) as f32;
+    // One envelope for the clip's own volume and every sequence clip's around it.
+    let own = clip.start.to_samples(rate) + shift;
+    let first = sound.start.max(from + shift);
+    let last = sound.end.min(to + shift);
+    let mut points = Vec::new();
+    let mut at = first - (first - own).rem_euclid(ENVELOPE_STEP);
+    loop {
+        let offset = Flicks::from_samples(at - own, rate);
+        let mut gain = db_to_gain(clip.volume_db_at(offset)) as f64;
+        for outer in &nesting.outer {
+            gain *= outer.gain(at, rate);
+        }
+        points.push((at, gain as f32));
+        if at >= last {
+            break;
+        }
+        at += ENVELOPE_STEP;
+    }
+    sound.envelope = points;
+    true
+}
+
+/// The sound of sequence clip `clip` on `track` between samples `from` and `to`
+/// of its own timeline: its sequence's audible tracks, as the top timeline
+/// plays them.
+fn sequence_clips<'a>(
+    project: &'a Project,
+    track: &'a Track,
+    clip: &'a Clip,
+    from: i64,
+    to: i64,
+    nesting: &Nesting<'a>,
+    clips: &mut Vec<AudioClip>,
+) {
+    let rate = project.settings.sample_rate;
+    let frame = project.settings.frame_duration();
+    let Some(tracks) = clip
+        .sequence
+        .filter(|_| clip.audio && nesting.outer.len() < cgv_model::MAX_NESTING)
+        .and_then(|id| project.sequence_tracks(id))
+    else {
+        return;
+    };
+    let Extent {
+        start,
+        end,
+        fade_in,
+        fade_out,
+        ..
+    } = extent(track, clip, rate, frame);
+    if end <= from || start >= to {
+        return;
+    }
+    let mut window = (start + nesting.shift, end + nesting.shift);
+    if let Some((low, high)) = nesting.window {
+        window = (window.0.max(low), window.1.min(high));
+    }
+    if window.0 >= window.1 {
+        return;
+    }
+    // Sequence sample s plays at this timeline's sample s + offset.
+    let offset = clip.start.to_samples(rate) - clip.source_in.to_samples(rate);
+    let mut outer = nesting.outer.clone();
+    outer.push(Outer {
+        clip,
+        shift: nesting.shift,
+        extent: (start, end, fade_in, fade_out),
+    });
+    let mut hasher = DefaultHasher::new();
+    (nesting.key, clip.id.0).hash(&mut hasher);
+    let key = hasher.finish();
+    let soloing = tracks.iter().any(|track| track.solo);
+    for inner in tracks.iter() {
+        if inner.muted || (soloing && !inner.solo) {
+            continue;
+        }
+        let inside = Nesting {
+            shift: nesting.shift + offset,
+            window: Some(window),
+            outer: outer.clone(),
+            pan: nesting.pan + inner.pan,
+            key,
+        };
+        // The inner track's volume joins each of its clips' gains.
+        let first = clips.len();
+        track_clips(
+            project,
+            inner,
+            start.max(from) - offset,
+            end.min(to) - offset,
+            &inside,
+            clips,
+        );
+        let gain = db_to_gain(inner.volume_db);
+        for sound in &mut clips[first..] {
+            sound.gain *= gain;
+            sound.envelope.iter_mut().for_each(|point| point.1 *= gain);
+        }
+    }
 }
 
 /// Every clip of the plan, in track order.
@@ -791,5 +1026,156 @@ mod tests {
         // A window later in the clip covers only that window.
         let later = clips(&session, 30_000, 31_000);
         assert!(later[0].envelope[0].0 <= 30_000 && later[0].envelope[0].0 > 29_000);
+    }
+
+    /// The mix of `project` over `frames` samples from `start`, each medium a
+    /// steady tone of its own pitch.
+    fn mixed(project: &Project, start: i64, frames: usize) -> Vec<f32> {
+        let rate = project.settings.sample_rate;
+        let mut mixer = cgv_audio::Mixer::new(rate, 2, 256 << 20);
+        let plan = audio_plan(
+            project,
+            start - rate as i64 * 3,
+            start + frames as i64 + rate as i64,
+        );
+        for (media, block) in mixer.missing(&plan, start, frames) {
+            let (from, to) = mixer.block_span(block);
+            let pitch = 110.0 * (1 + media.len() % 7) as f64;
+            let data: Vec<f32> = (0..((to - from) * rate as f64).round() as usize)
+                .map(|i| {
+                    let t = from + i as f64 / rate as f64;
+                    (0.25 * (t * pitch * std::f64::consts::TAU).sin()) as f32
+                })
+                .collect();
+            let source = cgv_audio::SourceAudio {
+                sample_rate: rate,
+                channels: 1,
+                data: &data,
+                start_seconds: from,
+            };
+            mixer.insert_block(&media, block, source).unwrap();
+        }
+        mixer.mix(&plan, start, frames)
+    }
+
+    fn largest_difference(a: &[f32], b: &[f32]) -> f32 {
+        assert_eq!(a.len(), b.len());
+        a.iter()
+            .zip(b)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0, f32::max)
+    }
+
+    fn nest(session: &mut Session, clips: Vec<ClipId>) -> ClipId {
+        let outcome = session
+            .execute(&Command::Nest { clips, name: None })
+            .unwrap();
+        ClipId(outcome.created[0])
+    }
+
+    #[test]
+    fn a_sequence_clip_sounds_as_its_clips_do_unnested_three_deep() {
+        let mut session = session();
+        let (bottom, top) = (track(&session, 0), track(&session, 1));
+        let video = append(&mut session, bottom, "video", 60);
+        let sound = append(&mut session, top, "sound", 45);
+        // A fade and a volume of their own, which nesting keeps.
+        session
+            .execute(&Command::SetClipProperties {
+                clip: sound,
+                properties: ClipProperties {
+                    volume_db: Some(-4.0),
+                    fade_in: Some(Flicks(FRAME * 10)),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        let frames = (SAMPLES * 62) as usize;
+        let flat = mixed(session.project(), 0, frames);
+        assert!(flat.iter().any(|x| x.abs() > 0.2));
+        let mut outer = nest(&mut session, vec![video, sound]);
+        assert!(largest_difference(&flat, &mixed(session.project(), 0, frames)) < 1e-4);
+        for _ in 0..2 {
+            outer = nest(&mut session, vec![outer]);
+        }
+        let deep = mixed(session.project(), 0, frames);
+        assert!(largest_difference(&flat, &deep) < 1e-4);
+        // The sequence clip's own volume turns all of it down.
+        session
+            .execute(&Command::SetClipProperties {
+                clip: outer,
+                properties: ClipProperties {
+                    volume_db: Some(-6.0206),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        let quieter = mixed(session.project(), 0, frames);
+        let halved: Vec<f32> = flat.iter().map(|x| x / 2.0).collect();
+        assert!(largest_difference(&halved, &quieter) < 1e-4);
+    }
+
+    #[test]
+    fn a_sequence_clip_plays_the_part_it_shows_with_its_fades() {
+        let mut session = session();
+        let bottom = track(&session, 0);
+        let video = append(&mut session, bottom, "video", 90);
+        let outer = nest(&mut session, vec![video]);
+        // Show 30 frames from frame 20 of the sequence, a second later, fading in.
+        for (edge, delta) in [(cgv_model::Edge::Start, 20), (cgv_model::Edge::End, -40)] {
+            session
+                .execute(&Command::Trim {
+                    clip: outer,
+                    edge,
+                    delta: Flicks(FRAME * delta),
+                    ripple: false,
+                })
+                .unwrap();
+        }
+        session
+            .execute(&Command::Move {
+                clips: vec![outer],
+                delta: Flicks(FRAME * 10),
+                tracks: 0,
+                overwrite: false,
+            })
+            .unwrap();
+        session
+            .execute(&Command::SetClipProperties {
+                clip: outer,
+                properties: ClipProperties {
+                    fade_in: Some(Flicks(FRAME * 15)),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        let planned = clips(&session, 0, SAMPLES * 120);
+        assert_eq!(planned.len(), 1);
+        let sound = &planned[0];
+        assert_eq!((sound.start, sound.end), (SAMPLES * 30, SAMPLES * 60));
+        assert_eq!(sound.source_start, SAMPLES * 20);
+        assert!(!sound.seamless_in && !sound.seamless_out);
+        // The fade rises over the envelope, from silence to full at frame 45.
+        let gain_at = |t: i64| {
+            let next = sound.envelope.partition_point(|point| point.0 <= t);
+            sound.envelope[next - 1].1
+        };
+        assert!(gain_at(SAMPLES * 30) < 0.01);
+        assert!((gain_at(SAMPLES * 45 + 256) - 1.0).abs() < 1e-3);
+        // Two sequence clips of one sequence keep their effect chains apart.
+        session
+            .execute(&Command::Append {
+                track: bottom,
+                clip: ClipSpec {
+                    kind: cgv_model::ClipKind::Sequence,
+                    sequence: session.project().sequences.first().map(|s| s.id),
+                    duration: Flicks(FRAME * 30),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        let both = clips(&session, 0, SAMPLES * 200);
+        assert_eq!(both.len(), 2);
+        assert_ne!(both[0].chain, both[1].chain);
     }
 }

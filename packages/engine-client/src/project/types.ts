@@ -214,11 +214,13 @@ export interface Clip {
   id: number;
   /**
    * An adjustment layer has no media: its effects apply to the tracks below. A
-   * title has none either: it draws `title`.
+   * title has none either: it draws `title`. A sequence clip shows `sequence`.
    */
-  kind?: 'media' | 'adjustment' | 'title';
-  /** Empty for an adjustment layer or a title. */
+  kind?: 'media' | 'adjustment' | 'title' | 'sequence';
+  /** Empty for an adjustment layer, a title or a sequence clip. */
   media: string;
+  /** The sequence a sequence clip shows. */
+  sequence?: number;
   start: number;
   duration: number;
   sourceIn: number;
@@ -342,7 +344,20 @@ export interface Project {
   markers: Marker[];
   /** LUTs kept in the project for its effects. */
   luts: LutInfo[];
+  /** Timelines besides the main one, which sequence clips show. */
+  sequences?: SequenceInfo[];
+  /** The sequence these tracks and markers belong to; null for the main timeline. */
+  openSequence?: number | null;
   nextId: number;
+}
+
+/** A sequence as the bin lists it. */
+export interface SequenceInfo {
+  id: number;
+  name: string;
+  /** The end of its last clip, in flicks. */
+  duration: number;
+  tracks: number;
 }
 
 /** Clip values to change; missing ones stay as they are. */
@@ -371,9 +386,11 @@ export interface TrackSound {
 }
 
 export interface ClipSpec {
-  kind?: 'media' | 'adjustment' | 'title';
+  kind?: 'media' | 'adjustment' | 'title' | 'sequence';
   /** Empty (or left out) for an adjustment layer or a title. */
   media?: string;
+  /** The sequence a sequence clip shows. */
+  sequence?: number;
   sourceIn?: number;
   /** Timeline length, at `speed`. */
   duration: number;
@@ -500,7 +517,18 @@ export type Command =
   | { type: 'updateMarker'; marker: number; at?: number; name?: string; color?: MarkerColor }
   | { type: 'removeMarker'; marker: number }
   /** Clip property, effect, keyframe and transition changes as one command (one gesture step). */
-  | { type: 'batch'; commands: Command[] };
+  | { type: 'batch'; commands: Command[] }
+  /** An empty sequence with a magnetic main track, as a new project has. */
+  | { type: 'addSequence'; name: string }
+  | { type: 'renameSequence'; sequence: number; name: string }
+  /** Removes a sequence and every sequence clip that shows it. */
+  | { type: 'removeSequence'; sequence: number }
+  /** Moves clips into a new sequence and puts a sequence clip in their place. */
+  | { type: 'nest'; clips: number[]; name?: string }
+  /** Replaces a sequence clip with copies of the clips it shows. */
+  | { type: 'breakApart'; clip: number }
+  /** Runs `command` on a sequence's tracks (the open sequence's commands do this for you). */
+  | { type: 'inSequence'; sequence: number; command: Command };
 
 /** Ids a command created: the new clip, track, marker, effect, transition or LUT first. */
 export interface Outcome {

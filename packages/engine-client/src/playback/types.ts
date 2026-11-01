@@ -15,6 +15,8 @@ export interface EffectPlan {
 /** One picture of a planned frame. Times are flicks. */
 export interface LayerPlan {
   clip: number;
+  /** What readers keep its stream by: the clip, or a clip inside sequence clips by its path. */
+  key: number;
   track: number;
   media: string;
   still: boolean;
@@ -35,6 +37,8 @@ export interface LayerPlan {
   moving?: boolean;
   /** A title at this frame: the engine draws it, and the layer has no media. */
   title?: Title;
+  /** A sequence clip's picture: its `nest` step composes it, and the layer has no media. */
+  nest?: boolean;
   /** The clip plays backwards: its source frames come in falling order. */
   reverse?: boolean;
   /** Slow motion blends the frame at `sourceTime` with the next, by how far between them it falls. */
@@ -63,7 +67,9 @@ export type PlanStep =
       opacity: number;
       clipSeconds: number;
       seed: number;
-    };
+    }
+  /** A sequence clip's sequence: `steps` composed on their own become layer `layer`'s picture. */
+  | { kind: 'nest'; layer: number; steps: PlanStep[] };
 
 /** A project LUT a frame's effects read; `key` is what the GPU caches it by. */
 export interface LutPlan {

@@ -72,7 +72,7 @@ export class ExportFrames {
         continue;
       }
       if (this.originals?.has(layer.media)) continue;
-      if (this.stream(layer)) keep.add(layer.clip);
+      if (this.stream(layer)) keep.add(layer.key);
     }
     for (const [clip, { stream }] of this.streams) {
       if (keep.has(clip)) stream.hurry();
@@ -98,11 +98,11 @@ export class ExportFrames {
   }
 
   private stream(layer: LayerPlan): LayerStream | null {
-    let entry = this.streams.get(layer.clip);
+    let entry = this.streams.get(layer.key);
     const reverse = !!layer.reverse;
     if (entry && (entry.stream.error || entry.media !== layer.media || entry.reverse !== reverse)) {
       entry.stream.close();
-      this.streams.delete(layer.clip);
+      this.streams.delete(layer.key);
       entry = undefined;
     }
     if (entry) return entry.stream;
@@ -112,7 +112,7 @@ export class ExportFrames {
     const stream = reverse
       ? new ReverseStream(source, start)
       : new VideoStream(source, start, this.decoders, this.planes);
-    this.streams.set(layer.clip, { media: layer.media, stream, reverse });
+    this.streams.set(layer.key, { media: layer.media, stream, reverse });
     return stream;
   }
 
@@ -172,7 +172,7 @@ export class ExportFrames {
       } catch (error) {
         console.warn(`Clip ${layer.clip}: ${message(error)}; reading frame ${number} directly`);
         stream.close();
-        this.streams.delete(layer.clip);
+        this.streams.delete(layer.key);
       }
     }
     // The seek path: slower, but it finds any frame the file has.
