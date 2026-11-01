@@ -722,6 +722,7 @@ mod tests {
             version: 1,
             enabled: true,
             params,
+            masks: Vec::new(),
         }
     }
 
@@ -976,6 +977,7 @@ mod tests {
             version: 1,
             enabled: true,
             params,
+            masks: Vec::new(),
         }
     }
 

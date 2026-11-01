@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use cgv_time::Flicks;
 use serde::{Deserialize, Serialize};
 
+use crate::masks::{Mask, MAX_MASKS};
 use crate::project::{ClipId, EffectId, LutId, TransitionId, MAX_TIME};
 
 /// The pack of the effects and transitions that ship with the app.
@@ -130,12 +131,26 @@ pub struct Effect {
     /// Settings by name. Missing ones take the definition's defaults.
     #[serde(default)]
     pub params: Params,
+    /// Shapes the effect stays inside: the picture shows through unchanged
+    /// beyond them. None means the whole picture. Their ids count within the effect.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub masks: Vec<Mask>,
 }
 
 impl Effect {
     pub(crate) fn check(&self) -> Result<(), String> {
         check_kind(&self.kind, &self.pack, self.version)?;
-        check_params(&self.params)
+        check_params(&self.params)?;
+        if self.masks.len() > MAX_MASKS {
+            return Err(format!("An effect has at most {MAX_MASKS} masks"));
+        }
+        for (index, mask) in self.masks.iter().enumerate() {
+            if self.masks[..index].iter().any(|other| other.id == mask.id) {
+                return Err(format!("Effect {} has two masks with one id", self.id));
+            }
+            mask.check()?;
+        }
+        Ok(())
     }
 }
 
@@ -155,6 +170,8 @@ pub struct EffectSpec {
     pub enabled: bool,
     #[serde(default)]
     pub params: Params,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub masks: Vec<Mask>,
 }
 
 fn builtin() -> String {
@@ -178,6 +195,7 @@ impl EffectSpec {
             version: self.version,
             enabled: self.enabled,
             params: self.params.clone(),
+            masks: self.masks.clone(),
         };
         effect.check()?;
         Ok(effect)
@@ -193,6 +211,7 @@ impl From<&Effect> for EffectSpec {
             version: effect.version,
             enabled: effect.enabled,
             params: effect.params.clone(),
+            masks: effect.masks.clone(),
         }
     }
 }

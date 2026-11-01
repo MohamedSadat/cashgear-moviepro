@@ -1,8 +1,9 @@
 import { useRef, useState, type ReactNode } from 'react';
-import type { Color, Command, Effect, ParamDef } from '@cgv/engine-client';
+import type { Color, Command, Effect, Mask, ParamDef } from '@cgv/engine-client';
 import type { EditorState } from '../editing/useEditor';
 import { effectProperty, isAnimated, numberAt, valueAt } from '../effects/animation';
 import { defaultsOf, nameOf, valueOf } from '../effects/catalog';
+import { newMask } from '../masks/shapes';
 import { GradeControls } from './ColorControls';
 import { CurveLane } from './CurveLane';
 import { ColorField, KeyControls, ScrubField, keyCommand, type KeyContext } from './fields';
@@ -285,6 +286,10 @@ function EffectPanel({
       ? (preset?.name ?? entry.name)
       : nameOf(entry, effect.params)
     : effect.kind;
+  const window = effect.masks?.[0];
+  const editingWindow = editor.effectWindow === effect.id;
+  const setWindow = (masks: Mask[]) =>
+    run({ type: 'setEffectMasks', clip, effect: effect.id, masks });
   return (
     <div
       className="cgv-effect-panel"
@@ -383,6 +388,66 @@ function EffectPanel({
       )}
       {open && (
         <GradeControls editor={editor} context={context} effect={effect} disabled={disabled} />
+      )}
+      {open && !audio && (
+        <div className="cgv-effect-window" data-testid="effect-window">
+          <span className="cgv-field-label">Window</span>
+          {!window &&
+            (['rectangle', 'ellipse'] as const).map((tool) => (
+              <button
+                key={tool}
+                type="button"
+                disabled={disabled}
+                title={`Limit ${name} to a ${tool}`}
+                onClick={() => {
+                  setWindow([newMask(tool)]);
+                  editor.setEffectWindow(effect.id);
+                }}
+              >
+                {tool === 'rectangle' ? 'Rectangle' : 'Ellipse'}
+              </button>
+            ))}
+          {window && (
+            <>
+              <button
+                type="button"
+                aria-pressed={editingWindow}
+                title="Move and size the window on the monitor"
+                onClick={() => editor.setEffectWindow(editingWindow ? null : effect.id)}
+              >
+                Edit on monitor
+              </button>
+              <ScrubField
+                label="Feather"
+                value={(window.feather ?? 0) * 100}
+                min={0}
+                max={100}
+                step={0.5}
+                precision={1}
+                unit="%"
+                testId="effect-window-feather"
+                editor={editor}
+                disabled={disabled}
+                command={(percent) => ({
+                  type: 'setEffectMasks',
+                  clip,
+                  effect: effect.id,
+                  masks: [{ ...window, feather: percent / 100 }],
+                })}
+              />
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => {
+                  setWindow([]);
+                  if (editingWindow) editor.setEffectWindow(null);
+                }}
+              >
+                Remove window
+              </button>
+            </>
+          )}
+        </div>
       )}
       {open &&
         entry?.params.map((param) => (

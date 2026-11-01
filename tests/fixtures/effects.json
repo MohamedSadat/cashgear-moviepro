@@ -56,6 +56,27 @@
         "hue_sat_0": 1.4,
         "luma_sat_4": 0.6
       }
+    },
+    {
+      "name": "hsl-qualifier",
+      "params": {
+        "color": { "r": 0.25, "g": 0.42, "b": 0.72, "a": 1 },
+        "hue_range": 30,
+        "hue_soft": 15,
+        "hue_shift": -60,
+        "saturation": 1.2,
+        "gain": 0.1
+      }
+    },
+    {
+      "name": "hsl-qualifier",
+      "golden": "hsl-qualifier-matte",
+      "params": {
+        "color": { "r": 0.25, "g": 0.42, "b": 0.72, "a": 1 },
+        "hue_range": 30,
+        "hue_soft": 15,
+        "view": "matte"
+      }
     }
   ],
   "transitions": [

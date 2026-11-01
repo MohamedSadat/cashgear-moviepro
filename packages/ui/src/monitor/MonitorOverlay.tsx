@@ -177,6 +177,11 @@ export function MonitorOverlay({
   const host = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<Size>({ width: 0, height: 0 });
   const [mode, setMode] = useState<OverlayMode>('transform');
+  // Editing an effect's window brings up the mask handles.
+  const effectWindow = editor.effectWindow;
+  useEffect(() => {
+    if (effectWindow !== null) setMode('mask');
+  }, [effectWindow]);
   const [activeMask, setActiveMask] = useState<number | null>(null);
   const drag = useRef<Drag | null>(null);
   const playhead = usePausedTime(editor.playback);
@@ -251,7 +256,11 @@ export function MonitorOverlay({
       y: (event.clientY - rect.top - box.y) / box.scale,
     };
   };
-  const masks = (clip.masks ?? []).map((mask) => maskAt(clip, mask, offset));
+  // An effect's window takes the handles, while its effect is open for that.
+  const windowed = clip.effects?.find((effect) => effect.id === editor.effectWindow);
+  const masks = windowed
+    ? (windowed.masks ?? [])
+    : (clip.masks ?? []).map((mask) => maskAt(clip, mask, offset));
   const active = masks.find((mask) => mask.id === activeMask) ?? masks[0];
 
   const begin = (event: ReactPointerEvent, label: string, move: Drag['move']) => {
@@ -376,6 +385,15 @@ export function MonitorOverlay({
 
   // ---- Masks ----
   const maskCommand = (mask: Mask, values: Record<string, number>, points?: MaskPoint[]) => {
+    if (windowed)
+      return {
+        type: 'setEffectMasks' as const,
+        clip: clip.id,
+        effect: windowed.id,
+        masks: (windowed.masks ?? []).map((other) =>
+          other.id === mask.id ? { ...other, ...values, points: points ?? other.points } : other,
+        ),
+      };
     const original = clip.masks?.find((m) => m.id === mask.id) ?? mask;
     // A point moved on an animated path keys the whole shape, as editors key a path.
     const animatedPoints = (original.points ?? []).some((_, i) =>

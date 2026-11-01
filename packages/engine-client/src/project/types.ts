@@ -86,6 +86,8 @@ export interface Effect {
   enabled: boolean;
   /** Missing settings take the definition's defaults. */
   params: Params;
+  /** Shapes the effect stays inside; none means the whole picture. */
+  masks?: Mask[];
 }
 
 /** An effect to add. `id` is where it was copied from, so its keyframes follow it. */
@@ -528,6 +530,8 @@ export type Command =
   | { type: 'addMarker'; at: number; name?: string; color: MarkerColor }
   | { type: 'updateMarker'; marker: number; at?: number; name?: string; color?: MarkerColor }
   | { type: 'removeMarker'; marker: number }
+  /** Limits an effect to shapes; none means the whole picture. */
+  | { type: 'setEffectMasks'; clip: number; effect: number; masks: Mask[] }
   /** Clip property, effect, keyframe and transition changes as one command (one gesture step). */
   | { type: 'batch'; commands: Command[] }
   /** An empty sequence with a magnetic main track, as a new project has. */

@@ -468,6 +468,13 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         audio: bool,
     },
+    /// Limits an effect to `masks` (none: the whole picture again). Those without
+    /// an id of their own in the list get one.
+    SetEffectMasks {
+        clip: ClipId,
+        effect: EffectId,
+        masks: Vec<Mask>,
+    },
     /// Removes an effect and its keyframes.
     RemoveEffect {
         clip: ClipId,
@@ -743,6 +750,7 @@ impl Command {
             Command::AddEffect { audio: true, .. } => "Add sound effect",
             Command::AddEffect { .. } => "Add effect",
             Command::SetTitle { .. } => "Edit title",
+            Command::SetEffectMasks { .. } => "Change effect mask",
             Command::RemoveEffect { .. } => "Remove effect",
             Command::MoveEffect { .. } => "Reorder effects",
             Command::SetEffectEnabled { enabled: true, .. } => "Turn effect on",

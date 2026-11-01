@@ -1,0 +1,162 @@
+{
+  "id": "hsl-qualifier",
+  "name": "HSL Qualifier",
+  "category": "Color",
+  "type": "effect",
+  "version": 1,
+  "description": "Secondary correction: selects a range of hue, saturation and luma around a colour, and grades only what it selects. A window on the effect limits it to a shape.",
+  "space": "srgb",
+  "params": [
+    {
+      "id": "color",
+      "name": "Colour",
+      "type": "color",
+      "default": [0.25, 0.75, 0.25, 1]
+    },
+    {
+      "id": "hue_range",
+      "name": "Hue range",
+      "type": "number",
+      "min": 0,
+      "max": 180,
+      "default": 30,
+      "step": 1,
+      "unit": "°"
+    },
+    {
+      "id": "hue_soft",
+      "name": "Hue softness",
+      "type": "number",
+      "min": 0,
+      "max": 90,
+      "default": 10,
+      "step": 1,
+      "unit": "°"
+    },
+    {
+      "id": "sat_range",
+      "name": "Saturation range",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 1,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "sat_soft",
+      "name": "Saturation softness",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.1,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "luma_range",
+      "name": "Luma range",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 1,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "luma_soft",
+      "name": "Luma softness",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.1,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "invert",
+      "name": "Select the rest",
+      "type": "bool",
+      "default": false
+    },
+    {
+      "id": "view",
+      "name": "View",
+      "type": "choice",
+      "options": [
+        { "id": "result", "name": "Result" },
+        { "id": "matte", "name": "Matte" }
+      ],
+      "default": "result"
+    },
+    {
+      "id": "hue_shift",
+      "name": "Hue",
+      "type": "number",
+      "min": -180,
+      "max": 180,
+      "default": 0,
+      "step": 1,
+      "unit": "°"
+    },
+    {
+      "id": "saturation",
+      "name": "Saturation",
+      "type": "number",
+      "min": 0,
+      "max": 2,
+      "default": 1,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "lift",
+      "name": "Lift",
+      "type": "number",
+      "min": -1,
+      "max": 1,
+      "default": 0,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "gamma",
+      "name": "Gamma",
+      "type": "number",
+      "min": -1,
+      "max": 1,
+      "default": 0,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "gain",
+      "name": "Gain",
+      "type": "number",
+      "min": -1,
+      "max": 1,
+      "default": 0,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "temperature",
+      "name": "Temperature",
+      "type": "number",
+      "min": -1,
+      "max": 1,
+      "default": 0,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    }
+  ]
+}

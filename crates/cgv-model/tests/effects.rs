@@ -32,6 +32,7 @@ fn effect(kind: &str) -> EffectSpec {
         version: 1,
         enabled: true,
         params: Params::new(),
+        masks: Vec::new(),
     }
 }
 

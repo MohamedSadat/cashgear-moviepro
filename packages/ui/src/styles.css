@@ -1009,6 +1009,18 @@ body,
   border-top: 1px solid var(--cgv-border);
 }
 
+.cgv-effect-window {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.cgv-effect-window button[aria-pressed='true'] {
+  border-color: var(--cgv-accent);
+}
+
 .cgv-exchange-left-out {
   max-height: 180px;
   margin: 4px 0 0;

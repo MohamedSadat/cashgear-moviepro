@@ -22,6 +22,9 @@ pub struct EffectPlan {
     pub pack: String,
     pub kind: String,
     pub params: Params,
+    /// Shapes it stays inside; none means the whole picture.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub masks: Vec<Mask>,
 }
 
 /// One picture to draw.
@@ -160,6 +163,7 @@ fn effect_plans(clip: &Clip, offset: Flicks) -> Vec<EffectPlan> {
             pack: effect.pack.clone(),
             kind: effect.kind.clone(),
             params: clip.effect_params_at(index, offset),
+            masks: effect.masks.clone(),
         })
         .collect()
 }
@@ -355,6 +359,7 @@ impl Planner<'_> {
                         pack: t.pack.clone(),
                         kind: t.kind.clone(),
                         params: t.params.clone(),
+                        masks: Vec::new(),
                     },
                     progress: (middle / t.duration.0 as f64).clamp(0.0, 1.0),
                 });
@@ -996,6 +1001,7 @@ mod tests {
                     version: 1,
                     enabled: true,
                     params,
+                    masks: Vec::new(),
                 },
                 index: None,
                 audio: false,

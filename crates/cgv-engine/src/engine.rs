@@ -47,6 +47,7 @@ fn effect_run<'a>(
     Some(EffectRun {
         entry,
         params: &effect.params,
+        masks: &effect.masks,
         time,
         seed,
         lut,

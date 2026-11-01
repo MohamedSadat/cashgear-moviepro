@@ -277,6 +277,30 @@ impl Edit {
                 index,
                 audio,
             } => self.add_effect(*clip, effect, *index, *audio)?,
+            Command::SetEffectMasks {
+                clip,
+                effect,
+                masks,
+            } => {
+                let (index, mut changed) = self.editable(*clip)?;
+                if !changed.effects.iter().any(|e| e.id == *effect) {
+                    return Err(format!("Clip {clip} has no picture effect {effect}"));
+                }
+                let (list, position) = effect_slot(&mut changed, *effect)?;
+                let mut masks = masks.clone();
+                let mut next = masks.iter().map(|mask| mask.id.0).max().unwrap_or(0);
+                let mut seen = BTreeSet::new();
+                for mask in &mut masks {
+                    if mask.id.0 == 0 || !seen.insert(mask.id) {
+                        next += 1;
+                        mask.id = MaskId(next);
+                        seen.insert(mask.id);
+                    }
+                }
+                list[position].masks = masks;
+                list[position].check()?;
+                *self.clip_mut(index, *clip) = changed;
+            }
             Command::RemoveEffect { clip, effect } => {
                 let (index, mut changed) = self.editable(*clip)?;
                 let (list, position) = effect_slot(&mut changed, *effect)?;
@@ -560,6 +584,7 @@ impl Edit {
                         Command::SetClipProperties { .. }
                             | Command::SetEffectParams { .. }
                             | Command::SetEffectEnabled { .. }
+                            | Command::SetEffectMasks { .. }
                             | Command::SetKeyframe { .. }
                             | Command::SetKeyframes { .. }
                             | Command::RemoveKeyframes { .. }

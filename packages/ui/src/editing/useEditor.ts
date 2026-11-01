@@ -103,6 +103,9 @@ export interface EditorState {
    * timeline keeps its own playhead.
    */
   openSequence(id: number | null): Promise<void>;
+  /** The effect whose window the monitor's mask handles edit; null for the clip's masks. */
+  effectWindow: number | null;
+  setEffectWindow(effect: number | null): void;
   /** The monitor shows the angles of the multicam clip under the playhead. */
   angleView: boolean;
   setAngleView(on: boolean): void;
@@ -157,6 +160,7 @@ export function useEditor(
   const snapshot = project.snapshot;
   const current = snapshot?.project ?? null;
   const [path, setPath] = useState<number[]>([]);
+  const [effectWindow, setEffectWindow] = useState<number | null>(null);
   const [angleView, setAngleViewState] = useState(false);
   // A project that opens starts on the program.
   const projectId = current?.id;
@@ -638,6 +642,8 @@ export function useEditor(
     timeline,
     path,
     openSequence,
+    effectWindow,
+    setEffectWindow,
     angleView,
     setAngleView,
   };

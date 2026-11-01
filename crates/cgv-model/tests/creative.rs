@@ -627,6 +627,7 @@ fn a_slot_takes_media_and_keeps_its_place_look_and_transitions() {
             version: 1,
             enabled: true,
             params: Params::new(),
+            masks: Vec::new(),
         },
         index: None,
         audio: false,

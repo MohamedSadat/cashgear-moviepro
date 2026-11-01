@@ -307,6 +307,7 @@ fn random_spec(project: &Project, rng: &mut Rng) -> ClipSpec {
             version: 1,
             enabled: true,
             params: [("amount".to_string(), ParamValue::Number(0.4))].into(),
+            masks: Vec::new(),
         };
         let keys = vec![Keyframe {
             time: Flicks::ZERO,
@@ -551,6 +552,7 @@ fn effect_spec(rng: &mut Rng) -> EffectSpec {
             ParamValue::Number(rng.below(10) as f64 / 10.0),
         )]
         .into(),
+        masks: Vec::new(),
     }
 }
 

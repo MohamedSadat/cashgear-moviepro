@@ -305,10 +305,8 @@ fn mask_coverage(p: vec2<f32>, m: MaskInfo) -> f32 {
     return cover * m.kind.w;
 }
 
-@fragment
-fn fs_mask(in: FullOut) -> @location(0) vec4<f32> {
-    let color = textureSampleLevel(mask_input, mask_sampler, in.uv, 0.0);
-    let p = masks.area.xy + in.uv * masks.area.zw;
+/// How much of the picture the list of masks shows at `p`.
+fn masks_shown(p: vec2<f32>) -> f32 {
     let count = u32(masks.info.x + 0.5);
     // A first mask that subtracts or intersects starts from the whole picture,
     // and so does a matte alone.
@@ -325,6 +323,24 @@ fn fs_mask(in: FullOut) -> @location(0) vec4<f32> {
             shown = shown * c;
         }
     }
+    return shown;
+}
+
+/// An effect's result inside its masks (`mask_input`), and the picture before it
+/// (`mask_matte`) beyond them.
+@fragment
+fn fs_effect_mask(in: FullOut) -> @location(0) vec4<f32> {
+    let after = textureSampleLevel(mask_input, mask_sampler, in.uv, 0.0);
+    let before = textureSampleLevel(mask_matte, mask_sampler, in.uv, 0.0);
+    let p = masks.area.xy + in.uv * masks.area.zw;
+    return mix(before, after, masks_shown(p));
+}
+
+@fragment
+fn fs_mask(in: FullOut) -> @location(0) vec4<f32> {
+    let color = textureSampleLevel(mask_input, mask_sampler, in.uv, 0.0);
+    let p = masks.area.xy + in.uv * masks.area.zw;
+    var shown = masks_shown(p);
     if (masks.info.z > 0.0) {
         shown = shown * textureSampleLevel(mask_matte, mask_sampler, p / masks.info.zw, 0.0).r;
     }

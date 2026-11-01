@@ -393,6 +393,7 @@ fn multicam_clips_go_as_the_angles_they_show_and_exports_say_what_stays_behind()
                 version: 1,
                 enabled: true,
                 params: Params::new(),
+                masks: Vec::new(),
             },
             index: None,
             audio: false,

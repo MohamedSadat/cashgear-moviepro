@@ -26,6 +26,8 @@ const update = process.env.UPDATE_GOLDEN === '1';
 
 interface EffectFixture {
   name: string;
+  /** Another look at an effect: the golden's own name. */
+  golden?: string;
   params: Record<string, unknown>;
 }
 interface TransitionFixture extends EffectFixture {
@@ -65,7 +67,8 @@ function fixtures(): { name: string; build: Build; kind: 'effect' | 'transition'
   const list: { name: string; build: Build; kind: 'effect' | 'transition' | 'other' }[] = [];
   for (const fixture of effects)
     list.push({
-      name: fixture.name,
+      // Another look at one effect has a golden of its own.
+      name: fixture.golden ?? fixture.name,
       kind: 'effect',
       build: async (page, ids) => {
         const [main] = await clear(page);

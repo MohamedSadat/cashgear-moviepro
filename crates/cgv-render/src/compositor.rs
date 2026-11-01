@@ -107,6 +107,8 @@ pub struct LutUse<'a> {
 pub struct EffectRun<'a> {
     pub entry: &'a cgv_effects::Entry,
     pub params: &'a Params,
+    /// Shapes it stays inside; none means the whole picture.
+    pub masks: &'a [Mask],
     /// Seconds since the clip's start.
     pub time: f64,
     pub seed: f64,
@@ -192,6 +194,14 @@ impl Op<'_> {
             Op::Over(_) => false,
         }
     }
+}
+
+/// Where a texture lies in its upright picture, for shapes measured in the
+/// picture: the picture's size, and the part covered (x, y, width, height).
+#[derive(Clone, Copy, Debug)]
+struct PictureArea {
+    picture: (f64, f64),
+    area: [f64; 4],
 }
 
 /// The frame being composed: the project's size and the output's.
@@ -538,6 +548,7 @@ pub struct Compositor {
     layer_pipeline: RenderPipeline,
     blend_pipeline: RenderPipeline,
     mask_pipeline: RenderPipeline,
+    effect_mask_pipeline: RenderPipeline,
     /// Copy and constant mix into layer textures: frame blending.
     frame_copy_pipeline: RenderPipeline,
     frame_mix_pipeline: RenderPipeline,
@@ -781,6 +792,15 @@ impl Compositor {
             None,
             PrimitiveTopology::TriangleList,
         );
+        let effect_mask_pipeline = Self::pipeline(
+            device,
+            &shader,
+            &[&mask_layout],
+            ("vs_full", "fs_effect_mask"),
+            comp_format,
+            None,
+            PrimitiveTopology::TriangleList,
+        );
         let frame_copy = |format, blend| {
             Self::pipeline(
                 device,
@@ -907,6 +927,7 @@ impl Compositor {
             layer_pipeline,
             blend_pipeline,
             mask_pipeline,
+            effect_mask_pipeline,
             mask_layout,
             frame_copy_pipeline: frame_copy(LAYER_FORMAT, None),
             frame_mix_pipeline: frame_copy(
@@ -2167,16 +2188,20 @@ impl Compositor {
             pass.draw(0..3, 0..1);
         }
         let aspect = size.0 as f64 / size.1 as f64;
-        let mut result = self.run_effects(device, frame, input, aspect, &step.effects)?;
+        let (width, height) = draw.picture.upright();
+        let [u0, v0, u1, v1] = geometry.visible;
+        let area = [
+            u0 * width,
+            v0 * height,
+            (u1 - u0) * width,
+            (v1 - v0) * height,
+        ];
+        let place = PictureArea {
+            picture: (width, height),
+            area,
+        };
+        let mut result = self.run_effects(device, frame, input, aspect, &step.effects, place)?;
         if !step.masks.is_empty() || matte.is_some() {
-            let (width, height) = draw.picture.upright();
-            let [u0, v0, u1, v1] = geometry.visible;
-            let area = [
-                u0 * width,
-                v0 * height,
-                (u1 - u0) * width,
-                (v1 - v0) * height,
-            ];
             result = self.run_masks(
                 device,
                 frame,
@@ -2348,15 +2373,19 @@ impl Compositor {
             pass.draw(0..3, 0..1);
         }
         let aspect = part.size.0 as f64 / part.size.1 as f64;
-        let mut result = self.run_effects(device, frame, input, aspect, &step.effects)?;
+        let (width, height) = scene.project;
+        let area = [
+            u0 * width,
+            v0 * height,
+            (u1 - u0) * width,
+            (v1 - v0) * height,
+        ];
+        let place = PictureArea {
+            picture: (width, height),
+            area,
+        };
+        let mut result = self.run_effects(device, frame, input, aspect, &step.effects, place)?;
         if !step.masks.is_empty() {
-            let (width, height) = scene.project;
-            let area = [
-                u0 * width,
-                v0 * height,
-                (u1 - u0) * width,
-                (v1 - v0) * height,
-            ];
             result = self.run_masks(
                 device,
                 frame,
@@ -2389,6 +2418,7 @@ impl Compositor {
         input: Pooled,
         aspect: f64,
         effects: &[EffectRun],
+        place: PictureArea,
     ) -> Result<Pooled, String> {
         let mut current = input;
         for run in effects {
@@ -2420,10 +2450,68 @@ impl Compositor {
             }
             if let Some(result) = latest {
                 let original = std::mem::replace(&mut current, result);
-                self.pool.release(original);
+                if run.masks.is_empty() {
+                    self.pool.release(original);
+                } else {
+                    current =
+                        self.mask_effect(device, frame, original, current, run.masks, place)?;
+                }
             }
         }
         Ok(current)
+    }
+
+    /// An effect's result inside `masks`, and the picture before it beyond them.
+    /// Both textures go back to the pool.
+    fn mask_effect(
+        &mut self,
+        device: &Device,
+        frame: &mut FrameBuild,
+        before: Pooled,
+        after: Pooled,
+        masks: &[Mask],
+        place: PictureArea,
+    ) -> Result<Pooled, String> {
+        let PictureArea { picture, area } = place;
+        let texel = (area[2] / after.key.width as f64).max(area[3] / after.key.height as f64);
+        let values = mask_uniforms(masks, picture, area, texel);
+        let offset = Self::slot(frame, self.align, &floats(&values))?;
+        let target = self.pool.acquire(device, after.key);
+        let binding = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Effect masks"),
+            layout: &self.mask_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 50,
+                    resource: BindingResource::Buffer(BufferBinding {
+                        buffer: &self.uniforms,
+                        offset: 0,
+                        size: BufferSize::new(MASK_UNIFORM_SIZE),
+                    }),
+                },
+                BindGroupEntry {
+                    binding: 51,
+                    resource: BindingResource::TextureView(&after.view),
+                },
+                BindGroupEntry {
+                    binding: 52,
+                    resource: BindingResource::Sampler(&self.sampler),
+                },
+                BindGroupEntry {
+                    binding: 53,
+                    resource: BindingResource::TextureView(&before.view),
+                },
+            ],
+        });
+        {
+            let mut pass = begin_pass(&mut frame.encoder, "Effect masks", &target.view, true);
+            pass.set_pipeline(&self.effect_mask_pipeline);
+            pass.set_bind_group(0, &binding, &[offset as u32]);
+            pass.draw(0..3, 0..1);
+        }
+        self.pool.release(before);
+        self.pool.release(after);
+        Ok(target)
     }
 
     /// One pass of an effect or transition into `target`.
@@ -2667,7 +2755,12 @@ impl Compositor {
             pass.draw(0..3, 0..1);
         }
         let aspect = output.0 as f64 / output.1 as f64;
-        let adjusted = self.run_effects(device, frame, copy, aspect, effects)?;
+        let (width, height) = (self.project.0 as f64, self.project.1 as f64);
+        let place = PictureArea {
+            picture: (width, height),
+            area: [0.0, 0.0, width, height],
+        };
+        let adjusted = self.run_effects(device, frame, copy, aspect, effects, place)?;
         let binding = self.copy_binding(device, &adjusted.view);
         {
             let mut pass = begin_pass(&mut frame.encoder, "Adjustment", target, false);
