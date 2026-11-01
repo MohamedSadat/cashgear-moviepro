@@ -340,6 +340,11 @@ impl Engine {
         self.renderer.start_nv12_readback((width, height))
     }
 
+    /// Scopes: the latest composition at most `max_width` pixels across.
+    pub fn start_scaled_readback(&mut self, max_width: u32) -> Result<Readback, String> {
+        self.renderer.start_scaled_readback(max_width)
+    }
+
     /// Export: the latest composition as a frame of `width` × `height` laid out as `layout`.
     pub fn start_frame_readback(
         &mut self,

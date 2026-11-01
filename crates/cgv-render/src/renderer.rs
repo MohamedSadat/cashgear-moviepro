@@ -516,6 +516,12 @@ impl Renderer {
             .start_nv12_readback(&self.device, &self.queue, frame)
     }
 
+    /// Reads the latest composition back as sRGB RGBA bytes at most `max_width` across.
+    pub fn start_scaled_readback(&mut self, max_width: u32) -> Result<Readback, String> {
+        self.compositor
+            .start_scaled_readback(&self.device, &self.queue, max_width)
+    }
+
     /// Reads the latest composition back as an export frame of `frame` pixels.
     pub fn start_frame_readback(
         &mut self,

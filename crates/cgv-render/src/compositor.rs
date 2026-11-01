@@ -2898,11 +2898,41 @@ impl Compositor {
 
     /// Reads the last composition back as sRGB RGBA bytes at its own size.
     pub fn start_readback(&mut self, device: &Device, queue: &Queue) -> Result<Readback, String> {
+        let size = self
+            .comp
+            .as_ref()
+            .map(|comp| (comp.width, comp.height))
+            .ok_or("Nothing has been composed yet")?;
+        self.readback_at(device, queue, size)
+    }
+
+    /// Reads the last composition back as sRGB RGBA bytes, scaled down to at
+    /// most `max_width` pixels across: what the scopes count.
+    pub fn start_scaled_readback(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        max_width: u32,
+    ) -> Result<Readback, String> {
         let (width, height) = self
             .comp
             .as_ref()
             .map(|comp| (comp.width, comp.height))
             .ok_or("Nothing has been composed yet")?;
+        let scale = (f64::from(max_width.max(16)) / f64::from(width)).min(1.0);
+        let size = (
+            ((f64::from(width) * scale).round() as u32).max(1),
+            ((f64::from(height) * scale).round() as u32).max(1),
+        );
+        self.readback_at(device, queue, size)
+    }
+
+    fn readback_at(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        (width, height): (u32, u32),
+    ) -> Result<Readback, String> {
         let texture = device.create_texture(&TextureDescriptor {
             label: Some("Readback"),
             size: Extent3d {

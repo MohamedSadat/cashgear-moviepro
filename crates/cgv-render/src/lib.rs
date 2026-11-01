@@ -10,6 +10,7 @@ pub mod masks;
 pub mod pattern;
 #[cfg(target_arch = "wasm32")]
 mod renderer;
+pub mod scopes;
 #[cfg(target_arch = "wasm32")]
 pub use compositor::{
     EffectRun, FrameLayout, FrameSource, LayerDraw, LayerStep, LutUse, PlaneFormat, Planes,

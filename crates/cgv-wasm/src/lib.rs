@@ -246,6 +246,51 @@ mod bridge {
                 Ok(result.into())
             }))
         }
+        /// Scopes of the latest composition, counted at most `max_width` pixels
+        /// across: resolves with `{ columns, luma, red, green, blue, vector,
+        /// histogram }` (`cgv_render::scopes`), counts in `Uint32Array`s, bottom row
+        /// first. The histogram holds R', G', B' and luma, 256 bins each.
+        pub fn read_scopes(
+            &mut self,
+            max_width: u32,
+            columns: u32,
+        ) -> Result<js_sys::Promise, JsValue> {
+            let readback = self
+                .inner
+                .start_scaled_readback(max_width)
+                .map_err(js_error)?;
+            Ok(wasm_bindgen_futures::future_to_promise(async move {
+                let (width, height) = readback.size();
+                let pixels = readback.wait().await.map_err(js_error)?;
+                let scopes = cgv_render::scopes::measure(
+                    &pixels,
+                    width as usize,
+                    height as usize,
+                    columns as usize,
+                );
+                let result = js_sys::Object::new();
+                let set =
+                    |key: &str, value: &JsValue| js_sys::Reflect::set(&result, &key.into(), value);
+                set("columns", &(scopes.columns as u32).into())?;
+                set(
+                    "luma",
+                    &js_sys::Uint32Array::from(scopes.luma.as_slice()).into(),
+                )?;
+                for (key, counts) in ["red", "green", "blue"].iter().zip(&scopes.parade) {
+                    set(key, &js_sys::Uint32Array::from(counts.as_slice()).into())?;
+                }
+                set(
+                    "vector",
+                    &js_sys::Uint32Array::from(scopes.vector.as_slice()).into(),
+                )?;
+                let histogram: Vec<u32> = scopes.histogram.concat();
+                set(
+                    "histogram",
+                    &js_sys::Uint32Array::from(histogram.as_slice()).into(),
+                )?;
+                Ok(result.into())
+            }))
+        }
         /// Export: resolves with `{ width, height, stride, data }`, the latest
         /// composition centred over black in a `width` × `height` frame as BT.709
         /// limited-range NV12: luma rows, then interleaved Cb and Cr rows, `stride`
