@@ -449,11 +449,12 @@ fn deep_chroma_at(plane: u32, at: vec2<i32>) -> f32 {
     return f32(textureLoad(deep2, at, 0).r);
 }
 
-// Chroma plane `plane` at luma pixel `p`, centre-sited and bilinear, as the
-// 8-bit planes' sampler reads them.
+// Chroma plane `plane` at luma pixel `p`, bilinear: cosited with the even luma
+// pixels across, as BT.709 and ProRes have it, and centred between rows down, as
+// 4:2:0 has it. An unscaled 4:2:2 picture then goes back to the same samples.
 fn deep_chroma(plane: u32, p: vec2<f32>) -> f32 {
     let last = vec2<i32>(textureDimensions(deep1)) - vec2<i32>(1);
-    let c = (p + vec2<f32>(0.5)) / convert.planes.xy - vec2<f32>(0.5);
+    let c = vec2<f32>(p.x / convert.planes.x, (p.y + 0.5) / convert.planes.y - 0.5);
     let base = floor(c);
     let f = c - base;
     let i = vec2<i32>(base);
@@ -583,15 +584,15 @@ fn export_sample(index: u32) -> u32 {
     }
     n = n - w * h;
     if (n < 2u * cw * ch) {
+        // Cosited across (the even pixel's colour) and the mean of the rows down,
+        // as `fs_deep` reads chroma back.
         let i = n % (cw * ch);
         let corner = vec2<f32>(f32((i % cw) * step.x), f32((i / cw) * step.y)) + vec2<f32>(0.5);
         var rgb = vec4<f32>(0.0);
         for (var dy = 0u; dy < step.y; dy = dy + 1u) {
-            for (var dx = 0u; dx < step.x; dx = dx + 1u) {
-                rgb = rgb + export_colour(corner + vec2<f32>(f32(dx), f32(dy)));
-            }
+            rgb = rgb + export_colour(corner + vec2<f32>(0.0, f32(dy)));
         }
-        rgb = rgb / f32(step.x * step.y);
+        rgb = rgb / f32(step.y);
         let row = select(export_info.cr, export_info.cb, n < cw * ch);
         return export_code(dot(row, rgb));
     }
