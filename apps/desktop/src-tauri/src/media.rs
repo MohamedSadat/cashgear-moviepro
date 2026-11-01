@@ -38,10 +38,10 @@ impl MediaState {
             tools.check_license()?;
             Ok(tools)
         });
-        let cache_root = app
-            .path()
-            .app_cache_dir()
-            .unwrap_or_else(|_| std::env::temp_dir().join("cashgear-video"));
+        let cache_root = std::env::var_os("CGV_CACHE_DIR")
+            .map(PathBuf::from)
+            .or_else(|| app.path().app_cache_dir().ok())
+            .unwrap_or_else(|| std::env::temp_dir().join("cashgear-video"));
         MediaState {
             registry: Registry::default(),
             probes: Mutex::new(HashMap::new()),
@@ -55,7 +55,8 @@ impl MediaState {
         self.tools.as_ref().map_err(Clone::clone)
     }
 
-    /// The app cache folder (thumbnails, waveforms, proxies, export intermediates).
+    /// The app cache folder (thumbnails, waveforms, proxies, export intermediates),
+    /// or `CGV_CACHE_DIR`, for tests.
     pub(crate) fn cache_root(&self) -> &Path {
         &self.cache_root
     }

@@ -48,7 +48,7 @@ const port = listener.address().port;
 await new Promise((resolve) => listener.close(resolve));
 const profilePrefix = join(tmpdir(), 'cgv-webview2-smoke-');
 const profile = await mkdtemp(profilePrefix);
-// Autosaves and the saved project stay out of the real app data folder.
+// Autosaves, the saved project and the cache stay out of the real app's folders.
 const dataPrefix = join(tmpdir(), 'cgv-data-smoke-');
 const dataDir = await mkdtemp(dataPrefix);
 const projectPath = join(dataDir, 'Smoke test.cgvproj');
@@ -105,6 +105,8 @@ async function launch() {
       ...process.env,
       CGV_FFMPEG_DIR: process.env.CGV_FFMPEG_DIR ?? join(root, '.tools/ffmpeg/bin'),
       CGV_DATA_DIR: dataDir,
+      // Its own folder: the app empties the cache's `exports` when it starts.
+      CGV_CACHE_DIR: join(dataDir, 'cache'),
       WEBVIEW2_USER_DATA_FOLDER: profile,
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: browserArguments,
     },

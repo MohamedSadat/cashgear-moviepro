@@ -8,6 +8,7 @@ Dated entries, newest first. Every answer to a phase question is recorded here, 
 - **What a silent uninstall keeps:** Tauri's uninstaller removes `HKCU\Software\<publisher>\<product>` only when the user ticks "delete app data", so the test deletes its own. That key's default value is what sent the user's install into `%TEMP%`.
 - **Temporary files:** the test's installers and app run with `TEMP` inside its folder, because the updater never removes its download and NSIS leaves `~nsu.tmp` folders.
 - **The PWA test:** Chrome and Edge both remove the app on `PWA.uninstall`. The leftovers came from runs that failed before that line, so it now runs in a hook, on a browser started again if the old one crashed. It checks that Windows no longer lists the app.
+- **The desktop smoke:** Tauri finds the cache folder from the app's identifier, so the smoke's proxies, thumbnails, waveforms and export intermediates went into the real app's `%LOCALAPPDATA%\com.cashgear.video` (or the Claude desktop app's copy of it) and stayed there. `CGV_CACHE_DIR`, read as `CGV_DATA_DIR` is and used only by tests, puts them in the smoke's temporary folder.
 
 ## 2026-11-01: Phase 13 defaults
 
