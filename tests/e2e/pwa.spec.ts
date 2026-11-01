@@ -1,7 +1,8 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { chromium, expect, test, type Page } from '@playwright/test';
+import { basename, join } from 'node:path';
+import { chromium, expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { windowsPowerShell } from '../../scripts/lib.mjs';
 
 // Phase 11: the web app installs as a PWA, starts offline once it has loaded online
 // and passes the capability check there, and shows its third-party notices. A
@@ -58,101 +59,144 @@ async function ready(page: Page) {
   expect(await page.evaluate(() => crossOriginIsolated)).toBe(true);
 }
 
+/**
+ * The apps Windows lists for an install from this profile, which outlive the profile
+ * unless they are uninstalled: Chrome adds an entry under the Uninstall key, and Edge
+ * an MSIX package.
+ */
+function windowsApps(profile: string, channel: string | undefined, remove = false): string[] {
+  if (process.platform !== 'win32') return [];
+  const name = basename(profile);
+  const entries =
+    `Get-ChildItem 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall' | ` +
+    `Where-Object { $_.GetValue('UninstallString') -like '*${name}*' } | ` +
+    (remove ? 'Remove-Item -Recurse;' : 'ForEach-Object { $_.PSChildName };');
+  const packages =
+    `Get-AppxPackage -Name '127.0.0.1-*' | ` +
+    `Where-Object { (Get-AppxPackageManifest $_).Package.Applications.Application.Parameters -like '*${name}*' } | ` +
+    (remove ? 'Remove-AppxPackage;' : 'ForEach-Object { $_.PackageFullName };');
+  return windowsPowerShell(entries + (channel === 'msedge' ? packages : ''))
+    .split(/\r?\n/)
+    .filter(Boolean);
+}
+
+// In a hook, which runs after a timeout too, when the test's own code has stopped.
+let cleanUp: (() => Promise<void>) | undefined;
+test.afterEach(async () => {
+  await cleanUp?.();
+  cleanUp = undefined;
+});
+
 test('the web app installs, and the installed app starts offline with every capability', async () => {
   const testInfo = test.info();
   test.setTimeout(180_000);
+  const { channel } = testInfo.project.use;
   const profile = await mkdtemp(join(tmpdir(), 'cgv-pwa-'));
-  const context = await chromium.launchPersistentContext(profile, {
-    channel: testInfo.project.use.channel,
-    args: testInfo.project.use.launchOptions?.args,
-    viewport: { width: 1280, height: 800 },
-    // The config blocks service workers for every other test.
-    serviceWorkers: 'allow',
-  });
-  try {
-    const page = context.pages()[0] ?? (await context.newPage());
-    await page.goto(base + '/?diagnostic=1');
-    await ready(page);
-    await page.waitForFunction(() => !!navigator.serviceWorker.controller, undefined, {
-      timeout: 60_000,
+  const launch = () =>
+    chromium.launchPersistentContext(profile, {
+      channel,
+      args: testInfo.project.use.launchOptions?.args,
+      viewport: { width: 1280, height: 800 },
+      // The config blocks service workers for every other test.
+      serviceWorkers: 'allow',
     });
-    const cdp = await context.newCDPSession(page);
-    const { installabilityErrors } = await cdp.send('Page.getInstallabilityErrors');
-    expect(installabilityErrors).toEqual([]);
-    const manifest = await cdp.send('Page.getAppManifest');
-    expect(manifest.errors).toEqual([]);
-    expect(JSON.parse(manifest.data!)).toMatchObject({
-      name: 'CashGear Video',
-      display: 'standalone',
-    });
-
-    // The app shell is cached once the worker has installed.
-    const cached = await page.evaluate(async () => {
-      const shell = (await caches.keys()).find((name) => name.startsWith('cgv-shell-'));
-      return shell
-        ? (await (await caches.open(shell)).keys()).map((r) => new URL(r.url).pathname)
-        : [];
-    });
-    expect(cached).toContain('/');
-    expect(cached.some((path) => /\/assets\/cgv_wasm_bg-.*\.wasm$/.test(path))).toBe(true);
-
-    // The pack's media are cached as they are used: a sticker and a music bed,
-    // whose files are read in ranges.
-    await projectOpen(page);
-    const clips = () =>
-      page.evaluate(async () => {
-        const { project } = await Reflect.get(window, '__cgv').client.api.projectSnapshot();
-        return project.tracks.flatMap((track: { clips: unknown[] }) => track.clips).length;
-      });
-    await page.getByTestId('library-tab-stickers').click();
-    await expect(page.getByTestId('sticker-item')).toHaveCount(30);
-    await page.locator('[data-testid="sticker-item"][data-key="heart"]').dblclick();
-    await expect.poll(clips).toBe(1);
-    await page.getByTestId('library-tab-music').click();
-    await page.locator('[data-testid="sound-item"][data-key="sunny-steps"]').dblclick();
-    await expect.poll(clips).toBe(2);
-    await mediaReady(page, 2);
-    const online = await frame(page, 6 * FRAME);
-    await page.keyboard.press('Control+s');
-    await expect(page.getByTestId('project-bar')).toHaveAttribute('data-busy', 'false');
-
-    // Install it as the browser's install button does, and start it, offline.
-    const browser = await context.browser()!.newBrowserCDPSession();
-    const manifestId = base + '/';
-    await browser.send('PWA.install', { manifestId, installUrlOrBundleUrl: base + '/' });
-    // The system knows the installed app (this fails for one that is not installed).
-    await browser.send('PWA.getOsAppState', { manifestId });
-    // As if the user ticked "Open in a window" in the install prompt.
-    await browser.send('PWA.changeAppUserSettings', { manifestId, displayMode: 'standalone' });
-    await context.setOffline(true);
-    let app: Page;
-    if (testInfo.project.use.channel === 'msedge') {
-      // Edge starts installed apps through a host of its own, out of the test's
-      // reach: the app's page, offline in the same profile, stands in for it.
-      app = await context.newPage();
-      await app.goto(base + '/?diagnostic=1');
-    } else {
-      const opened = context.waitForEvent('page');
-      await browser.send('PWA.launch', { manifestId, url: base + '/?diagnostic=1' });
-      app = await opened;
-      // It runs in an app window of its own.
-      await app.waitForLoadState();
-      expect(await app.evaluate(() => matchMedia('(display-mode: standalone)').matches)).toBe(true);
+  const manifestId = base + '/';
+  let running: BrowserContext | undefined;
+  let installing = false;
+  cleanUp = async () => {
+    try {
+      if (installing) {
+        // A browser that has crashed can't uninstall; one started on the profile can.
+        if (!running?.browser()?.isConnected()) running = await launch();
+        const session = await running.browser()!.newBrowserCDPSession();
+        await session.send('PWA.uninstall', { manifestId });
+        await expect.poll(() => windowsApps(profile, channel), { timeout: 30_000 }).toEqual([]);
+      }
+    } finally {
+      await running?.close();
+      // Edge started again after a crash keeps its package through PWA.uninstall.
+      if (installing) windowsApps(profile, channel, true);
+      await rm(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 });
     }
-    await ready(app);
-    // The project comes back with its sticker and music, read from the cache.
-    await projectOpen(app);
-    await mediaReady(app, 2);
-    const offline = await frame(app, 6 * FRAME);
-    let same = 0;
-    for (let i = 0; i < online.length; i += 4) if (Math.abs(offline[i] - online[i]) <= 4) same++;
-    expect(same / (online.length / 4)).toBeGreaterThan(0.99);
-    await context.setOffline(false);
-    await browser.send('PWA.uninstall', { manifestId });
-  } finally {
-    await context.close();
-    await rm(profile, { recursive: true, force: true, maxRetries: 5 }).catch(() => {});
+  };
+  const context = (running = await launch());
+  const browser = await context.browser()!.newBrowserCDPSession();
+  const page = context.pages()[0] ?? (await context.newPage());
+  await page.goto(base + '/?diagnostic=1');
+  await ready(page);
+  await page.waitForFunction(() => !!navigator.serviceWorker.controller, undefined, {
+    timeout: 60_000,
+  });
+  const cdp = await context.newCDPSession(page);
+  const { installabilityErrors } = await cdp.send('Page.getInstallabilityErrors');
+  expect(installabilityErrors).toEqual([]);
+  const manifest = await cdp.send('Page.getAppManifest');
+  expect(manifest.errors).toEqual([]);
+  expect(JSON.parse(manifest.data!)).toMatchObject({
+    name: 'CashGear Video',
+    display: 'standalone',
+  });
+
+  // The app shell is cached once the worker has installed.
+  const cached = await page.evaluate(async () => {
+    const shell = (await caches.keys()).find((name) => name.startsWith('cgv-shell-'));
+    return shell
+      ? (await (await caches.open(shell)).keys()).map((r) => new URL(r.url).pathname)
+      : [];
+  });
+  expect(cached).toContain('/');
+  expect(cached.some((path) => /\/assets\/cgv_wasm_bg-.*\.wasm$/.test(path))).toBe(true);
+
+  // The pack's media are cached as they are used: a sticker and a music bed,
+  // whose files are read in ranges.
+  await projectOpen(page);
+  const clips = () =>
+    page.evaluate(async () => {
+      const { project } = await Reflect.get(window, '__cgv').client.api.projectSnapshot();
+      return project.tracks.flatMap((track: { clips: unknown[] }) => track.clips).length;
+    });
+  await page.getByTestId('library-tab-stickers').click();
+  await expect(page.getByTestId('sticker-item')).toHaveCount(30);
+  await page.locator('[data-testid="sticker-item"][data-key="heart"]').dblclick();
+  await expect.poll(clips).toBe(1);
+  await page.getByTestId('library-tab-music').click();
+  await page.locator('[data-testid="sound-item"][data-key="sunny-steps"]').dblclick();
+  await expect.poll(clips).toBe(2);
+  await mediaReady(page, 2);
+  const online = await frame(page, 6 * FRAME);
+  await page.keyboard.press('Control+s');
+  await expect(page.getByTestId('project-bar')).toHaveAttribute('data-busy', 'false');
+
+  // Install it as the browser's install button does, and start it, offline.
+  installing = true;
+  await browser.send('PWA.install', { manifestId, installUrlOrBundleUrl: base + '/' });
+  // The system knows the installed app (this fails for one that is not installed).
+  await browser.send('PWA.getOsAppState', { manifestId });
+  // As if the user ticked "Open in a window" in the install prompt.
+  await browser.send('PWA.changeAppUserSettings', { manifestId, displayMode: 'standalone' });
+  await context.setOffline(true);
+  let app: Page;
+  if (testInfo.project.use.channel === 'msedge') {
+    // Edge starts installed apps through a host of its own, out of the test's
+    // reach: the app's page, offline in the same profile, stands in for it.
+    app = await context.newPage();
+    await app.goto(base + '/?diagnostic=1');
+  } else {
+    const opened = context.waitForEvent('page');
+    await browser.send('PWA.launch', { manifestId, url: base + '/?diagnostic=1' });
+    app = await opened;
+    // It runs in an app window of its own.
+    await app.waitForLoadState();
+    expect(await app.evaluate(() => matchMedia('(display-mode: standalone)').matches)).toBe(true);
   }
+  await ready(app);
+  // The project comes back with its sticker and music, read from the cache.
+  await projectOpen(app);
+  await mediaReady(app, 2);
+  const offline = await frame(app, 6 * FRAME);
+  let same = 0;
+  for (let i = 0; i < online.length; i += 4) if (Math.abs(offline[i] - online[i]) <= 4) same++;
+  expect(same / (online.length / 4)).toBeGreaterThan(0.99);
 });
 
 test('About lists the third-party software and its licences', async ({ page }) => {
