@@ -238,3 +238,82 @@ test('a grade keeps the 10-bit ramp at ten bits', async ({ page }, testInfo) => 
   // The grade did something: the middle of the ramp is brighter than it was.
   expect(row[960]).toBeGreaterThan(64 + 438 + 4);
 });
+
+test('a drag on a colour wheel or a curve is one undo step', async ({ page }) => {
+  await open(page, '');
+  await page
+    .getByTestId('media-file-input')
+    .setInputFiles([{ name: 'bars.png', mimeType: 'image/png', buffer: barsPng() }]);
+  await expect(page.locator('[data-testid="media-item"][data-name="bars.png"]')).toHaveAttribute(
+    'data-status',
+    'ready',
+    { timeout: 60000 },
+  );
+  const [main] = await clear(page, 1);
+  const [clip] = await run(page, {
+    type: 'append',
+    track: main,
+    clip: { media: await mediaId(page, 'bars.png'), duration: 30 * FRAME },
+  });
+  await run(page, { type: 'addEffect', clip, effect: { kind: 'color-wheels' } });
+  await run(page, { type: 'addEffect', clip, effect: { kind: 'curves' } });
+  await page.evaluate(
+    (id) =>
+      (Reflect.get(window, '__cgv') as { editor: { select(ids: number[]): void } }).editor.select([
+        id,
+      ]),
+    clip,
+  );
+  const state = () =>
+    page.evaluate(async () => {
+      const api = (Reflect.get(window, '__cgv') as Hooks).client.api;
+      const snapshot = (await api.projectSnapshot()) as {
+        undoLabel: string | null;
+        project: {
+          tracks: { clips: { effects: { kind: string; params: Record<string, number> }[] }[] }[];
+        };
+      };
+      const effects = snapshot.project.tracks.flatMap((track) => track.clips)[0].effects;
+      return { label: snapshot.undoLabel, effects };
+    });
+  const before = await state();
+
+  // The lift wheel: from the centre towards blue, in several moves.
+  const wheel = page.getByTestId('wheel-lift').locator('svg');
+  await wheel.scrollIntoViewIfNeeded();
+  const box = (await wheel.boundingBox())!;
+  const centre = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await page.mouse.move(centre.x, centre.y);
+  await page.mouse.down();
+  for (let step = 1; step <= 5; step++)
+    await page.mouse.move(centre.x - step * 6, centre.y + step * 4);
+  await page.mouse.up();
+  await expect.poll(async () => (await state()).label).toBe('Change lift');
+  const wheels = (await state()).effects.find((effect) => effect.kind === 'color-wheels')!;
+  expect(wheels.params.lift_amount).toBeGreaterThan(0.3);
+
+  // The luma curve's middle point, dragged up.
+  const curve = page.getByTestId('curves').locator('svg');
+  await curve.scrollIntoViewIfNeeded();
+  const area = (await curve.boundingBox())!;
+  await page.mouse.move(area.x + area.width / 2, area.y + area.height / 2);
+  await page.mouse.down();
+  for (let step = 1; step <= 5; step++)
+    await page.mouse.move(area.x + area.width / 2, area.y + area.height / 2 - step * 6);
+  await page.mouse.up();
+  await expect.poll(async () => (await state()).label).toBe('Change the luma curve');
+  const curves = (await state()).effects.find((effect) => effect.kind === 'curves')!;
+  expect(curves.params.luma_2).toBeGreaterThan(0.6);
+
+  // One undo takes back the whole curve drag, and one more the whole wheel drag.
+  const undo = () =>
+    page.evaluate(() =>
+      (Reflect.get(window, '__cgv') as { project: { undo(): Promise<void> } }).project.undo(),
+    );
+  await undo();
+  await expect.poll(async () => (await state()).label).toBe('Change lift');
+  await undo();
+  await expect
+    .poll(async () => JSON.stringify((await state()).effects))
+    .toBe(JSON.stringify(before.effects));
+});

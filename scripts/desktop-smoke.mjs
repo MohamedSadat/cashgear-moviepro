@@ -924,10 +924,12 @@ try {
   }
   results.push({ masters: masterChecks });
 
-  // Originals: a 4K ProRes 422 HQ source plays through its 720p proxy, but its
+  // Originals: a 4K ProRes 422 HQ source plays through its 1080p proxy, but its
   // master is made from the original, which FFmpeg decodes for the export. Against
-  // FFmpeg's own decode of the source it reaches 45 dB on Y'CbCr planes, where an
-  // upscaled 720p proxy cannot come near.
+  // FFmpeg's own decode of the source it reaches 45 dB on Y'CbCr planes, where the
+  // proxy upscaled scores 39 dB. The test pattern's colours are at 40% saturation,
+  // so they stay in gamut through R'G'B', as camera footage does: its fully
+  // saturated bars clip in any R'G'B' pipeline (FFmpeg's own round trip scores 34.8 dB).
   const sourceFile = join(exportDir, 'detail-4k-prores.mov');
   const made = spawnSync(
     ffmpeg,
@@ -942,7 +944,7 @@ try {
       '-frames:v',
       '15',
       '-vf',
-      'format=yuv422p10le,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv',
+      'hue=s=0.4,format=yuv422p10le,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv',
       '-c:v',
       'prores_ks',
       '-profile:v',
