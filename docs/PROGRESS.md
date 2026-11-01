@@ -2,6 +2,73 @@
 
 Newest phase first. Each phase lists the evidence for every exit criterion.
 
+## Phase 12: Professional media pipeline (complete)
+
+- **Completed:** 2026-11-01, tag `phase-12`.
+- **CI:** [run 41266375858](https://github.com/MohamedSadat/cashgear-moviepro/actions/runs/41266375858) on commit `43e2db6`, green (License gates 37 s; Windows build and test 75 min 24 s).
+  - Its e2e step passed 115 tests in 51.8 minutes on software GPUs, with 5 skipped. The desktop smoke passed, with the masters, the 4K master from its original, and the 4K proxies, which software GPUs only have to play.
+  - The run before it, [run 41261337922](https://github.com/MohamedSadat/cashgear-moviepro/actions/runs/41261337922) on `9a268a5`, failed in that last step: three 4K layers take WARP about 645 ms a frame, so playback reached frame 23 in 5 s.
+- **Reference machine:** as in Phase 0: Xeon E5-2680 v3, GTX 1650 (driver 457.51), Chrome 156.0.8078.79, Edge 156.0.4314.50 and WebView2 156.0.4314.50.
+
+### Shipped
+
+- **10 bits from decode to export:**
+  - 10- and 12-bit planes (`I420P10` to `I444P12`) keep every level: they upload as 16-bit integers and convert with matrices that take code values, into half-float layers (`fs_deep`).
+  - Exports decode deep media in software (`deepCodec`), because browsers hand hardware 10-bit frames over at 8 bits.
+  - `Engine.read_yuv10` reads compositions back as planar 10-bit Y'CbCr (`yuv420p10le` to `yuva444p10le`), packed two samples a texel so WebGL2 reads it too.
+- **Frame channels:** WebView2 shared buffers between the desktop's native side and the page (`frames.rs`, `platform/frames.ts`). They carry raw frames at about 1.2 GB/s, against 11 MB/s through Tauri's IPC and 45 MB/s through the cgv-media protocol.
+- **ProRes masters (desktop):** ProRes 422 HQ and ProRes 4444 with alpha, which FFmpeg (`prores_ks`) encodes from the engine's 10-bit frames, tagged BT.709, with 24-bit PCM sound mixed first. Two new formats in the export dialog.
+- **Originals:** an export reads media that plays through a proxy from its original, which FFmpeg decodes at its own size and bit depth, frame by frame, seeking exactly. Media the webview decodes is exported from its original by WebCodecs. Exports never read proxies.
+- **Proxies for big media (desktop):** media over 1080p plays through a proxy at half its height, a quarter, or all of it, or not at all: the Media panel's choice. Each size is cached apart.
+- **Scopes:** a Scopes tab beside the library with the waveform, the RGB parade, the vectorscope (the 75% targets and the skin-tone line) and the histogram. They are counted in WASM from the monitor's picture eight times a second.
+- **Grading:** Color Wheels (lift, gamma, gain and offset) and Curves (luma, red, green and blue, and hue against hue, hue against saturation and luma against saturation), as effects that keyframe and undo. The Inspector draws wheels and a curve editor over them; a drag is one undo step.
+- **Fixes:** a decode preference set after media was imported now reaches its readers. 10-bit chroma is cosited across, so an unscaled 4:2:2 picture returns to the same samples.
+- **Tests:**
+  - Rust: the code-value matrices, frame layouts, proxy heights, the scopes against 75% bars, and with the real FFmpeg, masters that keep the ramp's levels and originals that seek to the exact frame.
+  - Playwright: `deep-colour.spec.ts` (what each decoder gives and the levels each path keeps), `grading.spec.ts` (scopes on bars on both backends, the Scopes tab, a grade at 10 bits, undo steps), and goldens for the two new effects.
+  - The desktop smoke: masters of the 10-bit ramp, a 4K master from its original, and three 4K tracks through proxies.
+
+### Exit criteria
+
+| Criterion                                                                                                                                                            | Result                               | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A 4K ProRes 422 HQ source exports at 4K from its original, and a ProRes 422 HQ master of it reaches at least 45 dB PSNR on Y'CbCr planes against FFmpeg's own decode | Passed                               | The desktop smoke makes a 15-frame 4K ProRes 422 HQ source (FFmpeg's `testsrc2` at 40% saturation), which plays through its 1080p proxy. Its 3840×2160 master scores **71.6 dB** against FFmpeg's decode of the source. That same source through its 1080p proxy scores 39.1 dB. The master took 2.05 s (7.3 frames a second at 4K). The pattern's fully saturated colours score 34.8 dB through any R'G'B' pipeline, FFmpeg's own Y'CbCr → R'G'B' → Y'CbCr included (34.9 dB here), because they clip; footage stays in gamut (decisions).                                                     |
+| A limited-range 10-bit ramp (877 luma levels) keeps at least 95% of its levels through import, a grade and a 10-bit export; through 8 bits it keeps at most 220      | Passed                               | **Browser** (`grading.spec.ts`, Chrome and Edge): the ramp, decoded in software and graded with Color Wheels (gamma +0.05, a warm push in the highlights), keeps at least 834 levels at 10 bits. Without a grade all 877 remain on WebGPU and WebGL2, at 1080p and 4K (`deep-colour.spec.ts`). **Desktop masters** (smoke): ProRes 422 HQ keeps **877 of 877**, and ProRes 4444 940 levels (decoded at 12 bits). **8 bits:** the monitor's 8-bit readback holds 255 levels of R'G'B' (an 8-bit limited-range Y' holds at most 220). Hardware decoders give 8-bit frames: 475 levels at 10 bits. |
+| On SMPTE colour bars every bar lands in its vectorscope target, and waveform levels are within 1%                                                                    | Passed                               | `grading.spec.ts` on WebGPU and WebGL2 (Chrome and Edge): 75% bars at 1280×720. Each bar holds more than 12% of the pixels within two cells of its BT.709 target, and each bar's luma on the waveform is within 2.56 levels (1%) of its value. `cgv-render/src/scopes.rs` checks the same natively, along with the 102.9° angle of 75% red. The Scopes tab draws the vectorscope.                                                                                                                                                                                                               |
+| A 4K30 project with three stacked tracks plays without dropped frames through proxies on the reference machine                                                       | Passed (desktop)                     | The desktop smoke: a 5 s 4K30 H.264 clip gets its half-size (1080p) proxy. Three stacked tracks of it at 60% opacity play for 5 s: **145 frames shown, 0 dropped**, at full quality. The web has no proxies yet (known gaps).                                                                                                                                                                                                                                                                                                                                                                   |
+| Every master export opens in FFmpeg with the expected codec, profile, bit depth and colour tags; the user opens one of each in DaVinci Resolve                       | Passed; Resolve pending, by the user | ffprobe of the smoke's masters: `prores`, profile `HQ`, `yuv422p10le`, and profile `4444`, `yuva444p12le`, both `bt709` and `tv`, 15 frames each, and 24-bit PCM sound in the recovered timeline's master. The Rust FFmpeg test checks the same with sound. Opening one of each in Resolve is left to the user.                                                                                                                                                                                                                                                                                 |
+| Wheels and curves have golden renders on both backends, and each grading change is one undo step                                                                     | Passed                               | `effects.spec.ts`: `color-wheels.png` and `curves.png` match on WebGPU and WebGL2 in Chrome and Edge, and on software GPUs. `grading.spec.ts`: a drag across the lift wheel and one up the luma curve leave "Change lift" and "Change the luma curve" as single undo steps, and two undos bring back the settings as they were.                                                                                                                                                                                                                                                                 |
+
+### Measurements
+
+- **10-bit decoding** (Chrome 156 and Edge 156, the same): software decoders give `I420P10` for VP9 profile 2 and AV1 (877 of 877 levels). Hardware decoders give opaque frames, which the browser converts at 8 bits even into `rgba16float` (255 levels). A `<video>` element turns AV1 10-bit into 8-bit NV12. This GPU has no AV1 decoder.
+- **Native and page:** the cgv-media protocol carries 45 MB/s, Tauri's IPC with raw bodies 11 MB/s, and WebView2 shared buffers 1,235 MB/s (native to page) and 1,480 MB/s (page to native).
+- **Masters:** 15 frames of a 1080p 10-bit master in 0.55 s (ProRes 422 HQ) and 0.60 s (4444).
+
+### Local verification
+
+| Check                                             | Result                                                                                                                                                                                                                                        |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| fmt, clippy `-D warnings` (native and wasm32)     | Clean                                                                                                                                                                                                                                         |
+| `cargo test --workspace` (`CGV_REQUIRE_FFMPEG=1`) | 331 passed (Phase 11: 319). New: code-value matrices, proxy heights, the scopes, master arguments and frame sizes, original layouts, and with the real FFmpeg masters that keep the ramp's levels and originals that seek to the exact frame. |
+| Vitest                                            | 188 passed (Phase 11: 184). New: deep codec strings, the master form rules and the scopes' graticule.                                                                                                                                         |
+| Playwright, hardware: Chrome 156, Edge 156        | The full run passed 210 of 214 in 2.3 hours, with 4 skipped and none failed, including the stress test and the captions' word error rates in both browsers. New: `deep-colour.spec.ts`, `grading.spec.ts` and the two effect goldens.         |
+| Desktop smoke, WebView2 156                       | Passed on hardware: every step from Phase 11, the masters' levels, the 4K master from its original (71.6 dB), and three 4K tracks through proxies (0 dropped).                                                                                |
+| Licenses                                          | cargo-deny ok, npm 173 packages; the GPL self-test rejects both fixtures. `webview2-com` and `windows-core` were already in the tree through wry.                                                                                             |
+| Release WASM                                      | 5,488,967 bytes; gzip 2,043,268, within the 2,250,000 budget (Phase 11: 2,034,112).                                                                                                                                                           |
+
+### Known gaps
+
+- **Proxies on the web:** not built. The web plays 4K from the original, in hardware.
+- **The proxy switch** is the Media panel's choice per user, made when media is imported, not a live switch on the monitor.
+- **Interpreting a file's colour** (wrong or missing tags) is not built. Frames use their own tags, camera log takes the vendor's LUT through the LUT effect, and exports are tagged BT.709.
+- **HDR output** and an HDR monitor view come in a later phase (the answer), as do DNxHR, 10-bit HEVC and 10-bit AV1 masters.
+- **Alpha:** ProRes 4444 masters have alpha only where nothing covers the frame; originals with alpha lose it.
+- **The monitor at 4K** shows 10-bit media at 8 bits (hardware decoders), and the scopes count what it shows. Exports keep 10 bits.
+- **HEVC Main10 on the web** stays 8-bit: browsers have no software HEVC decoder.
+- **ProRes in a paid product** needs legal advice before a release ships it.
+- **DaVinci Resolve:** opening the masters there is left to the user.
+
 ## Phase 11: Performance, packaging, licensing, release (complete)
 
 - **Completed:** 2026-10-30, tag `v1.0.0`.
