@@ -2,6 +2,13 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-11-01: The install tests leave nothing behind
+
+- **The installer test has its own identity:** its builds install as `CGV Installer Test` (product and publisher), `com.cashgear.video.installer-test`. It does not refuse to run beside a real install, because with no key, shortcut or data folder in common it has no reason to. It compares the real install's registry keys before and after, and fails if they changed.
+- **What a silent uninstall keeps:** Tauri's uninstaller removes `HKCU\Software\<publisher>\<product>` only when the user ticks "delete app data", so the test deletes its own. That key's default value is what sent the user's install into `%TEMP%`.
+- **Temporary files:** the test's installers and app run with `TEMP` inside its folder, because the updater never removes its download and NSIS leaves `~nsu.tmp` folders.
+- **The PWA test:** Chrome and Edge both remove the app on `PWA.uninstall`. The leftovers came from runs that failed before that line, so it now runs in a hook, on a browser started again if the old one crashed. It checks that Windows no longer lists the app.
+
 ## 2026-11-01: Phase 13 defaults
 
 - **Sequences in the model:** a project keeps `sequences` beside its main timeline. A command runs inside one by swapping the sequence's tracks, main track, magnetism and markers into the main timeline's fields (`Project::swap_timeline`), running as usual, and swapping back (`Command::InSequence`), so every edit works inside a sequence, in the one undo history. The session wraps commands while a sequence is open; commands about the whole project (media, LUTs, settings, sequences) run as they are.
