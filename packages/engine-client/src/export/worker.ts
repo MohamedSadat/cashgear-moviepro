@@ -56,6 +56,7 @@ const api: ExportWorkerApi = {
             .catch((error) => console.warn(`Export: the proxy of ${id} failed: ${message(error)}`));
       if (stop.signal.aborted) throw stop.signal.reason ?? cancelled();
       session = ProjectSession.open(job.project, false, undefined);
+      if (job.sequence != null) session.open_sequence(job.sequence);
       if (job.free && settings.video && session.duration() > 0) {
         addWatermark(session, session.duration());
       }

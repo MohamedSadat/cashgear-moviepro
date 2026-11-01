@@ -7,6 +7,8 @@ import type { ExportSettings, LoudnessPlan } from './settings';
 export interface ExportJob {
   /** The project, as `.cgvproj` text. */
   project: string;
+  /** The sequence to export, as the timeline shows it; the main timeline when missing. */
+  sequence?: number | null;
   /** Where each of the project's files is, with its desktop proxy if it plays through one. */
   media: { id: string; source: MediaSourceRef; proxy?: MediaSourceRef | null }[];
   settings: ExportSettings;

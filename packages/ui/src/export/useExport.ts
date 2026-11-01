@@ -150,6 +150,8 @@ export function useExport(
       setStatus({ state: 'running', name, progress: null, converting: null });
       const job: ExportJob = {
         project: text,
+        // What the timeline shows: the open sequence, or the main timeline.
+        sequence: snapshot.project.openSequence ?? null,
         media,
         settings,
         platform: platform.kind,
