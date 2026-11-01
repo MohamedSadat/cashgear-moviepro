@@ -54,6 +54,7 @@ export interface Palette {
   clipImage: string;
   clipAdjustment: string;
   clipTitle: string;
+  clipSequence: string;
   clipOffline: string;
   transition: string;
   clipText: string;
@@ -83,6 +84,7 @@ const defaults: Palette = {
   clipImage: '#68498f',
   clipAdjustment: '#4f5566',
   clipTitle: '#8c5a2c',
+  clipSequence: '#2f6f6a',
   clipOffline: '#6e2b2b',
   transition: 'rgba(240, 244, 255, 0.82)',
   clipText: '#eef1f6',
@@ -119,6 +121,7 @@ const tokenNames: Record<Exclude<keyof Palette, 'markers'>, string> = {
   clipImage: '--cgv-clip-image',
   clipAdjustment: '--cgv-clip-adjustment',
   clipTitle: '--cgv-clip-title',
+  clipSequence: '--cgv-clip-sequence',
   clipOffline: '--cgv-clip-offline',
   transition: '--cgv-transition',
   clipText: '--cgv-clip-text',
@@ -390,7 +393,8 @@ function drawClip(
   const media = input.media.get(clip.media);
   const adjustment = clip.kind === 'adjustment';
   const title = clip.kind === 'title';
-  const generated = adjustment || title;
+  const sequence = clip.kind === 'sequence';
+  const generated = adjustment || title || sequence;
   const offline = !generated && input.missing.has(clip.media);
   ctx.fillStyle = offline
     ? palette.clipOffline
@@ -398,11 +402,13 @@ function drawClip(
       ? palette.clipAdjustment
       : title
         ? palette.clipTitle
-        : !clip.video
-          ? palette.clipAudio
-          : media?.kind === 'image'
-            ? palette.clipImage
-            : palette.clipVideo;
+        : sequence
+          ? palette.clipSequence
+          : !clip.video
+            ? palette.clipAudio
+            : media?.kind === 'image'
+              ? palette.clipImage
+              : palette.clipVideo;
   if (w < 3) {
     ctx.fillRect(x, y, w, h);
     return;
@@ -449,7 +455,9 @@ function drawClip(
           ? 'Adjustment layer'
           : title
             ? titleName(clip.title)
-            : (media?.name ?? clip.media));
+            : sequence
+              ? (input.project.sequences?.find((s) => s.id === clip.sequence)?.name ?? 'Sequence')
+              : (media?.name ?? clip.media));
       ctx.fillText(name, Math.max(x, 0) + 5, y + nameBar / 2 + 0.5);
     }
     ctx.restore();

@@ -62,6 +62,10 @@ export function Inspector({ editor, ai }: { editor: EditorState; ai: AiToolsStat
     );
   const adjustment = clip.kind === 'adjustment';
   const title = clip.kind === 'title';
+  const sequence =
+    clip.kind === 'sequence'
+      ? snapshot.project.sequences?.find((item) => item.id === clip.sequence)
+      : undefined;
   const media = snapshot.project.media.find((item) => item.id === clip.media);
   const still = media?.kind === 'image' || adjustment || title;
   const locked = snapshot.project.tracks.some(
@@ -112,8 +116,35 @@ export function Inspector({ editor, ai }: { editor: EditorState; ai: AiToolsStat
             ? `Slot ${clip.slot}`
             : title
               ? `Title: ${titleName(clip.title)}`
-              : (media?.name ?? 'Clip')}
+              : sequence
+                ? `Sequence: ${sequence.name}`
+                : (media?.name ?? 'Clip')}
       </h2>
+      {sequence && (
+        <Section title="Sequence">
+          <p className="cgv-muted">
+            Shows {sequence.name} as one picture and one sound. Its own effects, transform and
+            volume apply over everything in it.
+          </p>
+          <div className="cgv-sequence-actions">
+            <CgButton
+              appearance="solid"
+              size="small"
+              onClick={() => void editor.openSequence(sequence.id)}
+            >
+              Open sequence
+            </CgButton>
+            <CgButton
+              appearance="ghost"
+              size="small"
+              disabled={locked}
+              onClick={() => editor.run('breakApart')}
+            >
+              Break apart
+            </CgButton>
+          </div>
+        </Section>
+      )}
       {locked && <p className="cgv-muted">This clip is on a locked track.</p>}
       {clip.slot !== undefined && (
         <p className="cgv-muted" data-testid="slot-note">
@@ -303,23 +334,27 @@ export function Inspector({ editor, ai }: { editor: EditorState; ai: AiToolsStat
               />
             );
           })}
-          <ScrubField
-            label="Noise reduction"
-            value={(clip.denoise ?? 0) * 100}
-            min={0}
-            max={100}
-            step={1}
-            precision={0}
-            unit="%"
-            testId="field-denoise"
-            editor={editor}
-            disabled={locked}
-            command={(percent) => set({ denoise: percent / 100 })}
-          />
+          {!sequence && (
+            <ScrubField
+              label="Noise reduction"
+              value={(clip.denoise ?? 0) * 100}
+              min={0}
+              max={100}
+              step={1}
+              precision={0}
+              unit="%"
+              testId="field-denoise"
+              editor={editor}
+              disabled={locked}
+              command={(percent) => set({ denoise: percent / 100 })}
+            />
+          )}
         </Section>
       )}
-      {clip.audio && <EffectStack editor={editor} context={context} disabled={locked} audio />}
-      {!still && (
+      {clip.audio && !sequence && (
+        <EffectStack editor={editor} context={context} disabled={locked} audio />
+      )}
+      {!still && !sequence && (
         <SpeedSection
           editor={editor}
           clip={clip}
@@ -332,7 +367,9 @@ export function Inspector({ editor, ai }: { editor: EditorState; ai: AiToolsStat
       {clip.video && !adjustment && (
         <MaskSection editor={editor} context={context} disabled={locked} />
       )}
-      {!adjustment && !title && <AiSection editor={editor} ai={ai} clip={clip} disabled={locked} />}
+      {!adjustment && !title && !sequence && (
+        <AiSection editor={editor} ai={ai} clip={clip} disabled={locked} />
+      )}
     </aside>
   );
 }

@@ -6,7 +6,13 @@ import {
   type CgContextMenuActions,
   type CgContextMenuItem,
 } from '@cashgear/ui';
-import { FLICKS_PER_SECOND, type MarkerColor, type MediaRef, type Track } from '@cgv/engine-client';
+import {
+  FLICKS_PER_SECOND,
+  type MarkerColor,
+  type MediaRef,
+  type SequenceInfo,
+  type Track,
+} from '@cgv/engine-client';
 import type { EditorState } from '../editing/useEditor';
 import { usePlaybackState, type PlaybackControls } from '../monitor/usePlayback';
 import { icons } from '../icons';
@@ -14,6 +20,7 @@ import { draggedMedia } from '../media/dragging';
 import { nameOf } from '../effects/catalog';
 import { draggedEffect, effectDragType } from '../effects/dragging';
 import { formatTime } from '../project/format';
+import { SequencePath } from '../sequences/SequencePath';
 import { TimelineController, findClip, projectEnd, type TimelineHost } from './controller';
 import {
   dropZoneHeight,
@@ -245,17 +252,20 @@ function ZoomSlider({
 const ClipList = memo(function ClipList({
   tracks,
   media,
+  sequences,
   missing,
   selected,
   onSelect,
 }: {
   tracks: Track[];
   media: MediaRef[];
+  sequences: SequenceInfo[];
   missing: Set<string>;
   selected: Set<number>;
   onSelect(id: number): void;
 }) {
   const names = new Map(media.map((item) => [item.id, item.name]));
+  const sequenceNames = new Map(sequences.map((item) => [item.id, item.name]));
   return (
     <ul className="cgv-sr-only" aria-label="Clips on the timeline">
       {tracks.map((track, index) =>
@@ -278,7 +288,9 @@ const ClipList = memo(function ClipList({
                 ? 'Adjustment layer'
                 : clip.kind === 'title'
                   ? `Title: ${titleName(clip.title)}`
-                  : (names.get(clip.media) ?? clip.media)}
+                  : clip.kind === 'sequence'
+                    ? `Sequence: ${sequenceNames.get(clip.sequence ?? -1) ?? 'missing'}`
+                    : (names.get(clip.media) ?? clip.media)}
               , {formatTime(clip.start)} to {formatTime(clip.start + clip.duration)} on{' '}
               {trackLabel(track, index)}
             </button>
@@ -393,6 +405,7 @@ export function Timeline({
         ),
       finish: (gesture) => editorRef.current.project.finish(gesture),
       openMenu: (hit, x, y) => openMenu.current(hit, x, y),
+      openSequence: (id) => void editorRef.current.openSequence(id),
       selectedTransition: () => editorRef.current.transition?.transition.id ?? null,
       selectTransition: (id) => editorRef.current.selectTransition(id),
       transitionLabel: (transition) => {
@@ -464,6 +477,7 @@ export function Timeline({
   const rows = useMemo(() => layoutRows(tracks), [tracks]);
   const end = snapshot ? projectEnd(snapshot.project) : 0;
   const media = useMemo(() => snapshot?.project.media ?? [], [snapshot]);
+  const sequences = useMemo(() => snapshot?.project.sequences ?? [], [snapshot]);
   const select = useMemo(() => (id: number) => editorRef.current.select([id]), []);
   const listenZoom = useMemo(
     () => (update: (scale: number) => void) => {
@@ -513,7 +527,11 @@ export function Timeline({
       data-tool={editor.tool}
       data-snapping={editor.snapping}
       data-magnetic={magnetic}
+      data-sequence={snapshot?.project.openSequence ?? undefined}
     >
+      {editor.path.length > 0 && (
+        <SequencePath editor={editor} names={new Map(sequences.map((s) => [s.id, s.name]))} />
+      )}
       <div className="cgv-timeline-toolbar" role="toolbar" aria-label="Timeline tools">
         <ToolButton
           label="Select tool"
@@ -653,6 +671,7 @@ export function Timeline({
             onPointerUp={(event) => void controller.current?.pointerUp(event.nativeEvent)}
             onPointerCancel={() => void controller.current?.cancelDrag()}
             onPointerLeave={() => controller.current?.pointerLeave()}
+            onDoubleClick={(event) => controller.current?.doubleClick(event.nativeEvent)}
             onContextMenu={(event) => event.preventDefault()}
           />
           <div ref={playheadElement} className="cgv-playhead" aria-hidden="true" />
@@ -661,6 +680,7 @@ export function Timeline({
       <ClipList
         tracks={tracks}
         media={media}
+        sequences={sequences}
         missing={missing}
         selected={editor.selected}
         onSelect={select}
@@ -791,8 +811,22 @@ function menuFor(editor: EditorState, hit: Hit): MenuItem[] {
   const found = findClip(snapshot.project, clip.id);
   const under = clip.start < time && time < clip.start + clip.duration;
   const many = editor.selection.length > 1;
+  const sequence = clip.kind === 'sequence' ? clip.sequence : undefined;
+  const nesting: MenuItem[] = [
+    { key: 'nest', text: 'Nest in a sequence', beginGroup: true, command: () => run('nest') },
+  ];
+  if (sequence !== undefined)
+    nesting.push(
+      {
+        key: 'open',
+        text: 'Open sequence',
+        command: () => void editor.openSequence(sequence),
+      },
+      { key: 'break', text: 'Break apart', command: () => run('breakApart') },
+    );
   return [
     { key: 'split', text: 'Split at the playhead', disabled: !under, command: () => run('split') },
+    ...nesting,
     { key: 'copy', text: 'Copy', beginGroup: true, command: () => run('copy') },
     { key: 'cut', text: 'Cut', command: () => run('cut') },
     paste,

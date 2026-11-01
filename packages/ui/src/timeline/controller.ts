@@ -91,6 +91,8 @@ export interface TimelineHost {
   gesture(label: string): Gesture | null;
   finish(gesture: Gesture): Promise<void>;
   openMenu(hit: Hit, clientX: number, clientY: number): void;
+  /** Shows a sequence clip's sequence in the timeline. */
+  openSequence(id: number): void;
   /** The selected transition, and selecting one (which clears the clips). */
   selectedTransition(): number | null;
   selectTransition(id: number | null): void;
@@ -439,6 +441,16 @@ export class TimelineController {
 
   private tolerance() {
     return (snapPixels / this.view.scale) * FLICKS_PER_SECOND;
+  }
+
+  /** A double-click on a sequence clip opens its sequence. */
+  doubleClick(event: MouseEvent) {
+    const snapshot = this.live;
+    if (!snapshot || this.drag) return;
+    const { x, y } = this.local(event);
+    const hit = hitTest(snapshot.project, this.rows, this.view, x, y, this.host.selected());
+    if (hit.kind === 'clip' && hit.clip.kind === 'sequence' && hit.clip.sequence !== undefined)
+      this.host.openSequence(hit.clip.sequence);
   }
 
   pointerDown(event: PointerEvent) {

@@ -81,6 +81,8 @@ export interface ProjectState {
   onLive(listener: (snapshot: ProjectSnapshot) => void): () => void;
   /** Shows a message to the user. */
   notice(text: string): void;
+  /** Shows sequence `id` in the timeline and the monitor, or the main timeline with null. */
+  openSequence(id: number | null): Promise<void>;
   undo(): Promise<void>;
   redo(): Promise<void>;
   save(): Promise<boolean>;
@@ -518,6 +520,16 @@ export function useProject(
       );
   };
 
+  const openSequence = useCallback(
+    async (id: number | null) => {
+      try {
+        show(await api().projectOpenSequence(id));
+      } catch (error) {
+        notice(message(error));
+      }
+    },
+    [api, notice, show],
+  );
   const undo = useCallback(async () => {
     try {
       show(await api().projectUndo());
@@ -594,6 +606,7 @@ export function useProject(
     onLive,
     notice,
     latest: () => snapshotRef.current,
+    openSequence,
     undo,
     redo,
     save,

@@ -23,6 +23,7 @@
   --cgv-clip-offline: #6e2b2b;
   --cgv-clip-adjustment: #4f5566;
   --cgv-clip-title: #8c5a2c;
+  --cgv-clip-sequence: #2f6f6a;
   --cgv-transition: rgb(240 244 255 / 0.82);
   --cgv-curve-bg: #15181d;
   --cgv-curve-grid: #262b34;
@@ -1006,6 +1007,51 @@ body,
   min-height: 0;
   background: var(--cgv-panel);
   border-top: 1px solid var(--cgv-border);
+}
+
+.cgv-sequence-item {
+  padding: 8px;
+  border: 1px solid var(--cgv-border);
+  border-radius: 6px;
+}
+
+.cgv-sequence-open {
+  border-color: var(--cgv-accent);
+}
+
+.cgv-sequence-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.cgv-sequence-path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-bottom: 1px solid var(--cgv-border);
+  background: var(--cgv-surface-raised, rgb(255 255 255 / 0.03));
+  font-size: 12px;
+}
+
+.cgv-sequence-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cgv-sequence-crumb button {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--cgv-accent);
+  cursor: pointer;
+}
+
+.cgv-sequence-crumb button:hover {
+  text-decoration: underline;
 }
 
 .cgv-timeline-toolbar {

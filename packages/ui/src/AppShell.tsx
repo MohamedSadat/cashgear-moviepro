@@ -37,6 +37,7 @@ import { icons } from './icons';
 import { Inspector } from './inspector/Inspector';
 import { ScopesPanel } from './scopes/ScopesPanel';
 import { MediaLibraryPanel } from './media/MediaLibraryPanel';
+import { SequencesPanel } from './sequences/SequencesPanel';
 import { MixerPanel } from './mixer/MixerPanel';
 import { useMeters, type MeterStore } from './mixer/useMeters';
 import { useVoiceover, type VoiceoverState } from './voiceover/useVoiceover';
@@ -455,6 +456,11 @@ export function AppShell({ platform }: Props) {
                     }
                   />
                 ),
+              },
+              {
+                id: 'sequences',
+                label: 'Sequences',
+                render: () => <SequencesPanel editor={editor} />,
               },
               {
                 id: 'templates',

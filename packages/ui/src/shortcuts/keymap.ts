@@ -36,7 +36,9 @@ export type ActionId =
   | 'zoomOut'
   | 'zoomToFit'
   | 'selectTool'
-  | 'bladeTool';
+  | 'bladeTool'
+  | 'nest'
+  | 'breakApart';
 
 export type ActionGroup = 'Playback' | 'Editing' | 'Timeline' | 'File';
 
@@ -72,6 +74,8 @@ export const actions: readonly ActionInfo[] = [
   { id: 'trimEndToPlayhead', label: 'Trim end to the playhead', group: 'Editing' },
   { id: 'addTransition', label: 'Add the default transition at the playhead', group: 'Editing' },
   { id: 'freezeFrame', label: 'Freeze the frame at the playhead', group: 'Editing' },
+  { id: 'nest', label: 'Nest the selected clips in a sequence', group: 'Editing' },
+  { id: 'breakApart', label: 'Break a sequence clip apart', group: 'Editing' },
   { id: 'undo', label: 'Undo', group: 'Editing' },
   { id: 'redo', label: 'Redo', group: 'Editing' },
   { id: 'addMarker', label: 'Add a marker', group: 'Timeline' },
@@ -117,6 +121,8 @@ const common = {
   addMarker: ['M'],
   addTransition: ['Ctrl+D'],
   freezeFrame: ['Alt+F'],
+  nest: ['Alt+G'],
+  breakApart: ['Alt+Shift+G'],
   toggleMagnetic: [],
   selectTool: ['V'],
   bladeTool: ['C'],

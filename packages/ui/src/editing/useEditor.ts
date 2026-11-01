@@ -95,6 +95,14 @@ export interface EditorState {
   /** Runs a shortcut, toolbar or menu action. */
   run(action: ActionId): void;
   timeline: MutableRefObject<TimelineHandle | null>;
+  /** The sequences opened on the way to the one the timeline shows, outermost first. */
+  path: number[];
+  /**
+   * Shows sequence `id` in the timeline (null for the main timeline): one inside
+   * the shown one goes on the path, one on the path goes back to it. Each
+   * timeline keeps its own playhead.
+   */
+  openSequence(id: number | null): Promise<void>;
 }
 
 /** A colour setting the eyedropper fills: the colour of the clip's own picture where clicked. */
@@ -145,6 +153,20 @@ export function useEditor(
   const timeline = useRef<TimelineHandle | null>(null);
   const snapshot = project.snapshot;
   const current = snapshot?.project ?? null;
+  const [path, setPath] = useState<number[]>([]);
+  /** Each timeline's playhead, by sequence (-1 for the main timeline). */
+  const playheads = useRef(new Map<number, number>());
+
+  // The session closes a sequence an undo removed: the path follows it.
+  const open = current?.openSequence ?? null;
+  useEffect(() => {
+    setPath((list) => {
+      if (open === null) return list.length ? [] : list;
+      const at = list.indexOf(open);
+      if (at < 0) return [open];
+      return at === list.length - 1 ? list : list.slice(0, at + 1);
+    });
+  }, [open]);
 
   // Clips and transitions that are gone (undo, delete) leave the selection.
   useEffect(() => {
@@ -386,6 +408,22 @@ export function useEditor(
 
   const playhead = useCallback(() => state.current.playback.state?.time ?? 0, []);
 
+  const openSequence = useCallback(async (id: number | null) => {
+    const { project, playback, current } = state.current;
+    const shown = current?.openSequence ?? null;
+    if (!current || shown === id) return;
+    playheads.current.set(shown ?? -1, playback.state?.time ?? 0);
+    if (playback.state?.playing) playback.shuttle('k');
+    setSelection([]);
+    setTransitionId(null);
+    setPath((list) =>
+      id === null ? [] : list.includes(id) ? list.slice(0, list.indexOf(id) + 1) : [...list, id],
+    );
+    await project.openSequence(id);
+    const frame = frameDuration(current.settings.frameRate);
+    playback.seekFrame(Math.round((playheads.current.get(id ?? -1) ?? 0) / frame));
+  }, []);
+
   const run = useCallback(
     (action: ActionId) => {
       const { project, playback, selection, clipboard, current, options } = state.current;
@@ -514,6 +552,23 @@ export function useEditor(
         zoomToFit: () => timeline.current?.fit(),
         selectTool: () => setTool('select'),
         bladeTool: () => setTool('blade'),
+        nest: () => {
+          if (!selection.length) return project.notice('Select the clips to nest first.');
+          void project
+            .execute({ type: 'nest', clips: selection })
+            .then((outcome) => outcome && setSelection([outcome.created[0]]));
+        },
+        breakApart: () => {
+          const target =
+            current &&
+            selection
+              .map((id) => findClip(current, id)?.clip)
+              .find((clip) => clip?.kind === 'sequence');
+          if (!target) return project.notice('Select a sequence clip to break it apart.');
+          void project
+            .execute({ type: 'breakApart', clip: target.id })
+            .then((outcome) => outcome && setSelection([]));
+        },
       };
       if (action !== 'exportVideo') handlers[action]();
     },
@@ -549,5 +604,7 @@ export function useEditor(
     playhead,
     run,
     timeline,
+    path,
+    openSequence,
   };
 }
