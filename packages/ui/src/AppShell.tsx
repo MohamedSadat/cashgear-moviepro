@@ -35,6 +35,7 @@ import { ExportDialog } from './export/ExportDialog';
 import { useExport, type ExportState } from './export/useExport';
 import { icons } from './icons';
 import { Inspector } from './inspector/Inspector';
+import { ScopesPanel } from './scopes/ScopesPanel';
 import { MediaLibraryPanel } from './media/MediaLibraryPanel';
 import { MixerPanel } from './mixer/MixerPanel';
 import { useMeters, type MeterStore } from './mixer/useMeters';
@@ -450,6 +451,11 @@ export function AppShell({ platform }: Props) {
                 id: 'templates',
                 label: 'Templates',
                 render: () => <TemplatesBrowser editor={editor} previews={templatePreviews} />,
+              },
+              {
+                id: 'scopes',
+                label: 'Scopes',
+                render: () => <ScopesPanel client={client} />,
               },
               {
                 id: 'titles',

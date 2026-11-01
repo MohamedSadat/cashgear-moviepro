@@ -18,6 +18,7 @@ import type {
   ProjectStore,
   UpdateInfo,
 } from '@cgv/ui';
+import { FrameChannel } from './frames';
 
 /** A file the native side has registered for streaming through `cgv-media`. */
 interface RegisteredMedia {
@@ -120,13 +121,9 @@ const projects: ProjectStore = {
  * the file, the export worker's bytes are written into it through the native
  * side, and FFmpeg converts it afterwards for GIF and MP3.
  */
-async function chooseExport({
-  fileName,
-  format,
-  settings,
-  path,
-  estimatedBytes,
-}: ExportChoice): Promise<ExportDestination | null> {
+async function chooseExport(choice: ExportChoice): Promise<ExportDestination | null> {
+  const { fileName, format, settings, path, estimatedBytes } = choice;
+  if (format.master) return chooseMaster(choice);
   const opened = await invoke<{ id: string; path: string } | null>('export_open', {
     name: fileName,
     extension: format.extension,
@@ -157,6 +154,114 @@ async function chooseExport({
   };
 }
 
+interface OriginalSession {
+  id: string;
+  width: number;
+  height: number;
+  format: string;
+  frameBytes: number;
+  planes: [number, number][];
+}
+
+/** Each open original's frame channel: FFmpeg fills a slot, the page copies it out. */
+const originalChannels = new Map<string, Promise<FrameChannel>>();
+
+/**
+ * Originals for exports: FFmpeg decodes media that plays through a proxy at its
+ * own size and bit depth, a frame at a time, into a frame channel.
+ */
+const originals: NonNullable<MediaPlatform['originals']> = {
+  async open(id) {
+    const session = await invoke<OriginalSession>('originals_open', { id });
+    originalChannels.set(session.id, FrameChannel.open(session.frameBytes, 2));
+    return session;
+  },
+  async frame(session, frame, seconds, duration) {
+    const channel = await originalChannels.get(session)!;
+    return channel.receive((slot) =>
+      invoke('originals_frame', {
+        id: session,
+        channel: channel.id,
+        slot,
+        frame,
+        seconds,
+        frameSeconds: duration,
+      }),
+    );
+  },
+  async close(session) {
+    const channel = originalChannels.get(session);
+    originalChannels.delete(session);
+    await invoke('originals_close', { id: session });
+    await (await channel)?.close();
+  },
+};
+
+/**
+ * Where a ProRes master goes: the native save dialog picks the file, and the
+ * worker's sound and 10-bit frames reach FFmpeg through a frame channel.
+ */
+async function chooseMaster({
+  fileName,
+  format,
+  settings,
+  path,
+  estimatedBytes,
+  sound,
+}: ExportChoice): Promise<ExportDestination | null> {
+  const opened = await invoke<{ id: string; path: string; frameBytes: number } | null>(
+    'master_open',
+    {
+      name: fileName,
+      path: path ?? null,
+      width: settings.width,
+      height: settings.height,
+      rate: [settings.frameRate.num, settings.frameRate.den],
+      profile: format.master!.profile,
+      sound: settings.audio && sound ? sound : null,
+      needs: estimatedBytes ? Math.round(estimatedBytes) : null,
+    },
+  );
+  if (!opened) return null;
+  const { id } = opened;
+  let channel: FrameChannel;
+  try {
+    // Two slots: the page fills one while FFmpeg takes the other.
+    channel = await FrameChannel.open(opened.frameBytes, 2);
+  } catch (error) {
+    await invoke('master_cancel', { id });
+    throw error;
+  }
+  let closed = false;
+  const close = async () => {
+    if (closed) return;
+    closed = true;
+    await channel.close();
+  };
+  return {
+    target: { kind: 'master' },
+    name: opened.path.split(/[\\/]/).pop() ?? fileName,
+    sound: (data) =>
+      channel.send(data, (slot, len) =>
+        invoke('master_sound', { id, channel: channel.id, slot, len }),
+      ),
+    frame: (data) =>
+      channel.send(data, (slot, len) =>
+        invoke('master_frame', { id, channel: channel.id, slot, len }),
+      ),
+    async finish(result) {
+      await close();
+      const finished = await invoke<{ path: string; bytes: number }>('master_finish', { id });
+      result.bytes = finished.bytes;
+      return finished.path;
+    },
+    async discard() {
+      await invoke('master_cancel', { id });
+      await close();
+    },
+  };
+}
+
 /**
  * The desktop app: native file dialog and drops give real paths, the native side
  * streams them to the engine through the `cgv-media` protocol, probes them with
@@ -181,6 +286,7 @@ async function installedFonts(): Promise<FontFamilyEntry[]> {
 }
 
 export const desktopPlatform: MediaPlatform = {
+  originals,
   kind: 'desktop',
   projects,
 

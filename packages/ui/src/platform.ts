@@ -1,5 +1,6 @@
 import type {
   CacheStore,
+  ExportHandlers,
   ExportResult,
   ExportSettings,
   ExportTarget,
@@ -20,9 +21,13 @@ export interface ExportDestination {
   name: string;
   /** Desktop: hands the worker's bytes to the native file. */
   write?(position: number, data: Uint8Array): Promise<void>;
+  /** Desktop masters: hands FFmpeg the sound (all of it first), then each frame. */
+  sound?(data: Float32Array): Promise<void>;
+  frame?(data: Uint8Array): Promise<void>;
   /**
    * After the worker has written everything: closes the file, converts it on
    * desktop (GIF, MP3), or starts the download. Resolves with where the file is.
+   * A master's size is known only on the native side, which fills in `result.bytes`.
    */
   finish(result: ExportResult, onProgress: (fraction: number) => void): Promise<string>;
   /** Removes what was written after a failure or cancel. */
@@ -40,6 +45,8 @@ export interface ExportChoice {
   download?: boolean;
   /** About how big the file gets: the desktop checks the disk has room. */
   estimatedBytes?: number;
+  /** The project's sound, which a master's FFmpeg reads beside the frames. */
+  sound?: { sampleRate: number; channels: number };
 }
 
 export interface UpdateInfo {
@@ -138,6 +145,11 @@ export interface MediaPlatform {
   registerPaths?(paths: string[]): Promise<ImportRequest[]>;
   /** Asks where to save an export. Null when the user cancels. */
   chooseExport(choice: ExportChoice): Promise<ExportDestination | null>;
+  /**
+   * Desktop: exports read media that plays through a proxy from its original,
+   * which FFmpeg decodes at its own size and bit depth.
+   */
+  originals?: ExportHandlers['originals'];
   /**
    * Desktop: keeps a voiceover as a WAV file in a `Voiceovers` folder beside the
    * project (or in the app's data folder before its first save). The web imports

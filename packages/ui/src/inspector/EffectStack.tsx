@@ -3,6 +3,7 @@ import type { Color, Command, Effect, ParamDef } from '@cgv/engine-client';
 import type { EditorState } from '../editing/useEditor';
 import { effectProperty, isAnimated, numberAt, valueAt } from '../effects/animation';
 import { defaultsOf, nameOf, valueOf } from '../effects/catalog';
+import { GradeControls } from './ColorControls';
 import { CurveLane } from './CurveLane';
 import { ColorField, KeyControls, ScrubField, keyCommand, type KeyContext } from './fields';
 
@@ -379,6 +380,9 @@ function EffectPanel({
             ))}
           </select>
         </label>
+      )}
+      {open && (
+        <GradeControls editor={editor} context={context} effect={effect} disabled={disabled} />
       )}
       {open &&
         entry?.params.map((param) => (

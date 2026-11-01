@@ -85,6 +85,8 @@ export function ExportDialog(props: Props) {
     if (converting !== null) line = `Converting with FFmpeg: ${Math.round(converting * 100)}%`;
     else if (progress?.phase === 'measuring')
       line = `Measuring loudness: ${Math.round(progress.fraction * 100)}%`;
+    else if (progress?.phase === 'mixing')
+      line = `Mixing the sound: ${Math.round(progress.fraction * 100)}%`;
     else if (progress?.phase === 'rendering')
       line = `Frame ${progress.frame.toLocaleString()} of ${progress.frames.toLocaleString()}`;
     else if (progress?.phase === 'finishing') line = 'Finishing the file…';
@@ -383,7 +385,18 @@ function ExportSettingsView({ project, exporter, platform, free, onLicence, onCl
                 </label>
               )}
             </div>
-            {form.format !== 'gif' && (
+            {info.master && (
+              <div className="cgv-form-row">
+                <span className="cgv-form-note" data-testid="export-master-note">
+                  {info.master.profile === 'prores-4444'
+                    ? '10-bit 4:4:4 with alpha where nothing covers the frame'
+                    : '10-bit 4:2:2'}
+                  , about {((result.video?.bitrate ?? 0) / 1e6).toFixed(0)} Mbit/s, encoded by
+                  FFmpeg.
+                </span>
+              </div>
+            )}
+            {form.format !== 'gif' && !info.master && (
               <div className="cgv-form-row">
                 <label>
                   Quality

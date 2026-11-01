@@ -120,11 +120,13 @@ export function useExport(
       try {
         const seconds = projectEnd(snapshot.project) / FLICKS_PER_SECOND;
         const estimatedBytes = estimateBytes(settings, snapshot.project.settings, seconds);
+        const { sampleRate, channels } = snapshot.project.settings;
         destination = await platform.chooseExport({
           fileName,
           format,
           settings,
           estimatedBytes,
+          sound: settings.audio ? { sampleRate, channels } : undefined,
           ...choice,
         });
       } catch (error) {
@@ -154,6 +156,9 @@ export function useExport(
         progress: (progress) =>
           setStatus((value) => (value.state === 'running' ? { ...value, progress } : value)),
         write: destination.write,
+        masterSound: destination.sound,
+        masterFrame: destination.frame,
+        originals: platform.originals,
       });
       running.current.export = current;
       if (running.current.cancelled) current.cancel();

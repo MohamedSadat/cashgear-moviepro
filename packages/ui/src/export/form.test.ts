@@ -29,6 +29,21 @@ const noAac: EncoderSupport = {
 };
 
 describe('export form', () => {
+  it('makes ProRes masters with 24-bit sound, whatever the browser encodes', () => {
+    const form = applyFormat(initialForm(hd), 'prores-422-hq', hd, chrome);
+    expect(usableCodecs('prores-422-hq', chrome)).toEqual({
+      video: ['prores'],
+      audio: ['pcm-s24'],
+    });
+    const settings = exportSettings(form, hd);
+    expect(settings.video).toEqual({ codec: 'prores', bitrate: 220.2e6 });
+    expect(settings.audio).toMatchObject({ codec: 'pcm-s24', bitrate: 0 });
+    // A minute: about 220 Mbit/s of picture and 2.3 Mbit/s of sound.
+    expect(estimateBytes(settings, hd, 60) / 1e9).toBeCloseTo(1.669, 2);
+    const back = applyFormat(form, 'mp4', hd, chrome);
+    expect([back.videoCodec, back.audioCodec]).toEqual(['avc', 'aac']);
+  });
+
   it('starts from the preset that matches the project', () => {
     const form = initialForm(hd);
     expect(form.preset).toBe('youtube-1080p');

@@ -5,6 +5,7 @@ import {
   exportPresets,
   fitFreeSize,
   formatInfo,
+  masterBitrate,
   presetBitrate,
   qualityBitrate,
   withinFreeSize,
@@ -118,9 +119,13 @@ export function applyPreset(form: ExportForm, id: string, project: ProjectSettin
   };
 }
 
-/** The codecs a format offers that this browser can encode (all of them while unknown). */
+/**
+ * The codecs a format offers that this browser can encode (all of them while
+ * unknown). FFmpeg encodes masters, so the browser's encoders do not matter.
+ */
 export function usableCodecs(format: ExportFormat, support: EncoderSupport | null) {
   const info = formatInfo(format);
+  if (info.master) return { video: info.video, audio: info.audio };
   return {
     video: info.video.filter((codec) => !support || support.video[codec]),
     audio: info.audio.filter((codec) => !support || support.audio[codec]),
@@ -168,6 +173,8 @@ export function videoBitrateOf(form: ExportForm, project: ProjectSettings): numb
   const rate = frameRateOf(form, project);
   const fps = rate.num / rate.den;
   const { width, height } = evenSize(form.width, form.height);
+  const master = formatInfo(form.format).master;
+  if (master) return masterBitrate(master.profile, width, height, fps);
   // A GIF's intermediate file must not add artefacts of its own.
   if (form.format === 'gif')
     return Math.max(4e6, 3 * qualityBitrate('high', 'avc', width, height, fps));
@@ -210,13 +217,15 @@ export function estimateBytes(
   project: ProjectSettings,
   seconds: number,
 ): number {
-  const pcm = project.sampleRate * project.channels * 16;
+  const pcm = project.sampleRate * project.channels;
   const audio =
     settings.audio === null
       ? 0
-      : settings.audio.codec === 'pcm-s16' && settings.format !== 'mp3'
-        ? pcm
-        : settings.audio.bitrate;
+      : settings.audio.codec === 'pcm-s24'
+        ? pcm * 24
+        : settings.audio.codec === 'pcm-s16' && settings.format !== 'mp3'
+          ? pcm * 16
+          : settings.audio.bitrate;
   // A GIF's size has little to do with its intermediate bitrate.
   const video = settings.format === 'gif' ? 0 : (settings.video?.bitrate ?? 0);
   return ((video + audio) * seconds) / 8;
