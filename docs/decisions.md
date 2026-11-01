@@ -2,6 +2,15 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-11-01: Phase 13 answers
+
+- **Exchange formats:** "OTIO + FCP7 XML". The phase writes OpenTimelineIO (`.otio`), which Resolve and newer Premiere versions read, and FCP7 XML (`xmeml`), which both open today. FCPXML and EDL are not in this phase. AAF is not either, since there is no open writer without GPL.
+- **Direction:** "Export and import". Timelines come back in from Resolve and Premiere as new projects and relink their media, and both formats are tested going out and coming back.
+- **Multicam:** "Up to 4 angles". Angles sync by sound or by timecode, the monitor shows them in a 2×2 grid, and keys 1 to 4 cut during playback. It builds on nested sequences, which are in the phase either way.
+- **Colour:** "HSL qualifier" and "Colour tag override". HDR output stays for a later phase.
+- **No Resolve or Premiere here:** neither is installed on the reference machine. So OpenTimelineIO's Python package (Apache-2.0, pinned, a test tool that is never shipped) reads the exports in the tests. OpenTimelineIO's sample files that Resolve and Premiere exported stand in for those apps' output. Opening the exports in Resolve and Premiere is left to the user.
+- **The plan's Overview:** its scope row now says the editor goes on to professional work. Phase 12 meant to say so, and Phase 13's exchange contradicts the old "no XML/EDL exchange".
+
 ## 2026-11-01: Phase 12 defaults
 
 - **10-bit in the compositor:** 10- and 12-bit planes upload as 16-bit integers (`R16Uint`) and convert with matrices that take code values (`codes_to_rgb`), into half-float layers (`rgba16float`, or 8-bit on WebGL2 without float targets). 8-bit sources keep their 8-bit sRGB layers, so their goldens and memory stay as they were.

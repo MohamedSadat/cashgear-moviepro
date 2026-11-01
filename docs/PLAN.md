@@ -1,4 +1,4 @@
-> Exported from the Claude Docs plan on 2026-10-22. The doc is the source of truth; progress lives in PROGRESS.md and decisions in decisions.md. Phase 12 was added here on 2026-11-01, after the doc's phases were done.
+> Exported from the Claude Docs plan on 2026-10-22. The doc is the source of truth; progress lives in PROGRESS.md and decisions in decisions.md. Phases 12 and 13 were added here on 2026-11-01, after the doc's phases were done.
 
 # CashGear Video — Implementation Plan
 
@@ -10,7 +10,7 @@ CashGear Video is a Filmora-level video editor that runs in the browser and as a
 
 | Decision | Choice | Reason |
 | --- | --- | --- |
-| Scope | Filmora-level consumer and prosumer editor | Realistic target; no pro color grading, collaboration or XML/EDL exchange |
+| Scope | Filmora-level consumer and prosumer editor, then professional work (Phases 12 and 13) | Filmora-level tools first; then pro media, grading and exchange with Resolve and Premiere; no collaboration |
 | Engine | One Rust core compiled to WASM, running in the browser and inside the Tauri webview | One render path for both versions; no video frames sent over IPC |
 | GPU | wgpu: WebGPU first, WebGL2 fallback | Same WGSL shaders on web and desktop |
 | Preview decoding | WebCodecs (hardware) fed by a demuxer | Fast hardware decode in browsers and WebView2 |
@@ -509,6 +509,72 @@ UI command, then model update (undoable), then `renderFrame(t)` finds active cli
 - [ ] A 4K30 project with three stacked tracks plays without dropped frames through proxies on the reference machine.
 - [ ] Every master export opens in FFmpeg with the expected codec, profile, bit depth and colour tags. The user opens one of each format in DaVinci Resolve.
 - [ ] Wheels and curves have golden renders on both backends, and each grading change is one undo step.
+
+## Phase 13: Pro editing workflow
+
+**Goal:** CashGear Video works beside professional tools. Cuts go to DaVinci Resolve and Premiere Pro and come back, sequences nest, up to four camera angles cut live, and grading gains a qualifier and a way to correct how a file's colour is read.
+
+**Questions to ask first**
+
+- Which exchange formats: OTIO, FCP7 XML, FCPXML or EDL?
+- Export only, or import too?
+- Is multicam in this phase, and with how many angles?
+- Which colour work joins: an HSL qualifier, overriding a file's colour tags, HDR output?
+
+**Tasks**
+
+1. Nested sequences:
+   - A project holds sequences beside its main timeline. Each has its own tracks, main track and markers, and shares the project's settings, media and LUTs.
+   - A sequence clip shows a sequence. It has the timing, transform, effects, masks and sound settings of any clip.
+   - Nest turns the selected clips into a sequence clip in their place, Open edits a sequence in the timeline with a path back, and Break apart puts a sequence clip's clips back in its place.
+   - Edits inside a sequence are the same commands, addressed to it, in the project's one undo history.
+   - The engine plans a sequence clip's frame from its sequence at its source time and draws it as one picture. Its sound is the sequence's mix.
+   - A sequence never contains itself, and nesting goes 16 levels deep at most.
+   - `.cgvproj` files gain sequences, and older files open unchanged.
+2. Multicam, up to four angles:
+   - Make a multicam clip from two to four clips. Each angle is a track of a sequence, synced:
+     - by sound, cross-correlating the angles' envelopes in `cgv-dsp`;
+     - by timecode, where the files carry it;
+     - or by their in points.
+   - A multicam clip shows one angle's picture, and the sound of the angle chosen for sound.
+   - The angle viewer: the monitor shows the four angles in a 2×2 grid, with the program angle outlined.
+   - Keys 1 to 4 cut to an angle at the playhead, during playback too, one undo step each. A piece's angle can also be changed later.
+   - Flatten turns a multicam clip into plain clips of the angles it shows.
+3. Exchange with OTIO and FCP7 XML:
+   - Export the open sequence as OTIO (`.otio`) and FCP7 XML (`.xml`, `xmeml`), which Resolve and Premiere open.
+   - What goes across:
+     - tracks, and clips with their media (paths on the desktop, names on the web);
+     - source and timeline ranges, constant speed, reverse and freeze frames;
+     - dissolves (other transitions go as dissolves), opacity, volume and markers;
+     - nested sequences, as nested stacks and sequences;
+     - multicam clips, as the angles they show.
+   - Titles, effects and masks do not go across, and the export lists what it left out.
+   - Import both formats: a timeline from Resolve or Premiere opens as a new project, and relinks its media by path, then by name and duration. What cannot be shown is listed.
+   - OpenTimelineIO's Python package, pinned and used only in tests, reads every export in CI. Sample timelines that Resolve and Premiere exported, from OpenTimelineIO's Apache-2.0 test files, are imported in the tests.
+4. Secondary correction:
+   - An HSL qualifier effect selects hue, saturation and luma ranges, each with softness.
+     - The monitor's eyedropper picks its colour.
+     - A matte view shows the selection.
+     - A correction applies inside it: lift, gamma and gain, saturation, hue and temperature.
+   - Effect masks: any effect can be limited to mask shapes drawn with the existing mask tools, so a qualifier combines with a window.
+5. A file's colour interpretation:
+   - Each media file can override its tags: the matrix (BT.601, BT.709, BT.2020), the range (limited or full), and the transfer (SDR, PQ, HLG).
+   - It is undoable, and saved in the project.
+   - Overridden media is drawn from its planes with the chosen matrix, range and transfer, on both backends, in playback and in exports.
+6. Tests:
+   - Interchange fixtures: a project with three video tracks and two sound tracks, cuts, dissolves, speed changes, a freeze frame, opacity, markers, a nested sequence and a multicam clip.
+   - A multicam test set with known offsets, drawn with the pinned FFmpeg during the tests.
+   - A colour chart encoded with wrong tags.
+   - Goldens for the qualifier and its matte view.
+
+**Exit criteria**
+
+- [ ] OTIO and FCP7 XML exports of the interchange fixture open in OpenTimelineIO, with every clip's media, source range and timeline range exact to the frame, and its dissolves, speeds and markers in place.
+- [ ] Both formats round-trip: importing an export of the fixture gives back its tracks, clips, ranges, speeds, dissolves and markers. The Resolve and Premiere sample timelines import with every clip and range they hold.
+- [ ] A sequence clip draws the same picture and plays the same sound as its clips do unnested, three levels deep, on both backends. Every edit inside a sequence is one undo step in the project's history.
+- [ ] Four angles with known offsets sync by sound within 1 ms. The angle viewer plays four 1080p30 angles without dropped frames on the reference machine. Keys 1 to 4 during playback cut on the frame showing when pressed.
+- [ ] The qualifier selects a test chart's target hue with its edges where the settings put them. It has goldens (graded and matte view) on both backends, and a mask limits it.
+- [ ] A chart encoded with the BT.601 matrix but tagged BT.709, and one in full range but tagged limited, match their references within one 8-bit level once their interpretation is corrected, in the monitor and in exports.
 
 ## Risks and testing strategy
 
