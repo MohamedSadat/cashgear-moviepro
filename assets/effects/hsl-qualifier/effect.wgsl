@@ -18,7 +18,12 @@ fn selected(rgb: vec3<f32>) -> f32 {
     let key = rgb_to_hsv(params.color.rgb);
     let c = rgb_to_hsv(rgb);
     let turn = abs(c.x - key.x);
-    let hue = min(turn, 1.0 - turn) * 360.0;
+    // Hue means nothing without colour, and rounding would flip it from pixel to
+    // pixel: grey is as far as hue goes from a colourful key, and a grey key
+    // leaves the choice to saturation and luma.
+    let sure = smoothstep(0.0, 0.04, c.y * c.z);
+    let key_sure = smoothstep(0.0, 0.04, key.y * key.z);
+    let hue = mix(180.0, min(turn, 1.0 - turn) * 360.0, sure) * key_sure;
     let matte = within(hue, params.hue_range, params.hue_soft)
         * within(abs(c.y - key.y), params.sat_range, params.sat_soft)
         * within(abs(luma(rgb) - luma(params.color.rgb)), params.luma_range, params.luma_soft);

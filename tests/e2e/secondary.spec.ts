@@ -8,6 +8,7 @@ import { FRAME, clear, render, run, type Pixels } from './golden-tools';
 // matte view are in effects.spec.ts.
 const WIDTH = 720;
 const HEIGHT = 90;
+const GREY_ROW = 80;
 
 function hsv(hue: number): [number, number, number] {
   const h = ((hue % 360) + 360) % 360;
@@ -28,12 +29,15 @@ function hsv(hue: number): [number, number, number] {
   return [r * 255, g * 255, b * 255];
 }
 
-/** Every hue across the picture, at full saturation and value: half a degree a column. */
+/**
+ * Every hue across the picture, at full saturation and value: half a degree a
+ * column. The bottom rows are mid grey, which has no hue.
+ */
 function hueChart(): Buffer {
   const png = new PNG({ width: WIDTH, height: HEIGHT });
   for (let y = 0; y < HEIGHT; y++)
     for (let x = 0; x < WIDTH; x++) {
-      const [r, g, b] = hsv(((x + 0.5) * 360) / WIDTH);
+      const [r, g, b] = y < GREY_ROW ? hsv(((x + 0.5) * 360) / WIDTH) : [128, 128, 128];
       const at = (y * WIDTH + x) * 4;
       png.data[at] = Math.round(r);
       png.data[at + 1] = Math.round(g);
@@ -116,6 +120,24 @@ for (const backend of ['WebGPU', 'WebGL2'] as const) {
       expect(halfway, `hue ${hue}: ${halfway}`).toBeGreaterThan(100);
       expect(halfway, `hue ${hue}: ${halfway}`).toBeLessThan(155);
     }
+
+    // Grey has no hue, so a colourful key leaves it, and a grey key goes by saturation alone.
+    expect(at(matte, 120, GREY_ROW + 5)[0], 'grey under a green key').toBeLessThan(5);
+    await run(page, {
+      type: 'setEffectParams',
+      clip,
+      effect,
+      params: { color: { r: 0.5, g: 0.5, b: 0.5, a: 1 }, sat_range: 0.1, sat_soft: 0 },
+    });
+    const greyKey = await render(page, 0);
+    expect(at(greyKey, 120, GREY_ROW + 5)[0], 'grey under a grey key').toBeGreaterThan(250);
+    expect(at(greyKey, 120)[0], 'green under a grey key').toBeLessThan(5);
+    await run(page, {
+      type: 'setEffectParams',
+      clip,
+      effect,
+      params: { color: green, sat_range: 1, sat_soft: 0.1 },
+    });
 
     // The grade: inside the selection it turns the hue; outside nothing changes.
     await run(page, {
