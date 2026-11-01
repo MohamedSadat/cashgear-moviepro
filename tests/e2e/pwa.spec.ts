@@ -67,10 +67,12 @@ async function ready(page: Page) {
 function windowsApps(profile: string, channel: string | undefined, remove = false): string[] {
   if (process.platform !== 'win32') return [];
   const name = basename(profile);
+  const key = `'HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall'`;
+  // A fresh user, such as CI's, may have no such key.
   const entries =
-    `Get-ChildItem 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall' | ` +
+    `if (Test-Path ${key}) { Get-ChildItem ${key} | ` +
     `Where-Object { $_.GetValue('UninstallString') -like '*${name}*' } | ` +
-    (remove ? 'Remove-Item -Recurse;' : 'ForEach-Object { $_.PSChildName };');
+    (remove ? 'Remove-Item -Recurse };' : 'ForEach-Object { $_.PSChildName } };');
   const packages =
     `Get-AppxPackage -Name '127.0.0.1-*' | ` +
     `Where-Object { (Get-AppxPackageManifest $_).Package.Applications.Application.Parameters -like '*${name}*' } | ` +
