@@ -5,7 +5,11 @@ mod fonts;
 #[cfg(windows)]
 mod frames;
 mod licence;
+#[cfg(windows)]
+mod master;
 mod media;
+#[cfg(windows)]
+mod originals;
 mod project;
 mod updates;
 
@@ -43,6 +47,8 @@ fn main() {
             app.manage(export::ExportState::default());
             #[cfg(windows)]
             app.manage(frames::FrameState::default());
+            #[cfg(windows)]
+            app.manage(originals::OriginalsState::default());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -76,6 +82,22 @@ fn main() {
             #[cfg(windows)]
             frames::frames_sum,
             licence::licence_machine,
+            #[cfg(windows)]
+            master::master_open,
+            #[cfg(windows)]
+            master::master_sound,
+            #[cfg(windows)]
+            master::master_frame,
+            #[cfg(windows)]
+            master::master_finish,
+            #[cfg(windows)]
+            master::master_cancel,
+            #[cfg(windows)]
+            originals::originals_open,
+            #[cfg(windows)]
+            originals::originals_frame,
+            #[cfg(windows)]
+            originals::originals_close,
             media::media_pick,
             media::media_register,
             media::media_forget,

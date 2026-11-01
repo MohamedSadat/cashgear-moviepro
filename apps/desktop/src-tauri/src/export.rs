@@ -26,6 +26,9 @@ struct Job {
 #[derive(Default)]
 pub struct ExportState {
     jobs: Mutex<HashMap<String, Arc<Job>>>,
+    /// ProRes masters FFmpeg is encoding (`master.rs`).
+    #[cfg(windows)]
+    pub(crate) masters: Mutex<HashMap<String, Arc<crate::master::Master>>>,
 }
 
 impl ExportState {
@@ -40,6 +43,10 @@ impl ExportState {
 
     /// True while an export is being written or converted.
     pub fn running(&self) -> bool {
+        #[cfg(windows)]
+        if !self.masters.lock().expect("masters").is_empty() {
+            return true;
+        }
         !self.jobs.lock().expect("export jobs").is_empty()
     }
 
@@ -55,6 +62,18 @@ impl ExportState {
         for job in jobs {
             job.cancel.store(true, Ordering::Relaxed);
             remove_partial(&job);
+        }
+        #[cfg(windows)]
+        let masters: Vec<_> = self
+            .masters
+            .lock()
+            .expect("masters")
+            .drain()
+            .map(|(_, master)| master)
+            .collect();
+        #[cfg(windows)]
+        for master in masters {
+            master.cancel();
         }
     }
 }
@@ -127,26 +146,8 @@ pub async fn export_open(
     convert: Option<Conversion>,
     needs: Option<u64>,
 ) -> Result<Option<ExportFile>, String> {
-    let destination = match path {
-        Some(path) => PathBuf::from(path),
-        None => {
-            let mut dialog = app
-                .dialog()
-                .file()
-                .set_title("Export video")
-                .set_file_name(&name)
-                .add_filter(extension.to_uppercase(), &[extension.as_str()]);
-            if let Ok(videos) = app.path().video_dir() {
-                dialog = dialog.set_directory(videos);
-            }
-            match dialog
-                .blocking_save_file()
-                .and_then(|file| file.into_path().ok())
-            {
-                Some(path) => path,
-                None => return Ok(None),
-            }
-        }
+    let Some(destination) = destination(&app, &name, &extension, path) else {
+        return Ok(None);
     };
     let id = uuid::Uuid::new_v4().to_string();
     let file = match convert {
@@ -156,16 +157,7 @@ pub async fn export_open(
             .join(format!("{id}.{}", conversion.intermediate_extension())),
         None => part_path(&destination),
     };
-    if let (Some(needs), Some(free)) = (needs, cgv_native::disk::free_bytes(&file)) {
-        // Room for the file, and some to spare so the disk is not left full.
-        if free < needs.saturating_add(SPARE_BYTES) {
-            return Err(format!(
-                "There is not enough space on that disk: the export needs about {} and {} is free.",
-                gigabytes(needs + SPARE_BYTES),
-                gigabytes(free)
-            ));
-        }
-    }
+    check_room(&file, needs)?;
     let writer = ExportWriter::create(&file)?;
     let job = Job {
         writer: Mutex::new(Some(writer)),
@@ -182,6 +174,46 @@ pub async fn export_open(
         id,
         path: destination.display().to_string(),
     }))
+}
+
+/// The file an export goes to: `path` (for tests), or the one the user picks in
+/// the save dialog, which opens in Videos. None when the user cancels.
+pub(crate) fn destination(
+    app: &AppHandle,
+    name: &str,
+    extension: &str,
+    path: Option<String>,
+) -> Option<PathBuf> {
+    if let Some(path) = path {
+        return Some(PathBuf::from(path));
+    }
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("Export video")
+        .set_file_name(name)
+        .add_filter(extension.to_uppercase(), &[extension]);
+    if let Ok(videos) = app.path().video_dir() {
+        dialog = dialog.set_directory(videos);
+    }
+    dialog
+        .blocking_save_file()
+        .and_then(|file| file.into_path().ok())
+}
+
+/// Fails when the disk that `file` goes on lacks room for `needs` bytes, and
+/// some to spare so the disk is not left full.
+pub(crate) fn check_room(file: &std::path::Path, needs: Option<u64>) -> Result<(), String> {
+    if let (Some(needs), Some(free)) = (needs, cgv_native::disk::free_bytes(file)) {
+        if free < needs.saturating_add(SPARE_BYTES) {
+            return Err(format!(
+                "There is not enough space on that disk: the export needs about {} and {} is free.",
+                gigabytes(needs + SPARE_BYTES),
+                gigabytes(free)
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Writes the raw body at the `x-position` byte of export `x-export-id`.

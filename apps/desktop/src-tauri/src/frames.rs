@@ -57,7 +57,7 @@ pub struct FrameChannel {
 
 impl FrameChannel {
     /// Slot `index`'s first `len` bytes.
-    fn bytes(&self, index: usize, len: usize) -> Result<&[u8], String> {
+    pub(crate) fn bytes(&self, index: usize, len: usize) -> Result<&[u8], String> {
         let slot = self.slot(index, len)?;
         // SAFETY: the slot is mapped for the channel's lifetime, and the page does
         // not write to it while the native side owns it.
@@ -68,7 +68,7 @@ impl FrameChannel {
         clippy::mut_from_ref,
         reason = "shared memory: ownership is by protocol"
     )]
-    fn bytes_mut(&self, index: usize, len: usize) -> Result<&mut [u8], String> {
+    pub(crate) fn bytes_mut(&self, index: usize, len: usize) -> Result<&mut [u8], String> {
         let slot = self.slot(index, len)?;
         // SAFETY: as for `bytes`; only the command that owns the slot writes it.
         Ok(unsafe { std::slice::from_raw_parts_mut(slot.ptr, len) })
