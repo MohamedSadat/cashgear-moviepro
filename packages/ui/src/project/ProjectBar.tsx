@@ -6,6 +6,8 @@ interface Props {
   project: ProjectState;
   onOpenProjects(): void;
   onOpenSettings(): void;
+  onImportTimeline(): void;
+  onExportTimeline(): void;
 }
 
 function SaveState({ project }: { project: ProjectState }) {
@@ -30,7 +32,13 @@ function SaveState({ project }: { project: ProjectState }) {
 }
 
 /** Project name, save state, and the project and undo commands. */
-export function ProjectBar({ project, onOpenProjects, onOpenSettings }: Props) {
+export function ProjectBar({
+  project,
+  onOpenProjects,
+  onOpenSettings,
+  onImportTimeline,
+  onExportTimeline,
+}: Props) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const snapshot = project.snapshot;
@@ -102,6 +110,24 @@ export function ProjectBar({ project, onOpenProjects, onOpenSettings }: Props) {
             Save as…
           </button>
         )}
+        <button
+          type="button"
+          onClick={onImportTimeline}
+          disabled={project.busy}
+          title="Open a timeline from DaVinci Resolve, Premiere Pro or another editor"
+          data-testid="import-timeline"
+        >
+          Import timeline…
+        </button>
+        <button
+          type="button"
+          onClick={onExportTimeline}
+          disabled={disabled}
+          title="Send the timeline to DaVinci Resolve, Premiere Pro or another editor"
+          data-testid="export-timeline"
+        >
+          Export timeline…
+        </button>
         <span className="cgv-toolbar-gap" />
         <button
           type="button"

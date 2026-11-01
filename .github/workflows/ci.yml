@@ -48,6 +48,7 @@ jobs:
       GPU_TEST_SOFTWARE: '1'
       # The FFmpeg integration tests must run here, not skip.
       CGV_REQUIRE_FFMPEG: '1'
+      CGV_REQUIRE_OTIO: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -88,12 +89,17 @@ jobs:
           path: tests/models
           key: models-${{ hashFiles('packages/engine-client/src/ai/models.json') }}
       - run: pnpm fetch-models whisper-tiny selfie selfie-landscape
+      # OpenTimelineIO reads the timelines we write; its wheels stop at Python 3.13.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pnpm setup:otio
       - run: cargo fmt --all --check
       # The generated engine bindings and apps/web/dist are untracked; build them
       # before clippy (Tauri embeds dist), typecheck and the browser tests.
       - run: pnpm build
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo clippy -p cgv-wasm -p cgv-denoise -p cgv-ai --target wasm32-unknown-unknown -- -D warnings
+      - run: cargo clippy -p cgv-wasm -p cgv-denoise -p cgv-ai -p cgv-exchange --target wasm32-unknown-unknown -- -D warnings
       - run: cargo test --workspace
       - run: pnpm typecheck
       - run: pnpm lint

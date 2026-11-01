@@ -481,6 +481,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cgv-exchange"
+version = "1.0.1"
+dependencies = [
+ "cgv-model",
+ "cgv-time",
+ "quick-xml 0.38.4",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "cgv-media"
 version = "1.0.1"
 dependencies = [
@@ -2875,7 +2887,7 @@ checksum = "327a4cb2ad49dc48adfdc9da89e22c64d488b508c67a044d71ba729e4521a285"
 dependencies = [
  "base64 0.23.1",
  "indexmap 2.14.2",
- "quick-xml",
+ "quick-xml 0.42.0",
  "serde",
  "time",
 ]
@@ -3028,6 +3040,15 @@ dependencies = [
  "rand_xorshift",
  "regex-syntax",
  "unarray",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.38.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b66c2058c55a409d601666cffe35f04333cf1013010882cec174a7467cd4e21c"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

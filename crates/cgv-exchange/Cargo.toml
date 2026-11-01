@@ -1,0 +1,23 @@
+[package]
+name = "cgv-exchange"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+# Timelines to and from other editors, OTIO and FCP7 XML, as a WASM module of its
+# own: it loads the first time a timeline goes out or comes in, so none of it
+# counts against the engine's size budget.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cgv-model.workspace = true
+cgv-time.workspace = true
+quick-xml = { version = "=0.38.4", default-features = false }
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen.workspace = true

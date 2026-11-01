@@ -37,6 +37,7 @@ import { icons } from './icons';
 import { Inspector } from './inspector/Inspector';
 import { ScopesPanel } from './scopes/ScopesPanel';
 import { MediaLibraryPanel } from './media/MediaLibraryPanel';
+import { ExportTimelineDialog, ImportReportDialog } from './exchange/ExchangeDialog';
 import { MulticamDialog } from './multicam/MulticamDialog';
 import { SequencesPanel } from './sequences/SequencesPanel';
 import { MixerPanel } from './mixer/MixerPanel';
@@ -185,8 +186,10 @@ export function AppShell({ platform }: Props) {
     | 'update'
     | 'about'
     | 'multicam'
+    | 'export-timeline'
     | null
   >(null);
+  const [importReport, setImportReport] = useState<string[] | null>(null);
   const editorRun = editor.run;
   const runAction = useCallback(
     (action: Parameters<typeof editorRun>[0]) =>
@@ -310,6 +313,10 @@ export function AppShell({ platform }: Props) {
     if (saved) project.notice(`The diagnostic report is saved: ${saved}`);
   };
 
+  const importTimeline = async () => {
+    const leftOut = await project.importTimeline();
+    if (leftOut?.length) setImportReport(leftOut);
+  };
   const hasMulticam = !!project.snapshot?.project.tracks.some((track) =>
     track.clips.some((clip) => clip.angles),
   );
@@ -381,6 +388,8 @@ export function AppShell({ platform }: Props) {
           project={project}
           onOpenProjects={() => setDialog('projects')}
           onOpenSettings={() => setDialog('settings')}
+          onImportTimeline={() => void importTimeline()}
+          onExportTimeline={() => setDialog('export-timeline')}
         />
         {exporter.status.state !== 'idle' && dialog !== 'export' && (
           <ExportChip exporter={exporter} onOpen={() => setDialog('export')} />
@@ -563,6 +572,12 @@ export function AppShell({ platform }: Props) {
       />
       <CapabilityStrip engine={engine} probe={probe} report={report} native={native} />
       {devOverlay && <DevOverlay client={client} />}
+      {dialog === 'export-timeline' && project.snapshot && (
+        <ExportTimelineDialog client={client} project={project} onClose={() => setDialog(null)} />
+      )}
+      {importReport && (
+        <ImportReportDialog leftOut={importReport} onClose={() => setImportReport(null)} />
+      )}
       {dialog === 'multicam' && project.snapshot && (
         <MulticamDialog editor={editor} ai={ai} onClose={() => setDialog(null)} />
       )}

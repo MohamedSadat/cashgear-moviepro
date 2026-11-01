@@ -171,6 +171,14 @@ const projects: ProjectStore = {
       : (await pickWithInput('.cgvproj', false))[0];
     return file ? { text: await file.text() } : null;
   },
+  async openTimeline() {
+    const accept = { 'application/json': ['.otio'], 'text/xml': ['.xml'] };
+    const handles = await pickHandles('Timeline', accept, false);
+    const file = handles
+      ? await handles[0]?.getFile()
+      : (await pickWithInput('.otio,.xml', false))[0];
+    return file ? { name: file.name, text: await file.text() } : null;
+  },
   async exportFile(name, text) {
     const link = document.createElement('a');
     link.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));

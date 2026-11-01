@@ -11,12 +11,13 @@ const check = spawnSync(bindgen, ['--version'], { encoding: 'utf8' });
 if (check.status !== 0 || check.stdout.trim() !== 'wasm-bindgen ' + bindgenVersion) {
   throw new Error('wasm-bindgen ' + bindgenVersion + ' is missing. Run pnpm setup:wasm.');
 }
-// The engine, and noise reduction and the AI tools' analysis as modules of their
-// own (each loaded when first used).
+// The engine, and noise reduction, the AI tools' analysis and timeline exchange as
+// modules of their own (each loaded when first used).
 const modules = [
   { crate: 'cgv-wasm', name: 'cgv_wasm', out: wasmOutput },
   { crate: 'cgv-denoise', name: 'cgv_denoise', out: join(wasmOutput, 'denoise') },
   { crate: 'cgv-ai', name: 'cgv_ai', out: join(wasmOutput, 'ai') },
+  { crate: 'cgv-exchange', name: 'cgv_exchange', out: join(wasmOutput, 'exchange') },
 ];
 await run('cargo', [
   'build',
@@ -60,8 +61,12 @@ if (release) {
   );
   const ai = await optimize(join(modules[2].out, 'cgv_ai_bg.wasm'));
   console.log('AI analysis WASM: ' + ai.wasmBytes + ' bytes; gzip: ' + ai.gzippedBytes);
+  const exchange = await optimize(join(modules[3].out, 'cgv_exchange_bg.wasm'));
+  console.log(
+    'Timeline exchange WASM: ' + exchange.wasmBytes + ' bytes; gzip: ' + exchange.gzippedBytes,
+  );
   const { wasmBytes, gzippedBytes } = await optimize(join(wasmOutput, 'cgv_wasm_bg.wasm'));
-  const report = { wasmBytes, gzippedBytes, limitBytes, denoise, ai };
+  const report = { wasmBytes, gzippedBytes, limitBytes, denoise, ai, exchange };
   await mkdir(join(root, 'bench/results'), { recursive: true });
   await writeFile(
     join(root, 'bench/results/wasm-size.json'),

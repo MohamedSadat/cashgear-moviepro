@@ -115,6 +115,8 @@ export type * from './export/types';
 export type * from './media/types';
 export type * from './playback/types';
 export type * from './project/types';
+export { exportTimeline, importTimeline, timelineFormatOf } from './exchange';
+export type { ExportedTimeline, ImportedTimeline, TimelineFormat } from './exchange';
 export type * from './project/title';
 export { elementProperty } from './project/title';
 export { defaultDucking, FLICKS_PER_SECOND } from './project/types';

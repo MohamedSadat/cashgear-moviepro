@@ -18,6 +18,9 @@ import {
   type ProjectEntry,
   type ProjectSettings,
   type ProjectSnapshot,
+  importTimeline,
+  timelineFormatOf,
+  type TimelineFormat,
 } from '@cgv/engine-client';
 import { Gesture } from '../editing/gesture';
 import { useMediaLibrary, type MediaLibraryState } from '../media/useMediaLibrary';
@@ -95,6 +98,13 @@ export interface ProjectState {
   open(entry: ProjectEntry): Promise<void>;
   openFile(): Promise<void>;
   exportFile(): Promise<void>;
+  /**
+   * Opens a timeline from another editor as a new project, whose media then asks
+   * to be relinked. Resolves to what it could not show, or null when nothing opened.
+   */
+  importTimeline(): Promise<string[] | null>;
+  /** Saves a timeline file named `name`; false when the user cancels. */
+  saveTimeline(name: string, format: TimelineFormat, text: string): Promise<boolean>;
   remove(entry: ProjectEntry): Promise<void>;
   recover(choice: 'recover' | 'discard'): Promise<void>;
   rename(name: string): Promise<void>;
@@ -569,9 +579,12 @@ export function useProject(
     async (expected: MediaRef, request: ImportRequest) => {
       const media = await libraryRef.current.relink(request);
       if (!media) return false;
-      const differs =
-        media.kind !== expected.kind ||
-        Math.abs(media.duration - expected.duration) > FLICKS_PER_SECOND / 10;
+      // A timeline from another editor says little of its files: no size, and a
+      // duration that is only as long as its clips reach.
+      const tenth = FLICKS_PER_SECOND / 10;
+      const differs = expected.size
+        ? media.kind !== expected.kind || Math.abs(media.duration - expected.duration) > tenth
+        : media.duration < expected.duration - tenth;
       if (differs)
         notice(
           `${media.name} is not like the original ${expected.name}; check the clips that use it.`,
@@ -669,6 +682,31 @@ export function useProject(
       if (!current || !store.exportFile) return;
       await store.exportFile(current.project.name, (await api().projectSave()).text);
     }),
+    importTimeline: async () => {
+      const result = await serial(async () => {
+        const file = await store.openTimeline();
+        if (!file) return null;
+        const format = timelineFormatOf(file.name);
+        if (!format) throw new Error(`${file.name} is not an .otio or .xml timeline.`);
+        const imported = await importTimeline(file.text, format, crypto.randomUUID());
+        await closeCurrent();
+        const id = projectIdOf(imported.project)!;
+        await load({ id, name: '', openedAt: Date.now() }, imported.project, {});
+        // On the web an opened file becomes a project in browser storage.
+        if (store.savesInPlace) await saveNow(false);
+        return imported.leftOut;
+      });
+      return result ?? null;
+    },
+    saveTimeline: async (name, format, text) => {
+      try {
+        const extension = format === 'otio' ? 'otio' : 'xml';
+        return (await platform.saveTextFile(name, extension, 'Timeline', text)) !== null;
+      } catch (error) {
+        notice(message(error));
+        return false;
+      }
+    },
     remove: (target) =>
       serial(async () => {
         if (target.id === entryRef.current?.id) {

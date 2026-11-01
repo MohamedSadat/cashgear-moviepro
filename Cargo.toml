@@ -12,6 +12,7 @@ default-members = [
   "crates/cgv-dsp",
   "crates/cgv-denoise",
   "crates/cgv-ai",
+  "crates/cgv-exchange",
   "crates/cgv-audio",
   "crates/cgv-engine",
   "crates/cgv-wasm",

@@ -1009,6 +1009,14 @@ body,
   border-top: 1px solid var(--cgv-border);
 }
 
+.cgv-exchange-left-out {
+  max-height: 180px;
+  margin: 4px 0 0;
+  padding-left: 18px;
+  overflow: auto;
+  font-size: 12px;
+}
+
 .cgv-angle-view[aria-pressed='true'] {
   border-color: var(--cgv-accent);
   color: var(--cgv-accent);

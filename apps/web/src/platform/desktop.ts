@@ -114,6 +114,13 @@ const projects: ProjectStore = {
     const opened = await invoke<OpenedProject | null>('project_open');
     return opened && { text: opened.contents, path: opened.path };
   },
+  async openTimeline() {
+    const opened = await invoke<{ name: string; contents: string } | null>('text_file_open', {
+      label: 'Timeline',
+      extensions: ['otio', 'xml'],
+    });
+    return opened && { name: opened.name, text: opened.contents };
+  },
 };
 
 /**

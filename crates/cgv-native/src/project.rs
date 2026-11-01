@@ -119,8 +119,9 @@ pub struct Wanted {
 pub const SEARCH_DEPTH: usize = 6;
 pub const SEARCH_ENTRIES: usize = 50_000;
 
-/// Looks under `root` for files with each wanted name and size. Returns the
-/// matches as (media id, path), each wanted file at most once.
+/// Looks under `root` for files with each wanted name and size (a size of 0, from a
+/// timeline another editor wrote, matches any). Returns the matches as (media id,
+/// path), each wanted file at most once.
 pub fn search_folder(root: &Path, wanted: &[Wanted]) -> Vec<(String, PathBuf)> {
     let mut found: Vec<(String, PathBuf)> = Vec::new();
     let mut pending = vec![(root.to_path_buf(), 0)];
@@ -155,7 +156,8 @@ pub fn search_folder(root: &Path, wanted: &[Wanted]) -> Vec<(String, PathBuf)> {
                 } else {
                     want.name == name
                 };
-                if same_name && want.size == size && !found.iter().any(|(id, _)| id == &want.id) {
+                let same_size = want.size == 0 || want.size == size;
+                if same_name && same_size && !found.iter().any(|(id, _)| id == &want.id) {
                     found.push((want.id.clone(), path.clone()));
                 }
             }

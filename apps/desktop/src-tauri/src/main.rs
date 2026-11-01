@@ -109,6 +109,7 @@ fn main() {
             media::recording_save,
             project::project_save,
             project::project_open,
+            project::text_file_open,
             project::project_read,
             project::text_file_save,
             project::autosave_read,

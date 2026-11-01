@@ -155,6 +155,46 @@ pub async fn text_file_save(
     .map(Some)
 }
 
+/// A text file the user picked.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenedText {
+    name: String,
+    contents: String,
+}
+
+/// Asks for a text file (a timeline from another editor) with one of `extensions`,
+/// and reads it. None when the user cancels.
+#[tauri::command]
+pub async fn text_file_open(
+    app: AppHandle,
+    label: String,
+    extensions: Vec<String>,
+) -> Result<Option<OpenedText>, String> {
+    let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
+    let picked = app
+        .dialog()
+        .file()
+        .set_title(format!("Open {label}"))
+        .add_filter(&label, &extensions)
+        .blocking_pick_file();
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|error| error.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        Ok(Some(OpenedText { name, contents }))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// Asks for a project file and reads it. None when the user cancels.
 #[tauri::command]
 pub async fn project_open(app: AppHandle) -> Result<Option<OpenedProject>, String> {

@@ -82,6 +82,7 @@ pnpm install && pnpm setup:wasm   # first time: wasm32 target + wasm-bindgen-cli
 pnpm setup:ffmpeg                 # pinned LGPL FFmpeg into .tools/ffmpeg (hash and license checked)
 pnpm fetch-test-media             # test clips into tests/media (CI sets CGV_REQUIRE_FFMPEG=1)
 pnpm fetch-models [ids]           # AI models into tests/models (CI: whisper-tiny selfie selfie-landscape)
+pnpm setup:otio                   # OpenTimelineIO into .tools/otio: a test tool that reads the timelines we write
 pnpm dev:web                      # engine (debug) + Vite on http://127.0.0.1:5173, rebuilds on .rs/.wgsl changes
 pnpm dev:desktop                  # the same UI in Tauri
 pnpm build                        # release WASM + web build + third-party notices (run before typecheck, clippy, e2e, desktop)
@@ -96,7 +97,7 @@ Checks run in CI (`.github/workflows/ci.yml`). Run them in this order:
 cargo fmt --all --check
 pnpm build
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p cgv-wasm -p cgv-denoise -p cgv-ai --target wasm32-unknown-unknown -- -D warnings
+cargo clippy -p cgv-wasm -p cgv-denoise -p cgv-ai -p cgv-exchange --target wasm32-unknown-unknown -- -D warnings
 cargo test --workspace
 pnpm typecheck && pnpm lint && pnpm format:check && pnpm test
 pnpm test:e2e                     # Chrome + Edge on the real GPU; CI uses software GPUs (GPU_TEST_SOFTWARE=1)

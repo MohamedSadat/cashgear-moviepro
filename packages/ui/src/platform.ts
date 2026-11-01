@@ -90,6 +90,8 @@ export interface ProjectStore {
   remove(id: string): Promise<void>;
   /** Asks for a project file. Null when the user cancels. */
   openFile(): Promise<{ text: string; path?: string } | null>;
+  /** Asks for a timeline from another editor (`.otio`, `.xml`) and reads it. */
+  openTimeline(): Promise<{ name: string; text: string } | null>;
   /** Web: downloads the project as a `.cgvproj` file. */
   exportFile?(name: string, text: string): Promise<void>;
 }
