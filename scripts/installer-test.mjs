@@ -8,6 +8,8 @@
 //      install the update;
 //   3. checks that the app the installer starts again is the new version;
 //   4. uninstalls it silently and checks that nothing is left behind.
+// The test builds install as a product of their own, so they can run beside a real
+// install of CashGear Video and never touch its registry keys, shortcuts or data.
 // Needs .tools/ffmpeg (pnpm setup:ffmpeg), the WebView2 Runtime and the Windows SDK.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -25,13 +27,14 @@ import { rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { chromium } from '@playwright/test';
 import { pnpmCommand, root, run, windowsPowerShell } from './lib.mjs';
 import { makeTestCertificate } from './test-certificate.mjs';
 
 if (process.platform !== 'win32') throw new Error('The installer test runs on Windows.');
-const product = 'CashGear Video';
+const product = 'CGV Installer Test';
+const identifier = 'com.cashgear.video.installer-test';
 const feedPort = 47811;
 const started = Date.now();
 const log = (line) => console.log(`[${((Date.now() - started) / 1000).toFixed(0)} s] ${line}`);
@@ -41,15 +44,50 @@ const log = (line) => console.log(`[${((Date.now() - started) / 1000).toFixed(0)
 const work = join(realpathSync.native(tmpdir()), `cgv-installer-${randomBytes(4).toString('hex')}`);
 const feed = join(work, 'feed');
 const installDir = join(work, 'app');
+// The installers, uninstallers and app keep their temporary files in here too: the
+// updater never removes its download, nor NSIS its copy of the uninstaller.
+const temp = join(work, 'temp');
 mkdirSync(feed, { recursive: true });
+mkdirSync(temp, { recursive: true });
+const tempEnv = { ...process.env, TEMP: temp, TMP: temp };
 const results = { versions: [], installer: {}, steps: {} };
 
+const reg = (args) => spawnSync('reg.exe', args, { encoding: 'utf8', windowsHide: true });
+const uninstallRoot = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall';
+const uninstallKey = `${uninstallRoot}\\${product}`;
+// A silent uninstall keeps this key, which records the install folder for the next
+// install to restore: a real install once went into a test's temp folder that way.
+const publisherKey = `HKCU\\Software\\${product}`;
+const desktop = windowsPowerShell("[Environment]::GetFolderPath('Desktop')");
+const shortcuts = [
+  join(process.env.APPDATA, 'Microsoft/Windows/Start Menu/Programs', `${product}.lnk`),
+  join(desktop, `${product}.lnk`),
+];
+const dataFolders = [process.env.APPDATA, process.env.LOCALAPPDATA].map((folder) =>
+  join(folder, identifier),
+);
+
 function uninstallEntry() {
-  const key = `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${product}`;
-  const query = spawnSync('reg.exe', ['query', key], { encoding: 'utf8', windowsHide: true });
+  const query = reg(['query', uninstallKey]);
   if (query.status !== 0) return null;
-  return { version: query.stdout.match(/DisplayVersion\s+REG_SZ\s+(\S+)/)?.[1] ?? null };
+  return {
+    version: query.stdout.match(/DisplayVersion\s+REG_SZ\s+(\S+)/)?.[1] ?? null,
+    uninstaller: query.stdout.match(/UninstallString\s+REG_SZ\s+"?([^"\r\n]+)/)?.[1] ?? null,
+  };
 }
+
+/** What Windows records of a real install, which the test must not change. */
+const realInstall = () =>
+  ['HKCU\\Software\\CashGear\\CashGear Video', `${uninstallRoot}\\CashGear Video`]
+    .map((key) => reg(['query', key]).stdout)
+    .join('');
+const realInstallBefore = realInstall();
+
+/** What an install under the test's name has left on this machine. */
+const leftBehind = () => [
+  ...[uninstallKey, publisherKey].filter((key) => reg(['query', key]).status === 0),
+  ...[...shortcuts, ...dataFolders].filter((path) => existsSync(path)),
+];
 
 async function until(what, check, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
@@ -77,8 +115,37 @@ const appExe = () =>
 
 function stopApp() {
   windowsPowerShell(
-    `Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith('${installDir}') } | Stop-Process -Force`,
+    `Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith('${work}') } | Stop-Process -Force -ErrorAction SilentlyContinue`,
   );
+}
+
+const forceRemove = (path) =>
+  rm(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+
+/** Takes out an install under the test's name, finished or not, this run's or a killed one's. */
+async function removeInstall() {
+  const uninstaller = uninstallEntry()?.uninstaller;
+  stopApp();
+  if (uninstaller && existsSync(uninstaller)) {
+    spawnSync(`"${uninstaller}" /S`, { shell: true, windowsHide: true, env: tempEnv });
+    await until(
+      'the uninstaller to finish',
+      () => !uninstallEntry() && !existsSync(uninstaller),
+      120_000,
+    ).catch((error) => log(error.message));
+  }
+  for (const key of [uninstallKey, publisherKey]) reg(['delete', key, '/f']);
+  for (const path of [...shortcuts, ...dataFolders]) await forceRemove(path);
+}
+
+/** A killed run's folders. One that a real install is recorded in stays: it holds that install. */
+async function removeKilledRuns() {
+  const parent = dirname(work);
+  for (const name of readdirSync(parent)) {
+    const path = join(parent, name);
+    if (name.startsWith('cgv-installer-') && path !== work && !realInstallBefore.includes(name))
+      await forceRemove(path);
+  }
 }
 
 /** Attaches to the app's WebView2 and returns the page with its test hooks. */
@@ -107,12 +174,14 @@ const policyKey = 'HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge\\WebView2\\Addition
 const policyName = 'cgv-desktop.exe';
 const hostedRunner =
   process.env.GITHUB_ACTIONS === 'true' && process.env.RUNNER_ENVIRONMENT === 'github-hosted';
-const reg = (args) => spawnSync('reg.exe', args, { encoding: 'utf8', windowsHide: true });
 let policySet = false;
 let server;
 let profile;
 let dataDir;
 try {
+  await removeInstall();
+  await removeKilledRuns();
+
   // Two installers a version apart, signed with a throwaway certificate and updater key.
   const certificate = makeTestCertificate(join(work, 'certificate'));
   const keyPath = join(work, 'updater.key');
@@ -140,6 +209,8 @@ try {
   results.versions = versions;
   const env = {
     ...process.env,
+    CGV_TEST_PRODUCT: product,
+    CGV_TEST_IDENTIFIER: identifier,
     CGV_SIGN_PFX: certificate.pfx,
     CGV_SIGN_PASSWORD: certificate.password,
     CGV_SIGN_TIMESTAMP: '0',
@@ -196,13 +267,12 @@ try {
   await new Promise((resolve) => server.listen(feedPort, '127.0.0.1', resolve));
 
   // 1. Install silently, and check the signatures.
-  if (uninstallEntry())
-    throw new Error(`${product} is already installed for this user: uninstall it first.`);
   log(`Installing ${versions[0]} into ${installDir}`);
   let step = Date.now();
   const installed = spawnSync(`"${setups[0]}" /S /D=${installDir}`, {
     shell: true,
     windowsHide: true,
+    env: tempEnv,
   });
   if (installed.status !== 0) throw new Error(`The installer failed (${installed.status}).`);
   results.steps.installSeconds = (Date.now() - step) / 1000;
@@ -258,7 +328,7 @@ try {
     spawn(appExe(), [], {
       windowsHide: true,
       env: {
-        ...process.env,
+        ...tempEnv,
         CGV_DATA_DIR: dataDir,
         WEBVIEW2_USER_DATA_FOLDER: profile,
         WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: browserArguments,
@@ -313,20 +383,20 @@ try {
 
   // 4. Uninstall silently: nothing may be left.
   step = Date.now();
-  spawnSync(`"${join(installDir, 'uninstall.exe')}" /S`, { shell: true, windowsHide: true });
+  spawnSync(`"${join(installDir, 'uninstall.exe')}" /S`, {
+    shell: true,
+    windowsHide: true,
+    env: tempEnv,
+  });
   await until(
     'the uninstaller to finish',
     () => !uninstallEntry() && !existsSync(join(installDir, 'uninstall.exe')),
     120_000,
   );
-  const shortcut = join(
-    process.env.APPDATA,
-    'Microsoft/Windows/Start Menu/Programs',
-    `${product}.lnk`,
-  );
   const left = existsSync(installDir) ? readdirSync(installDir) : [];
   if (left.length) throw new Error('The uninstaller left: ' + left.join(', '));
-  if (existsSync(shortcut)) throw new Error('The uninstaller left the Start menu shortcut.');
+  const leftShortcuts = shortcuts.filter((path) => existsSync(path));
+  if (leftShortcuts.length) throw new Error('The uninstaller left: ' + leftShortcuts.join(', '));
   results.steps.uninstallSeconds = (Date.now() - step) / 1000;
   log('Uninstalled: nothing left behind');
   mkdirSync(join(root, 'bench/results'), { recursive: true });
@@ -335,12 +405,15 @@ try {
 } finally {
   server?.close();
   if (policySet) reg(['delete', policyKey, '/v', policyName, '/f', '/reg:64']);
-  if (existsSync(installDir)) {
-    stopApp();
-    if (uninstallEntry() && existsSync(join(installDir, 'uninstall.exe'))) {
-      spawnSync(`"${join(installDir, 'uninstall.exe')}" /S`, { shell: true, windowsHide: true });
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-    }
+  await removeInstall().catch((error) => log(`Removing the install failed: ${error.message}`));
+  await forceRemove(work).catch((error) =>
+    log(`Removing the temp folder failed: ${error.message}`),
+  );
+  const left = leftBehind();
+  if (existsSync(work)) left.push(work);
+  if (realInstall() !== realInstallBefore) left.push('changes to the real install in the registry');
+  if (left.length) {
+    console.error('The test left behind: ' + left.join(', '));
+    process.exitCode = 1;
   }
-  await rm(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 }).catch(() => {});
 }

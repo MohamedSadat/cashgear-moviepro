@@ -7,6 +7,10 @@
 //
 // Settings, from the environment:
 //   CGV_VERSION        build this version instead of tauri.conf.json's (tests)
+//   CGV_TEST_PRODUCT, CGV_TEST_IDENTIFIER: build as another product (the installer
+//                      test). These and the publisher, which takes the product's
+//                      name, decide the install's registry keys, shortcuts and data
+//                      folders, so that it shares none with the real app.
 //   TAURI_SIGNING_PRIVATE_KEY (and _PASSWORD): the updater's private key. With it
 //                      the build also signs the update (the installer's .sig) for
 //                      latest.json.
@@ -80,7 +84,11 @@ const env = process.env;
 const forward = (path) => path.replace(/\\/g, '/');
 const config = {
   ...(env.CGV_VERSION ? { version: env.CGV_VERSION } : {}),
+  ...(env.CGV_TEST_PRODUCT
+    ? { productName: env.CGV_TEST_PRODUCT, identifier: env.CGV_TEST_IDENTIFIER }
+    : {}),
   bundle: {
+    ...(env.CGV_TEST_PRODUCT ? { publisher: env.CGV_TEST_PRODUCT } : {}),
     resources: {
       [forward(join(ffmpegOut, '*'))]: 'ffmpeg/',
       ...(readdirSync(licences).length ? { [forward(join(licences, '*'))]: 'licences/' } : {}),
