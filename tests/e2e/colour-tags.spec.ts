@@ -286,7 +286,11 @@ test('an export reads the colour as it is set to', async ({ page }, testInfo) =>
     colour: { fullRange: true },
   });
 
-  /** Exports `name` alone and reads the bars of a frame of the file. */
+  /**
+   * Exports `name` alone and reads each bar's Y'CbCr from the file's planes. FFmpeg's
+   * conversion to RGB rounds differently from one saturated bar to the next, by more
+   * than the difference this measures.
+   */
   const exported = async (name: string) => {
     await shown(page, main, ids, name);
     const download = page.waitForEvent('download', { timeout: 180000 });
@@ -307,7 +311,7 @@ test('an export reads the colour as it is set to', async ({ page }, testInfo) =>
     const file = join(dir, `${name}.export.webm`);
     await (await download).saveAs(file);
     await page.evaluate(() => Reflect.get(window, '__cgv').exporter.dismiss());
-    const frame = join(dir, `${name}.export.png`);
+    const frame = join(dir, `${name}.export.yuv`);
     const decoded = spawnSync(
       ffmpeg,
       [
@@ -318,21 +322,51 @@ test('an export reads the colour as it is set to', async ({ page }, testInfo) =>
         file,
         '-frames:v',
         '1',
-        '-vf',
-        'scale=in_range=auto:in_color_matrix=auto:out_range=pc,format=rgb24',
+        '-f',
+        'rawvideo',
+        '-pix_fmt',
+        'yuv420p',
         frame,
       ],
       { encoding: 'utf8', windowsHide: true },
     );
     if (decoded.status !== 0) throw new Error(`FFmpeg failed: ${decoded.stderr}`);
-    return bars(PNG.sync.read(readFileSync(frame)));
+    const planes = readFileSync(frame);
+    const chroma = (WIDTH / 2) * (HEIGHT / 2);
+    return Array.from({ length: 8 }, (_, bar) => {
+      const x = Math.floor(((bar + 0.5) * WIDTH) / 8);
+      const y = Math.floor(HEIGHT / 2);
+      const at = Math.floor(y / 2) * (WIDTH / 2) + Math.floor(x / 2);
+      return [
+        planes[y * WIDTH + x],
+        planes[WIDTH * HEIGHT + at],
+        planes[WIDTH * HEIGHT + chroma + at],
+      ];
+    });
   };
+  /** What the chart's bars are in BT.709 limited range, which exports are. */
+  const chartPlanes = colours.map(([r, g, b]) => {
+    const luma = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+    return [
+      Math.round(16 + 219 * luma),
+      Math.round(128 + (224 * (b / 255 - luma)) / 1.8556),
+      Math.round(128 + (224 * (r / 255 - luma)) / 1.5748),
+    ];
+  });
   const reference = await exported('bt601-true.webm');
   const mended = await exported('bt601-as-709.webm');
-  console.log(`Export, mended matrix: off by ${difference(mended, reference)}`);
+  console.log(
+    `Export, mended matrix: off by ${difference(mended, reference)}, ` +
+      `off the chart by ${difference(mended, chartPlanes)}`,
+  );
   expect(difference(mended, reference)).toBeLessThanOrEqual(1);
+  expect(difference(mended, chartPlanes)).toBeLessThanOrEqual(2);
   const rangeReference = await exported('full-true.webm');
   const mendedRange = await exported('full-as-limited.webm');
-  console.log(`Export, mended range: off by ${difference(mendedRange, rangeReference)}`);
+  console.log(
+    `Export, mended range: off by ${difference(mendedRange, rangeReference)}, ` +
+      `off the chart by ${difference(mendedRange, chartPlanes)}`,
+  );
   expect(difference(mendedRange, rangeReference)).toBeLessThanOrEqual(1);
+  expect(difference(mendedRange, chartPlanes)).toBeLessThanOrEqual(2);
 });
