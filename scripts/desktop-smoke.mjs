@@ -329,10 +329,17 @@ try {
     return (await hooks.client.api.projectSnapshot()).project;
   }, projectPath);
   const file = JSON.parse(await readFile(projectPath, 'utf8'));
-  if (file.format !== 'cashgear-video-project' || file.version !== 7)
+  if (file.format !== 'cashgear-video-project' || file.version !== 8)
     throw new Error('Unexpected project file: ' + JSON.stringify(file).slice(0, 200));
-  // The file leaves out an empty LUT list; the snapshot lists LUTs without their data.
-  expect({ ...file.project, luts: file.project.luts ?? [] }).toEqual(saved);
+  // The file leaves out what is empty; the snapshot lists LUTs and sequences without
+  // their data, and says which sequence is open.
+  expect({
+    ...file.project,
+    luts: file.project.luts ?? [],
+    sequences: [],
+    openSequence: null,
+    mediaColour: {},
+  }).toEqual(saved);
   if (saved.media.length !== 2 || !saved.media.every((m) => m.location.kind === 'path'))
     throw new Error('Desktop projects should record both files by path');
   await expect(page.getByTestId('save-state')).toHaveAttribute('data-state', 'saved');
