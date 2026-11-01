@@ -13,7 +13,14 @@ const levelLabels = ['Full', '1/2', '1/4'];
  * The program monitor's controls: transport buttons, timecode, a scrub bar and
  * the preview quality.
  */
-export function TransportBar({ playback }: { playback: PlaybackControls }) {
+export function TransportBar({
+  playback,
+  angles,
+}: {
+  playback: PlaybackControls;
+  /** The angle viewer's switch, when the timeline has a multicam clip. */
+  angles?: { on: boolean; toggle(): void };
+}) {
   const state = usePlaybackState(playback);
   const disabled = !state || state.duration <= 0;
   const playing = state?.playing ?? false;
@@ -95,6 +102,18 @@ export function TransportBar({ playback }: { playback: PlaybackControls }) {
         <span className="cgv-shuttle" data-testid="shuttle-rate">
           {state.rate > 0 ? '▶︎' : '◀︎'} {Math.abs(state.rate)}×
         </span>
+      )}
+      {angles && (
+        <button
+          type="button"
+          className="cgv-angle-view"
+          aria-pressed={angles.on}
+          data-testid="angle-view"
+          title="Show the multicam clip's angles. Keys 1 to 4 cut to an angle."
+          onClick={angles.toggle}
+        >
+          Angles
+        </button>
       )}
       <label className="cgv-quality">
         <span>Quality</span>

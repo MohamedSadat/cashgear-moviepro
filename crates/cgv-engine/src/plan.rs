@@ -303,6 +303,21 @@ fn layer_key(path: u64, clip: ClipId) -> u64 {
     (hasher.finish() & ((1 << 53) - 1)) | (1 << 52)
 }
 
+/// What the clips inside sequence clip `clip` keep their streams by. The pieces
+/// of a split sequence clip share it, so their decoders play on through the cut;
+/// two sequence clips showing one sequence elsewhere read it apart.
+pub(crate) fn inner_path(path: u64, track: TrackId, clip: &Clip) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    (
+        path,
+        track.0,
+        clip.sequence.map(|id| id.0),
+        (clip.start - clip.source_in).0,
+    )
+        .hash(&mut hasher);
+    (hasher.finish() & ((1 << 53) - 1)) | (1 << 52)
+}
+
 struct Planner<'p> {
     project: &'p Project,
     frame_length: Flicks,
@@ -404,7 +419,7 @@ impl Planner<'_> {
             return None;
         }
         let source_time = clip.source_at(offset, self.frame_length);
-        let inside = self.tracks(inner, source_time, key, depth + 1);
+        let inside = self.tracks(inner, source_time, inner_path(path, track, clip), depth + 1);
         if inside.is_empty() {
             return None;
         }
@@ -508,8 +523,15 @@ pub fn plan_angles(project: &Project, time: Flicks) -> Option<FramePlan> {
         planner.layers.len() - 1
     };
     for (index, angle) in inner.iter().take(count).enumerate() {
+        // The same streams as when the clip shows the angle: switching views or
+        // cutting restarts nothing.
         let key = layer_key(path, ClipId(index as u64 + 1));
-        let inside = planner.tracks(std::slice::from_ref(angle), source_time, key, 1);
+        let inside = planner.tracks(
+            std::slice::from_ref(angle),
+            source_time,
+            inner_path(0, track.id, clip),
+            1,
+        );
         if inside.is_empty() {
             continue;
         }
@@ -763,7 +785,7 @@ fn upcoming_in(
                     low: first + offset,
                     high: last + offset,
                     shift: span.shift - offset,
-                    path: layer_key(span.path, clip.id),
+                    path: inner_path(span.path, track.id, clip),
                     depth: span.depth + 1,
                 };
                 if inside.from < inside.to {

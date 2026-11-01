@@ -103,6 +103,9 @@ export interface EditorState {
    * timeline keeps its own playhead.
    */
   openSequence(id: number | null): Promise<void>;
+  /** The monitor shows the angles of the multicam clip under the playhead. */
+  angleView: boolean;
+  setAngleView(on: boolean): void;
 }
 
 /** A colour setting the eyedropper fills: the colour of the clip's own picture where clicked. */
@@ -154,6 +157,17 @@ export function useEditor(
   const snapshot = project.snapshot;
   const current = snapshot?.project ?? null;
   const [path, setPath] = useState<number[]>([]);
+  const [angleView, setAngleViewState] = useState(false);
+  // A project that opens starts on the program.
+  const projectId = current?.id;
+  useEffect(() => setAngleViewState(false), [projectId]);
+  const setAngleView = useCallback(
+    (on: boolean) => {
+      setAngleViewState(on);
+      void project.setAngleView(on);
+    },
+    [project],
+  );
   /** Each timeline's playhead, by sequence (-1 for the main timeline). */
   const playheads = useRef(new Map<number, number>());
 
@@ -458,6 +472,20 @@ export function useEditor(
           edge === 'start' ? time - target.start : time - (target.start + target.duration);
         execute({ type: 'trim', clip: target.id, edge, delta, ripple: true });
       };
+      /** Cuts the selected multicam clip under the playhead, or the highest one there. */
+      const cutToAngle = (angle: number) => {
+        if (!current) return;
+        const under = (clip: Clip) =>
+          !!clip.angles && clip.start <= time && time < clip.start + clip.duration;
+        const target =
+          selection.map((id) => findClip(current, id)?.clip).find((clip) => clip && under(clip)) ??
+          [...current.tracks]
+            .reverse()
+            .flatMap((track) => track.clips)
+            .find(under);
+        if (!target) return;
+        execute({ type: 'switchAngle', clip: target.id, at: time, angle });
+      };
       // Exporting opens a dialog: the app shell takes that key.
       const handlers: Record<Exclude<ActionId, 'exportVideo'>, () => void> = {
         playPause: playback.toggle,
@@ -558,6 +586,10 @@ export function useEditor(
             .execute({ type: 'nest', clips: selection })
             .then((outcome) => outcome && setSelection([outcome.created[0]]));
         },
+        angle1: () => cutToAngle(0),
+        angle2: () => cutToAngle(1),
+        angle3: () => cutToAngle(2),
+        angle4: () => cutToAngle(3),
         breakApart: () => {
           const target =
             current &&
@@ -606,5 +638,7 @@ export function useEditor(
     timeline,
     path,
     openSequence,
+    angleView,
+    setAngleView,
   };
 }

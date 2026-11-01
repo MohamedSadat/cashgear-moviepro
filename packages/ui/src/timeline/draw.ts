@@ -378,6 +378,12 @@ function speedLabel(clip: Clip) {
   return parts.length ? `${parts.join(' ')} ` : '';
 }
 
+/** A sequence clip's name, with the angle a multicam clip shows. */
+export function sequenceLabel(project: Project, clip: Clip): string {
+  const name = project.sequences?.find((item) => item.id === clip.sequence)?.name ?? 'Sequence';
+  return clip.angles ? `${name} · Angle ${clip.angles.picture + 1}` : name;
+}
+
 function drawClip(
   ctx: CanvasRenderingContext2D,
   input: DrawInput,
@@ -456,7 +462,7 @@ function drawClip(
           : title
             ? titleName(clip.title)
             : sequence
-              ? (input.project.sequences?.find((s) => s.id === clip.sequence)?.name ?? 'Sequence')
+              ? sequenceLabel(input.project, clip)
               : (media?.name ?? clip.media));
       ctx.fillText(name, Math.max(x, 0) + 5, y + nameBar / 2 + 0.5);
     }

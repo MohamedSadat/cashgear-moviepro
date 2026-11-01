@@ -373,8 +373,12 @@ struct Nesting<'a> {
     outer: Vec<Outer<'a>>,
     /// The pans of the sequence tracks it is on, added up.
     pan: f64,
-    /// Tells apart two sequence clips that show the same sequence.
+    /// Tells apart two sequence clips that show the same sequence. The pieces
+    /// of a split one share it, so their effect chains run on.
     key: u64,
+    /// The sound goes on past the start and end of the window: the next piece
+    /// of a split sequence clip plays it, so those edges need no ramp.
+    seamless: (bool, bool),
 }
 
 /// The audible clips of `track` between samples `from` and `to` of its own
@@ -392,7 +396,13 @@ fn track_clips<'a>(
     let mut chain = 0;
     for (index, clip) in track.clips.iter().enumerate() {
         if clip.is_sequence() {
-            sequence_clips(project, track, clip, from, to, nesting, clips);
+            let before = index.checked_sub(1).map(|i| &track.clips[i]);
+            let after = track.clips.get(index + 1);
+            let seamless = (
+                before.is_some_and(|before| sequence_continues(track, before, clip)),
+                after.is_some_and(|after| sequence_continues(track, clip, after)),
+            );
+            sequence_clips(project, track, clip, (from, to), seamless, nesting, clips);
             continue;
         }
         if !audible(project, clip) {
@@ -478,12 +488,12 @@ fn place_nested(
         sound.source_start += low - sound.start;
         sound.start = low;
         sound.fade_in = 0;
-        sound.seamless_in = false;
+        sound.seamless_in = nesting.seamless.0;
     }
     if sound.end > high {
         sound.end = high;
         sound.fade_out = 0;
-        sound.seamless_out = false;
+        sound.seamless_out = nesting.seamless.1;
     }
     if sound.start >= sound.end {
         return false;
@@ -514,15 +524,36 @@ fn place_nested(
     true
 }
 
+/// True when `next` starts where sequence clip `clip` ends and goes on with the
+/// same sound: two pieces of a split clip, or of a multicam clip cut to another
+/// picture.
+fn sequence_continues(track: &Track, clip: &Clip, next: &Clip) -> bool {
+    clip.is_sequence()
+        && next.sequence == clip.sequence
+        && next.start == clip.end()
+        && next.source_in == clip.source_out()
+        && next.audio == clip.audio
+        && clip.angles.map(|angles| angles.sound) == next.angles.map(|angles| angles.sound)
+        && next.volume_db == clip.volume_db
+        && !clip.has_volume_keyframes()
+        && !next.has_volume_keyframes()
+        && clip.fade_out == Flicks::ZERO
+        && next.fade_in == Flicks::ZERO
+        && !track
+            .transitions
+            .iter()
+            .any(|t| t.from == Some(clip.id) && t.to == Some(next.id))
+}
+
 /// The sound of sequence clip `clip` on `track` between samples `from` and `to`
 /// of its own timeline: its sequence's audible tracks, as the top timeline
-/// plays them.
+/// plays them. `seamless` says whether the sound goes on past its start and end.
 fn sequence_clips<'a>(
     project: &'a Project,
     track: &'a Track,
     clip: &'a Clip,
-    from: i64,
-    to: i64,
+    (from, to): (i64, i64),
+    seamless: (bool, bool),
     nesting: &Nesting<'a>,
     clips: &mut Vec<AudioClip>,
 ) {
@@ -546,7 +577,15 @@ fn sequence_clips<'a>(
         return;
     }
     let mut window = (start + nesting.shift, end + nesting.shift);
+    let mut seamless = seamless;
+    // Where a sequence clip around this one cuts it, that clip's edge decides.
     if let Some((low, high)) = nesting.window {
+        if low >= window.0 {
+            seamless.0 = nesting.seamless.0;
+        }
+        if high <= window.1 {
+            seamless.1 = nesting.seamless.1;
+        }
         window = (window.0.max(low), window.1.min(high));
     }
     if window.0 >= window.1 {
@@ -560,9 +599,7 @@ fn sequence_clips<'a>(
         shift: nesting.shift,
         extent: (start, end, fade_in, fade_out),
     });
-    let mut hasher = DefaultHasher::new();
-    (nesting.key, clip.id.0).hash(&mut hasher);
-    let key = hasher.finish();
+    let key = crate::plan::inner_path(nesting.key, track.id, clip);
     let soloing = tracks.iter().any(|track| track.solo);
     for (index, inner) in tracks.iter().enumerate() {
         // A multicam clip plays one angle's sound.
@@ -578,6 +615,7 @@ fn sequence_clips<'a>(
             outer: outer.clone(),
             pan: nesting.pan + inner.pan,
             key,
+            seamless,
         };
         // The inner track's volume joins each of its clips' gains.
         let first = clips.len();
@@ -1226,5 +1264,52 @@ mod tests {
         let source = planned[0].source_start + (at - planned[0].start);
         let expected = Flicks(cgv_time::FLICKS_PER_SECOND + shift).to_samples(48_000);
         assert!((source - expected).abs() <= 1, "{source} {expected}");
+    }
+
+    #[test]
+    fn a_cut_between_angles_does_not_touch_the_sound() {
+        let mut session = session();
+        session
+            .execute(&Command::AddMedia {
+                media: media("other", MediaKind::Video),
+            })
+            .unwrap();
+        let (bottom, top) = (track(&session, 0), track(&session, 1));
+        let first = append(&mut session, bottom, "video", 90);
+        let second = append(&mut session, top, "other", 90);
+        let outcome = session
+            .execute(&Command::MakeMulticam {
+                clips: vec![first, second],
+                sync: vec![Flicks::ZERO, Flicks::ZERO],
+                name: None,
+            })
+            .unwrap();
+        let clip = ClipId(outcome.created[0]);
+        let frames = (SAMPLES * 90) as usize;
+        let whole = mixed(session.project(), 0, frames);
+        // Cut the picture to the other angle: the sound plays on, sample for sample.
+        session
+            .execute(&Command::SwitchAngle {
+                clip,
+                at: Flicks(FRAME * 30),
+                angle: 1,
+            })
+            .unwrap();
+        let planned = clips(&session, 0, SAMPLES * 90);
+        assert_eq!(planned.len(), 2);
+        assert!(planned[0].seamless_out && planned[1].seamless_in);
+        assert_eq!(planned[0].chain, planned[1].chain);
+        let cut = mixed(session.project(), 0, frames);
+        assert!(largest_difference(&whole, &cut) < 1e-5);
+        // Another sound angle at the cut is a real cut, with its ramp.
+        session
+            .execute(&Command::SetAngles {
+                clip: ClipId(outcome.created[0]),
+                picture: None,
+                sound: Some(1),
+            })
+            .unwrap();
+        let planned = clips(&session, 0, SAMPLES * 90);
+        assert!(!planned[0].seamless_out && !planned[1].seamless_in);
     }
 }

@@ -38,7 +38,11 @@ export type ActionId =
   | 'selectTool'
   | 'bladeTool'
   | 'nest'
-  | 'breakApart';
+  | 'breakApart'
+  | 'angle1'
+  | 'angle2'
+  | 'angle3'
+  | 'angle4';
 
 export type ActionGroup = 'Playback' | 'Editing' | 'Timeline' | 'File';
 
@@ -76,6 +80,10 @@ export const actions: readonly ActionInfo[] = [
   { id: 'freezeFrame', label: 'Freeze the frame at the playhead', group: 'Editing' },
   { id: 'nest', label: 'Nest the selected clips in a sequence', group: 'Editing' },
   { id: 'breakApart', label: 'Break a sequence clip apart', group: 'Editing' },
+  { id: 'angle1', label: 'Cut to multicam angle 1', group: 'Editing' },
+  { id: 'angle2', label: 'Cut to multicam angle 2', group: 'Editing' },
+  { id: 'angle3', label: 'Cut to multicam angle 3', group: 'Editing' },
+  { id: 'angle4', label: 'Cut to multicam angle 4', group: 'Editing' },
   { id: 'undo', label: 'Undo', group: 'Editing' },
   { id: 'redo', label: 'Redo', group: 'Editing' },
   { id: 'addMarker', label: 'Add a marker', group: 'Timeline' },
@@ -123,6 +131,10 @@ const common = {
   freezeFrame: ['Alt+F'],
   nest: ['Alt+G'],
   breakApart: ['Alt+Shift+G'],
+  angle1: ['1'],
+  angle2: ['2'],
+  angle3: ['3'],
+  angle4: ['4'],
   toggleMagnetic: [],
   selectTool: ['V'],
   bladeTool: ['C'],

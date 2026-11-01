@@ -37,6 +37,7 @@ import { icons } from './icons';
 import { Inspector } from './inspector/Inspector';
 import { ScopesPanel } from './scopes/ScopesPanel';
 import { MediaLibraryPanel } from './media/MediaLibraryPanel';
+import { MulticamDialog } from './multicam/MulticamDialog';
 import { SequencesPanel } from './sequences/SequencesPanel';
 import { MixerPanel } from './mixer/MixerPanel';
 import { useMeters, type MeterStore } from './mixer/useMeters';
@@ -176,7 +177,15 @@ export function AppShell({ platform }: Props) {
     [library.items],
   );
   const [dialog, setDialog] = useState<
-    'projects' | 'settings' | 'shortcuts' | 'export' | 'licence' | 'update' | 'about' | null
+    | 'projects'
+    | 'settings'
+    | 'shortcuts'
+    | 'export'
+    | 'licence'
+    | 'update'
+    | 'about'
+    | 'multicam'
+    | null
   >(null);
   const editorRun = editor.run;
   const runAction = useCallback(
@@ -301,6 +310,9 @@ export function AppShell({ platform }: Props) {
     if (saved) project.notice(`The diagnostic report is saved: ${saved}`);
   };
 
+  const hasMulticam = !!project.snapshot?.project.tracks.some((track) =>
+    track.clips.some((clip) => clip.angles),
+  );
   const monitor = (
     <main className="cgv-stage">
       <CapabilityNotice report={report} />
@@ -350,7 +362,14 @@ export function AppShell({ platform }: Props) {
         </ProgramMonitor>
         <VoiceoverPanel voiceover={voiceover} />
       </div>
-      <TransportBar playback={playback} />
+      <TransportBar
+        playback={playback}
+        angles={
+          editor.angleView || hasMulticam
+            ? { on: editor.angleView, toggle: () => editor.setAngleView(!editor.angleView) }
+            : undefined
+        }
+      />
     </main>
   );
 
@@ -536,6 +555,7 @@ export function AppShell({ platform }: Props) {
             editor={editor}
             diagnostic={options.diagnostic}
             onRecord={() => void voiceover.open()}
+            onMulticam={() => setDialog('multicam')}
           />
         }
         layout={settings.layout}
@@ -543,6 +563,9 @@ export function AppShell({ platform }: Props) {
       />
       <CapabilityStrip engine={engine} probe={probe} report={report} native={native} />
       {devOverlay && <DevOverlay client={client} />}
+      {dialog === 'multicam' && project.snapshot && (
+        <MulticamDialog editor={editor} ai={ai} onClose={() => setDialog(null)} />
+      )}
       {dialog === 'projects' && (
         <ProjectsDialog project={project} onClose={() => setDialog(null)} />
       )}

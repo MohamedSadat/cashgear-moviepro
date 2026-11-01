@@ -117,15 +117,43 @@ export function Inspector({ editor, ai }: { editor: EditorState; ai: AiToolsStat
             : title
               ? `Title: ${titleName(clip.title)}`
               : sequence
-                ? `Sequence: ${sequence.name}`
+                ? `${clip.angles ? 'Multicam' : 'Sequence'}: ${sequence.name}`
                 : (media?.name ?? 'Clip')}
       </h2>
       {sequence && (
-        <Section title="Sequence">
-          <p className="cgv-muted">
-            Shows {sequence.name} as one picture and one sound. Its own effects, transform and
-            volume apply over everything in it.
-          </p>
+        <Section title={clip.angles ? 'Multicam' : 'Sequence'}>
+          {clip.angles ? (
+            (['picture', 'sound'] as const).map((part) => (
+              <label className="cgv-field" key={part} data-testid={`field-angle-${part}`}>
+                <span className="cgv-field-label">
+                  {part === 'picture' ? 'Picture angle' : 'Sound angle'}
+                </span>
+                <select
+                  aria-label={part === 'picture' ? 'Picture angle' : 'Sound angle'}
+                  value={clip.angles![part]}
+                  disabled={locked}
+                  onChange={(event) =>
+                    void editor.project.execute({
+                      type: 'setAngles',
+                      clip: clip.id,
+                      [part]: Number(event.currentTarget.value),
+                    })
+                  }
+                >
+                  {Array.from({ length: sequence.tracks }, (_, angle) => (
+                    <option key={angle} value={angle}>
+                      Angle {angle + 1}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))
+          ) : (
+            <p className="cgv-muted">
+              Shows {sequence.name} as one picture and one sound. Its own effects, transform and
+              volume apply over everything in it.
+            </p>
+          )}
           <div className="cgv-sequence-actions">
             <CgButton
               appearance="solid"
@@ -140,7 +168,7 @@ export function Inspector({ editor, ai }: { editor: EditorState; ai: AiToolsStat
               disabled={locked}
               onClick={() => editor.run('breakApart')}
             >
-              Break apart
+              {clip.angles ? 'Flatten' : 'Break apart'}
             </CgButton>
           </div>
         </Section>

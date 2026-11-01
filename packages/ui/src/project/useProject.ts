@@ -83,6 +83,8 @@ export interface ProjectState {
   notice(text: string): void;
   /** Shows sequence `id` in the timeline and the monitor, or the main timeline with null. */
   openSequence(id: number | null): Promise<void>;
+  /** The monitor shows the angles of the multicam clip under the playhead, or the program. */
+  setAngleView(on: boolean): Promise<void>;
   undo(): Promise<void>;
   redo(): Promise<void>;
   save(): Promise<boolean>;
@@ -530,6 +532,16 @@ export function useProject(
     },
     [api, notice, show],
   );
+  const setAngleView = useCallback(
+    async (on: boolean) => {
+      try {
+        await api().projectSetAngleView(on);
+      } catch (error) {
+        notice(message(error));
+      }
+    },
+    [api, notice],
+  );
   const undo = useCallback(async () => {
     try {
       show(await api().projectUndo());
@@ -607,6 +619,7 @@ export function useProject(
     notice,
     latest: () => snapshotRef.current,
     openSequence,
+    setAngleView,
     undo,
     redo,
     save,

@@ -20,6 +20,7 @@ import { draggedMedia } from '../media/dragging';
 import { nameOf } from '../effects/catalog';
 import { draggedEffect, effectDragType } from '../effects/dragging';
 import { formatTime } from '../project/format';
+import { angleClips } from '../multicam/MulticamDialog';
 import { SequencePath } from '../sequences/SequencePath';
 import { TimelineController, findClip, projectEnd, type TimelineHost } from './controller';
 import {
@@ -289,7 +290,7 @@ const ClipList = memo(function ClipList({
                 : clip.kind === 'title'
                   ? `Title: ${titleName(clip.title)}`
                   : clip.kind === 'sequence'
-                    ? `Sequence: ${sequenceNames.get(clip.sequence ?? -1) ?? 'missing'}`
+                    ? `${clip.angles ? `Multicam, angle ${clip.angles.picture + 1}` : 'Sequence'}: ${sequenceNames.get(clip.sequence ?? -1) ?? 'missing'}`
                     : (names.get(clip.media) ?? clip.media)}
               , {formatTime(clip.start)} to {formatTime(clip.start + clip.duration)} on{' '}
               {trackLabel(track, index)}
@@ -310,12 +311,17 @@ export function Timeline({
   editor,
   diagnostic,
   onRecord,
+  onMulticam,
 }: {
   editor: EditorState;
   diagnostic?: boolean;
   /** Opens the voiceover panel. */
   onRecord?(): void;
+  /** Opens the dialog that makes a multicam clip of the selected clips. */
+  onMulticam?(): void;
 }) {
+  const onMulticamRef = useRef(onMulticam);
+  onMulticamRef.current = onMulticam;
   const { project, playback } = editor;
   const snapshot = project.snapshot;
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -354,7 +360,7 @@ export function Timeline({
 
   const openMenu = useRef<(hit: Hit, x: number, y: number) => void>(() => {});
   openMenu.current = (hit, x, y) => {
-    const items = menuFor(editorRef.current, hit);
+    const items = menuFor(editorRef.current, hit, onMulticamRef.current);
     if (!items.length) return;
     setMenuItems(items);
     // The menu reads its items on open, after React has rendered them.
@@ -730,7 +736,7 @@ export function Timeline({
 }
 
 /** The right-click menu for what is under the pointer. */
-function menuFor(editor: EditorState, hit: Hit): MenuItem[] {
+function menuFor(editor: EditorState, hit: Hit, onMulticam?: () => void): MenuItem[] {
   const snapshot = editor.project.snapshot;
   if (!snapshot) return [];
   const project = editor.project;
@@ -812,8 +818,15 @@ function menuFor(editor: EditorState, hit: Hit): MenuItem[] {
   const under = clip.start < time && time < clip.start + clip.duration;
   const many = editor.selection.length > 1;
   const sequence = clip.kind === 'sequence' ? clip.sequence : undefined;
+  const angles = angleClips(editor).length;
   const nesting: MenuItem[] = [
     { key: 'nest', text: 'Nest in a sequence', beginGroup: true, command: () => run('nest') },
+    {
+      key: 'multicam',
+      text: 'Make multicam clip…',
+      disabled: !onMulticam || angles < 2 || angles > 4 || angles !== editor.selection.length,
+      command: () => onMulticam?.(),
+    },
   ];
   if (sequence !== undefined)
     nesting.push(
@@ -822,7 +835,11 @@ function menuFor(editor: EditorState, hit: Hit): MenuItem[] {
         text: 'Open sequence',
         command: () => void editor.openSequence(sequence),
       },
-      { key: 'break', text: 'Break apart', command: () => run('breakApart') },
+      {
+        key: 'break',
+        text: clip.angles ? 'Flatten' : 'Break apart',
+        command: () => run('breakApart'),
+      },
     );
   return [
     { key: 'split', text: 'Split at the playhead', disabled: !under, command: () => run('split') },

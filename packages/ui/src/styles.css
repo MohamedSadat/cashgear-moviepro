@@ -1009,6 +1009,17 @@ body,
   border-top: 1px solid var(--cgv-border);
 }
 
+.cgv-angle-view[aria-pressed='true'] {
+  border-color: var(--cgv-accent);
+  color: var(--cgv-accent);
+}
+
+.cgv-multicam-angles {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
 .cgv-sequence-item {
   padding: 8px;
   border: 1px solid var(--cgv-border);
