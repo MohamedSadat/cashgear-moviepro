@@ -376,12 +376,16 @@ export const desktopPlatform: MediaPlatform = {
     return found.map(toRequest);
   },
 
-  async makeProxy(id, onProgress) {
+  async makeProxy(id, onProgress, size) {
     const events = new Channel<ProxyEvent>();
     events.onmessage = (message) => {
       if (message.event === 'progress') onProgress(message.progress);
     };
-    const proxy = await invoke<RegisteredMedia>('media_make_proxy', { id, events });
+    const proxy = await invoke<RegisteredMedia>('media_make_proxy', {
+      id,
+      size: size ?? null,
+      events,
+    });
     return toRequest(proxy).source;
   },
 

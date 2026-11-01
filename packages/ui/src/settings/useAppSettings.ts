@@ -1,10 +1,19 @@
 import { useCallback, useRef, useState } from 'react';
 import { readShortcuts, type ShortcutSettings } from '../shortcuts/keymap';
 
+/**
+ * Desktop proxies for media over 1080p, at half, a quarter or all of its height
+ * (never under 720 rows); off plays such media from its original. Media the
+ * webview cannot decode always gets one.
+ */
+export type ProxySize = 'half' | 'quarter' | 'full' | 'off';
+const proxySizes: ProxySize[] = ['half', 'quarter', 'full', 'off'];
+
 /** Per-user settings: kept in this browser or app profile, never in a project. */
 export interface AppSettings {
   shortcuts: ShortcutSettings;
   snapping: boolean;
+  proxies: ProxySize;
   /** Panel sizes by splitter, as the CG splitter reports them. */
   layout: Record<string, unknown>;
 }
@@ -21,8 +30,16 @@ function load(): AppSettings {
   return {
     shortcuts: readShortcuts(stored.shortcuts),
     snapping: stored.snapping !== false,
+    proxies: proxySizes.includes(stored.proxies as ProxySize)
+      ? (stored.proxies as ProxySize)
+      : 'half',
     layout: stored.layout && typeof stored.layout === 'object' ? stored.layout : {},
   };
+}
+
+/** The proxy size as last saved, for code outside React. */
+export function storedProxySize(): ProxySize {
+  return load().proxies;
 }
 
 export interface AppSettingsState {

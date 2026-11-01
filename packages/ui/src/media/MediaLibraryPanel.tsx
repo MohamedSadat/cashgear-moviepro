@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type DragEvent } from 'react';
 import type { MediaItem, MediaRef } from '@cgv/engine-client';
 import { mediaAccept } from '../platform';
 import type { ProjectState } from '../project/useProject';
+import type { ProxySize } from '../settings/useAppSettings';
 import { mediaDragType } from '../timeline/controller';
 import { draggedMedia } from './dragging';
 import type { MediaVisuals } from './useMediaLibrary';
@@ -158,7 +159,21 @@ function playable(item: MediaItem) {
   return item.status.state === 'ready' || item.status.state === 'proxyReady';
 }
 
-export function MediaLibraryPanel({ project }: { project: ProjectState }) {
+const proxyOptions: { value: ProxySize; label: string }[] = [
+  { value: 'half', label: 'Proxies: half size' },
+  { value: 'quarter', label: 'Proxies: quarter size' },
+  { value: 'full', label: 'Proxies: full size' },
+  { value: 'off', label: 'Proxies: off' },
+];
+
+export function MediaLibraryPanel({
+  project,
+  proxies,
+}: {
+  project: ProjectState;
+  /** Desktop: the proxy size for media over 1080p, and how to change it. */
+  proxies?: { size: ProxySize; change(size: ProxySize): void };
+}) {
   const library = project.library;
   const input = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -195,6 +210,21 @@ export function MediaLibraryPanel({ project }: { project: ProjectState }) {
         >
           {library.busy ? 'Importing…' : 'Import'}
         </button>
+        {proxies && (
+          <select
+            aria-label="Proxies for media over 1080p"
+            title="Media over 1080p plays through a proxy of this size; exports always use the original."
+            data-testid="proxy-size"
+            value={proxies.size}
+            onChange={(event) => proxies.change(event.target.value as ProxySize)}
+          >
+            {proxyOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        )}
         {/* Fallback picker for browsers without File System Access; tests also use it. */}
         <input
           ref={input}

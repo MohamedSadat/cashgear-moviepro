@@ -111,9 +111,14 @@ export function useExport(
       const fileName = exportFileName(snapshot.project.name, settings.format);
       // Taken now: edits made while the export runs do not change it.
       const { text } = await client.api.projectSave();
+      // Exports never use proxies: media the webview decodes is read from its
+      // original, and the rest through FFmpeg, which needs the proxy's frame index.
       const media = snapshot.project.media.flatMap((ref) => {
         const source = project.library.source(ref.id);
-        return source ? [{ id: ref.id, source, proxy: project.library.proxy(ref.id) }] : [];
+        const decodable = project.library.items.find((item) => item.id === ref.id)?.video
+          ?.decodable;
+        const proxy = decodable === false ? project.library.proxy(ref.id) : null;
+        return source ? [{ id: ref.id, source, proxy }] : [];
       });
       running.current = { export: null, destination: null, cancelled: false };
       let destination: ExportDestination | null;

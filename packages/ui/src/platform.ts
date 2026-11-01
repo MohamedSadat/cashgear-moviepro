@@ -138,7 +138,11 @@ export interface MediaPlatform {
   /** Desktop: asks for a folder and finds missing files in it by name and size. */
   searchFolder?(media: MediaRef[]): Promise<ImportRequest[]>;
   /** Desktop: transcodes `id` to an H.264 proxy, reporting progress from 0 to 1. */
-  makeProxy?(id: string, onProgress: (progress: number) => void): Promise<MediaSourceRef>;
+  makeProxy?(
+    id: string,
+    onProgress: (progress: number) => void,
+    size?: 'half' | 'quarter' | 'full',
+  ): Promise<MediaSourceRef>;
   /** Desktop: drops the proxy of a file that changed, so a new one is made. */
   dropProxy?(id: string): Promise<void>;
   /** Desktop test support: imports local paths as if they were dropped. */

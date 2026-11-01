@@ -14,6 +14,7 @@ import {
   type MediaStatus,
 } from '@cgv/engine-client';
 import type { MediaPlatform } from '../platform';
+import { storedProxySize } from '../settings/useAppSettings';
 
 export interface MediaVisuals {
   /** Object URLs of filmstrip thumbnails, in time order. */
@@ -145,6 +146,11 @@ type Success = Extract<ImportOutcome, { item: MediaItem }>;
 const configured = new WeakMap<EngineClient, Promise<void>>();
 
 /** The engine's open media as the UI sees it: items, thumbnails and waveforms. */
+/** Over 1080p: such media plays through a proxy on the desktop unless proxies are off. */
+function bigVideo(item: MediaItem) {
+  return !!item.video && item.video.codedWidth * item.video.codedHeight > 1920 * 1088;
+}
+
 export function useMediaLibrary(
   client: EngineClient | null,
   platform: MediaPlatform,
@@ -212,6 +218,16 @@ export function useMediaLibrary(
     [notice, platform.cache],
   );
 
+  /** Decodable media gets a proxy when it is too big to play smoothly. */
+  const wantsProxy = useCallback(
+    (item: MediaItem) =>
+      !!platform.makeProxy &&
+      item.status.state === 'ready' &&
+      bigVideo(item) &&
+      storedProxySize() !== 'off',
+    [platform],
+  );
+
   const runProxy = useCallback(
     async (engine: EngineClient, item: MediaItem) => {
       if (!platform.makeProxy) return;
@@ -219,11 +235,16 @@ export function useMediaLibrary(
       await status({ state: 'proxyRunning', progress: 0 });
       let last = 0;
       try {
-        const proxy = await platform.makeProxy(item.id, (progress) => {
-          if (progress - last < 0.02 && progress < 1) return;
-          last = progress;
-          void status({ state: 'proxyRunning', progress });
-        });
+        const size = storedProxySize();
+        const proxy = await platform.makeProxy(
+          item.id,
+          (progress) => {
+            if (progress - last < 0.02 && progress < 1) return;
+            last = progress;
+            void status({ state: 'proxyRunning', progress });
+          },
+          size === 'off' ? 'half' : size,
+        );
         const ready = await engine.api.attachProxy(item.id, proxy);
         const entry = sources.current.get(item.id);
         if (entry) entry.proxy = proxy;
@@ -281,7 +302,8 @@ export function useMediaLibrary(
           sources.current.set(outcome.id, { source: outcome.source });
           upsert(outcome.item);
           refreshVisuals(outcome.item);
-          if (outcome.item.status.state === 'proxyNeeded') void runProxy(engine, outcome.item);
+          if (outcome.item.status.state === 'proxyNeeded' || wantsProxy(outcome.item))
+            void runProxy(engine, outcome.item);
           done.push(outcome);
         }
         if (options.remember && done.length)
@@ -291,7 +313,7 @@ export function useMediaLibrary(
       }
       return { done, failed, changed };
     },
-    [notice, platform, refreshVisuals, runProxy, upsert],
+    [notice, platform, refreshVisuals, runProxy, upsert, wantsProxy],
   );
 
   useEffect(() => {

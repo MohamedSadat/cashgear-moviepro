@@ -445,7 +445,16 @@ export function AppShell({ platform }: Props) {
               {
                 id: 'media',
                 label: 'Media',
-                render: () => <MediaLibraryPanel project={project} />,
+                render: () => (
+                  <MediaLibraryPanel
+                    project={project}
+                    proxies={
+                      platform.makeProxy
+                        ? { size: settings.proxies, change: (proxies) => update({ proxies }) }
+                        : undefined
+                    }
+                  />
+                ),
               },
               {
                 id: 'templates',
