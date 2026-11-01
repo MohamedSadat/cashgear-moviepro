@@ -11,8 +11,10 @@ import init, {
   beats,
   scene_cuts,
   silences,
+  sync_lag,
 } from '../pkg/ai/cgv_ai';
-import { openInput } from '../media/sources';
+import { openInput, readRange, sourceSize } from '../media/sources';
+import { readStartTimecode } from '../media/timecode';
 import type { MediaSourceRef } from '../media/types';
 import { Cutout, cutoutSize } from './cutout';
 import { MatteWriter } from './mattes';
@@ -26,6 +28,7 @@ import type {
   SceneSettings,
   SilenceSettings,
   SoundAnalysis,
+  SyncResult,
   TranscribeRequest,
 } from './types';
 import { Whisper } from './whisper';
@@ -169,6 +172,46 @@ const api: AiApi = {
       cancelled.delete(job);
       input.dispose();
     }
+  },
+
+  async syncSound(job, sources, seconds, onProgress) {
+    await ready;
+    const progress = throttle(onProgress);
+    try {
+      const sounds: Float32Array[] = [];
+      for (const [index, { source, start, end }] of sources.entries()) {
+        const stop = Math.min(end, start + seconds);
+        sounds.push(
+          await speech(
+            source,
+            start,
+            stop,
+            (fraction) => progress((0.8 * (index + fraction)) / sources.length),
+            () => check(job),
+          ).catch(() => new Float32Array(0)),
+        );
+      }
+      const [reference] = sounds;
+      return sounds.map((sound, index): SyncResult | null => {
+        check(job);
+        if (index === 0) return reference.length ? { offset: 0, confidence: 1 } : null;
+        const found = sync_lag(reference, sound, seconds);
+        progress(0.8 + (0.2 * index) / sources.length);
+        if (found.length < 2) return null;
+        // A moment `u` into the first stretch is `u + lag` into this one.
+        return {
+          offset: sources[index].start - sources[0].start + found[0],
+          confidence: found[1],
+        };
+      });
+    } finally {
+      cancelled.delete(job);
+    }
+  },
+
+  async timecode(source) {
+    const size = await sourceSize(source);
+    return readStartTimecode((start, end) => readRange(source, start, end), size);
   },
 
   async silences(analysis: SoundAnalysis, settings: SilenceSettings) {

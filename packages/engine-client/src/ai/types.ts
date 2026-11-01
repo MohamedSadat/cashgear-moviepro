@@ -1,4 +1,5 @@
 import type { MediaSourceRef } from '../media/types';
+import type { StartTimecode } from '../media/timecode';
 
 /** Readings per second of the sound envelopes. */
 export const envelopeRate = 100;
@@ -134,6 +135,23 @@ export interface BeatAnalysis {
  * The AI worker: analysis and models off the engine's thread. Each job takes
  * an id that `cancel` stops it by; a cancelled job rejects with an AbortError.
  */
+/** A stretch of a medium's sound to sync, in its seconds. */
+export interface SyncSource {
+  source: MediaSourceRef;
+  start: number;
+  end: number;
+}
+
+/**
+ * Where a source's sound lines up with the first's: seconds of its media time
+ * minus the first's for the same moment (0 for the first), and how alike the
+ * sound is there (0 to 1).
+ */
+export interface SyncResult {
+  offset: number;
+  confidence: number;
+}
+
 export interface AiApi {
   /** Decodes a medium's sound once and measures it; null when it has none. */
   analyzeSound(
@@ -141,6 +159,18 @@ export interface AiApi {
     source: MediaSourceRef,
     onProgress: (fraction: number) => void,
   ): Promise<SoundAnalysis | null>;
+  /**
+   * Lines sources up by their sound; null for one that is silent. Each looks at
+   * most `seconds` from its start.
+   */
+  syncSound(
+    job: number,
+    sources: SyncSource[],
+    seconds: number,
+    onProgress: (fraction: number) => void,
+  ): Promise<(SyncResult | null)[]>;
+  /** A medium's start timecode, in seconds from midnight; null when it has none. */
+  timecode(source: MediaSourceRef): Promise<StartTimecode | null>;
   /** Silences as `[start, end]` source seconds, in order. */
   silences(analysis: SoundAnalysis, settings: SilenceSettings): Promise<[number, number][]>;
   beats(analysis: SoundAnalysis): Promise<BeatAnalysis>;

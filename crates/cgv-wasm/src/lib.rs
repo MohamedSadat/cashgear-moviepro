@@ -554,6 +554,8 @@ mod bridge {
     #[wasm_bindgen]
     pub struct ProjectSession {
         inner: cgv_model::Session,
+        /// The monitor shows the angles of the multicam clip under the playhead.
+        angle_view: bool,
     }
 
     #[wasm_bindgen]
@@ -565,6 +567,7 @@ mod bridge {
             cgv_model::validate(&project).map_err(js_error)?;
             Ok(Self {
                 inner: cgv_model::Session::new(project),
+                angle_view: false,
             })
         }
         /// Opens `.cgvproj` text. `recovered` marks an autosave (unsaved changes);
@@ -583,7 +586,10 @@ mod bridge {
             } else {
                 cgv_model::Session::new(project)
             };
-            Ok(Self { inner })
+            Ok(Self {
+                inner,
+                angle_view: false,
+            })
         }
         /// The `.cgvproj` text of the current state.
         pub fn save(&self) -> String {
@@ -655,6 +661,11 @@ mod bridge {
             let id = id.map(|id| cgv_model::SequenceId(id as u64));
             self.inner.set_open_sequence(id).map_err(js_error)
         }
+        /// Shows the angles of the multicam clip under the playhead instead of the
+        /// program, where there is one. Exports never turn this on.
+        pub fn set_angle_view(&mut self, on: bool) {
+            self.angle_view = on;
+        }
         /// The sequence open in the timeline, if any.
         pub fn open_sequence_id(&self) -> Option<f64> {
             self.inner.open_sequence().map(|id| id.0 as f64)
@@ -683,7 +694,12 @@ mod bridge {
         /// (`cgv_engine::plan::FramePlan`): the pure half of `renderFrame(t)`.
         pub fn plan_frame(&self, time: f64) -> Result<String, JsValue> {
             let time = cgv_time::Flicks(time as i64);
-            let plan = cgv_engine::plan::plan_frame(self.inner.timeline_project(), time);
+            let project = self.inner.timeline_project();
+            let angles = self
+                .angle_view
+                .then(|| cgv_engine::plan::plan_angles(project, time))
+                .flatten();
+            let plan = angles.unwrap_or_else(|| cgv_engine::plan::plan_frame(project, time));
             serde_json::to_string(&plan).map_err(js_error)
         }
         pub fn sample_rate(&self) -> u32 {

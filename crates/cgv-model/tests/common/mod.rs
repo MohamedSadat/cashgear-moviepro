@@ -665,7 +665,35 @@ pub fn random_command(project: &Project, rng: &mut Rng) -> Command {
     let (mask_clip, mask_id) = mask.unwrap_or((any_clip, MaskId(0)));
     let sequences: Vec<SequenceId> = project.sequences.iter().map(|s| s.id).collect();
     let sequence = rng.pick(&sequences).unwrap_or(SequenceId(0));
-    match rng.below(156) {
+    let multicams: Vec<ClipId> = project
+        .clips()
+        .filter(|clip| clip.angles.is_some())
+        .map(|clip| clip.id)
+        .collect();
+    let multicam = rng.pick(&multicams).unwrap_or(any_clip);
+    match rng.below(162) {
+        156..=157 => {
+            let count = 2 + rng.below(2) as usize;
+            let picked: Vec<ClipId> = (0..count).filter_map(|_| rng.pick(&clips)).collect();
+            Command::MakeMulticam {
+                sync: picked
+                    .iter()
+                    .map(|_| Flicks(rng.range(0, 90_000_000_000)))
+                    .collect(),
+                clips: picked,
+                name: None,
+            }
+        }
+        158..=159 => Command::SwitchAngle {
+            clip: multicam,
+            at: Flicks(rng.range(0, 40_000_000_000)),
+            angle: rng.below(4) as u32,
+        },
+        160..=161 => Command::SetAngles {
+            clip: multicam,
+            picture: rng.percent(70).then(|| rng.below(4) as u32),
+            sound: rng.percent(50).then(|| rng.below(4) as u32),
+        },
         146..=148 => {
             let mut picked = vec![any_clip];
             if rng.percent(50) {

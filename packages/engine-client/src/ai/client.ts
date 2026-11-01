@@ -13,7 +13,10 @@ import type {
   SceneSettings,
   SilenceSettings,
   SoundAnalysis,
+  SyncResult,
+  SyncSource,
 } from './types';
+import type { StartTimecode } from '../media/timecode';
 
 /** True for the error a cancelled AI job rejects with. */
 export function isCancelled(error: unknown) {
@@ -51,6 +54,17 @@ export function createAiClient() {
       signal?: AbortSignal,
     ): Promise<SoundAnalysis | null> {
       return run(signal, (id) => api.analyzeSound(id, source, proxy(onProgress)));
+    },
+    syncSound(
+      sources: SyncSource[],
+      seconds: number,
+      onProgress: (fraction: number) => void,
+      signal?: AbortSignal,
+    ): Promise<(SyncResult | null)[]> {
+      return run(signal, (id) => api.syncSound(id, sources, seconds, proxy(onProgress)));
+    },
+    timecode(source: MediaSourceRef): Promise<StartTimecode | null> {
+      return api.timecode(source);
     },
     silences(analysis: SoundAnalysis, settings: SilenceSettings): Promise<[number, number][]> {
       return api.silences(analysis, settings);

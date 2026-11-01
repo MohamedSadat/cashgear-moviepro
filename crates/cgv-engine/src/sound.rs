@@ -564,8 +564,12 @@ fn sequence_clips<'a>(
     (nesting.key, clip.id.0).hash(&mut hasher);
     let key = hasher.finish();
     let soloing = tracks.iter().any(|track| track.solo);
-    for inner in tracks.iter() {
-        if inner.muted || (soloing && !inner.solo) {
+    for (index, inner) in tracks.iter().enumerate() {
+        // A multicam clip plays one angle's sound.
+        let other_angle = clip
+            .angles
+            .is_some_and(|angles| angles.sound as usize != index);
+        if other_angle || inner.muted || (soloing && !inner.solo) {
             continue;
         }
         let inside = Nesting {
@@ -1177,5 +1181,50 @@ mod tests {
         let both = clips(&session, 0, SAMPLES * 200);
         assert_eq!(both.len(), 2);
         assert_ne!(both[0].chain, both[1].chain);
+    }
+
+    #[test]
+    fn a_multicam_clip_plays_one_angle_at_its_synced_place() {
+        let mut session = session();
+        session
+            .execute(&Command::AddMedia {
+                media: media("other", MediaKind::Video),
+            })
+            .unwrap();
+        let (bottom, top) = (track(&session, 0), track(&session, 1));
+        let first = append(&mut session, bottom, "video", 90);
+        let second = append(&mut session, top, "other", 90);
+        // The moment at 2 s of "video" is at 1 s plus a little of "other".
+        let shift = 1_234_567;
+        let outcome = session
+            .execute(&Command::MakeMulticam {
+                clips: vec![first, second],
+                sync: vec![
+                    Flicks(cgv_time::FLICKS_PER_SECOND * 2),
+                    Flicks(cgv_time::FLICKS_PER_SECOND + shift),
+                ],
+                name: None,
+            })
+            .unwrap();
+        let clip = ClipId(outcome.created[0]);
+        let planned = clips(&session, 0, SAMPLES * 30);
+        assert_eq!(planned.len(), 1);
+        assert_eq!(planned[0].media, "video");
+        session
+            .execute(&Command::SetAngles {
+                clip,
+                picture: None,
+                sound: Some(1),
+            })
+            .unwrap();
+        let planned = clips(&session, 0, SAMPLES * 90);
+        assert_eq!(planned.len(), 1);
+        assert_eq!(planned[0].media, "other");
+        // Sound keeps the sync: frame 60 of "video" is 1 s plus `shift` of "other"
+        // at the sequence time "video" reached it.
+        let at = SAMPLES * 60;
+        let source = planned[0].source_start + (at - planned[0].start);
+        let expected = Flicks(cgv_time::FLICKS_PER_SECOND + shift).to_samples(48_000);
+        assert!((source - expected).abs() <= 1, "{source} {expected}");
     }
 }

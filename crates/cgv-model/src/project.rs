@@ -55,6 +55,8 @@ id_type!(
 /// Sequences nest at most this deep: a sequence clip inside a sequence clip, and
 /// so on.
 pub const MAX_NESTING: usize = 16;
+/// A multicam clip has at most this many angles.
+pub const MAX_ANGLES: usize = 4;
 
 /// A project: settings, the media it uses, its tracks and markers.
 ///
@@ -107,6 +109,10 @@ pub struct Sequence {
     pub magnetic: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub markers: Vec<Marker>,
+    /// Its tracks are a multicam clip's angles, bottom first, synced: a
+    /// multicam clip shows one angle's picture and plays one angle's sound.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub multicam: bool,
 }
 
 fn tracks_duration(tracks: &[Arc<Track>]) -> Flicks {
@@ -132,6 +138,8 @@ pub struct Timeline<'a> {
     pub main_track: TrackId,
     pub magnetic: bool,
     pub markers: &'a [Marker],
+    /// A multicam sequence: its tracks are angles.
+    pub multicam: bool,
 }
 
 impl<'a> Timeline<'a> {
@@ -239,12 +247,19 @@ impl Project {
 
     /// The tracks and markers of timeline `node`, wherever they are stored for now.
     pub fn timeline(&self, node: Node) -> Option<Timeline<'_>> {
+        // A sequence's own flags stay in its entry while the main timeline's
+        // fields hold its tracks.
+        let multicam = match node {
+            Node::Main => false,
+            Node::Sequence(id) => self.sequence(id).is_some_and(|s| s.multicam),
+        };
         let root = || Timeline {
             node,
             tracks: &self.tracks,
             main_track: self.main_track,
             magnetic: self.magnetic,
             markers: &self.markers,
+            multicam,
         };
         let stored = |id: SequenceId| {
             self.sequence(id).map(|sequence| Timeline {
@@ -253,6 +268,7 @@ impl Project {
                 main_track: sequence.main_track,
                 magnetic: sequence.magnetic,
                 markers: &sequence.markers,
+                multicam,
             })
         };
         match (node, self.swapped) {
@@ -356,6 +372,8 @@ pub struct SequenceInfo<'a> {
     pub name: &'a str,
     pub duration: Flicks,
     pub tracks: usize,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub multicam: bool,
 }
 
 impl Project {
@@ -371,6 +389,7 @@ impl Project {
                     name: &sequence.name,
                     duration: timeline.duration(),
                     tracks: timeline.tracks.len(),
+                    multicam: sequence.multicam,
                 })
             })
             .collect();
@@ -879,6 +898,15 @@ impl ClipKind {
     }
 }
 
+/// The angles a multicam clip shows and plays: indices of its sequence's
+/// tracks, bottom first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Angles {
+    pub picture: u32,
+    pub sound: u32,
+}
+
 /// A piece of media, an adjustment layer or a title, placed on a track.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -891,6 +919,10 @@ pub struct Clip {
     /// The sequence a sequence clip shows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sequence: Option<SequenceId>,
+    /// A multicam clip's angles: which of its sequence's tracks shows its
+    /// picture and which plays its sound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub angles: Option<Angles>,
     /// Timeline position of the first frame.
     pub start: Flicks,
     /// Timeline duration.

@@ -152,6 +152,12 @@ export class ProjectService {
     return this.snapshot();
   }
 
+  /** The monitor shows the multicam clip's angles under the playhead, or the program. */
+  setAngleView(on: boolean) {
+    this.require().set_angle_view(on);
+    this.onChange(false);
+  }
+
   clipsAt(time: number): ClipAt[] {
     return JSON.parse(this.require().clips_at(time));
   }

@@ -12,11 +12,11 @@ use crate::effects::{
     parse_lut_ref, Alignment, Effect, EffectSpec, ParamValue, Transition, TransitionSpec,
     MAX_EFFECTS,
 };
-use crate::masks::{Mask, MAX_MASKS};
+use crate::masks::{BlendMode, Mask, MAX_MASKS};
 use crate::project::{
-    Clip, ClipId, ClipKind, Crop, EffectId, ElementId, LinkId, LutId, Marker, MarkerId, MaskId,
-    Node, Project, Sequence, SequenceId, Speed, Track, TrackId, Transform, TransitionId, MAX_BEATS,
-    MAX_TIME,
+    Angles, Clip, ClipId, ClipKind, Crop, EffectId, ElementId, LinkId, LutId, Marker, MarkerId,
+    MaskId, Node, Project, Sequence, SequenceId, Speed, Track, TrackId, Transform, TransitionId,
+    MAX_ANGLES, MAX_BEATS, MAX_TIME,
 };
 use crate::timing::{check_shape, shape_mean, RampPoint, RampShape};
 use crate::title::Content;
@@ -121,6 +121,11 @@ impl Edit {
                 self.project.media.push(media.clone());
             }
             Command::RemoveMedia { media } => self.remove_media(media)?,
+            Command::AddTrack { .. } | Command::RemoveTrack { .. } | Command::MoveTrack { .. }
+                if self.in_multicam() =>
+            {
+                return Err("A multicam clip's angles stay as they are: add, remove or move tracks outside it".into());
+            }
             Command::AddTrack { index, name } => {
                 if *index > self.project.tracks.len() {
                     return Err(format!("There is no track position {}", index + 1));
@@ -628,6 +633,7 @@ impl Edit {
                     tracks,
                     magnetic: true,
                     markers: Vec::new(),
+                    multicam: false,
                 }));
             }
             Command::RenameSequence { sequence, name } => {
@@ -646,6 +652,15 @@ impl Edit {
             Command::InSequence { .. } => {
                 return Err("Commands run inside one sequence at a time".into())
             }
+            Command::MakeMulticam { clips, sync, name } => {
+                self.make_multicam(clips, sync, name.as_deref())?
+            }
+            Command::SetAngles {
+                clip,
+                picture,
+                sound,
+            } => self.set_angles(*clip, *picture, *sound)?,
+            Command::SwitchAngle { clip, at, angle } => self.switch_angle(*clip, *at, *angle)?,
         }
         Ok(())
     }
@@ -1038,6 +1053,25 @@ impl Edit {
         if spec.sequence.is_some() != (spec.kind == ClipKind::Sequence) {
             return Err("Only sequence clips show a sequence".into());
         }
+        let multicam = spec
+            .sequence
+            .filter(|id| self.project.sequence(*id).is_some_and(|s| s.multicam))
+            .and_then(|id| self.project.sequence_tracks(id))
+            .map(|tracks| tracks.len() as u32);
+        let angles = match (multicam, spec.angles) {
+            (None, Some(_)) => return Err("Only multicam clips have angles".into()),
+            (None, None) => None,
+            (Some(count), angles) => {
+                let angles = angles.unwrap_or(Angles {
+                    picture: 0,
+                    sound: 0,
+                });
+                if angles.picture >= count || angles.sound >= count {
+                    return Err(format!("This multicam clip has {count} angles"));
+                }
+                Some(angles)
+            }
+        };
         if let Some(caption) = &spec.caption {
             if spec.kind != ClipKind::Title {
                 return Err("Only titles are captions".into());
@@ -1115,6 +1149,7 @@ impl Edit {
             kind: spec.kind,
             media,
             sequence: spec.sequence,
+            angles,
             start,
             duration: self.snap(spec.duration)?,
             source_in: spec.source_in,
@@ -1834,6 +1869,11 @@ impl Edit {
                 }
                 to
             }
+            None if self.in_multicam() => {
+                return Err(
+                    "Inside a multicam clip, detach sound onto another angle's track".into(),
+                )
+            }
             None => {
                 let new = Track::new(TrackId(self.alloc()));
                 self.created.push(new.id.0);
@@ -2052,6 +2092,7 @@ impl Edit {
             kind: ClipKind::Media,
             media: clip.media.clone(),
             sequence: None,
+            angles: None,
             start: at,
             duration,
             source_in: source,
@@ -2138,6 +2179,7 @@ impl Edit {
             kind: ClipKind::Media,
             media: media.id.clone(),
             sequence: None,
+            angles: None,
             title: None,
             caption: None,
             source_in: if still {
@@ -2327,6 +2369,7 @@ impl Edit {
             tracks,
             magnetic: false,
             markers: Vec::new(),
+            multicam: false,
         }));
         let clip = self.new_clip(&spec, start)?;
         self.created.push(clip.id.0);
@@ -2335,8 +2378,13 @@ impl Edit {
         self.check_track(target)
     }
 
-    /// Replaces sequence clip `id` with copies of what it shows.
+    /// Replaces sequence clip `id` with copies of what it shows. A multicam
+    /// clip flattens: the angle it shows keeps its picture, the one it plays
+    /// its sound.
     fn break_apart(&mut self, id: ClipId) -> Result<(), String> {
+        if self.in_multicam() {
+            return Err("Clips inside a multicam clip's angles don't break apart".into());
+        }
         let (index, clip) = self.editable(id)?;
         let sequence = clip
             .sequence
@@ -2361,7 +2409,31 @@ impl Edit {
                 }
             }
         }
-        let layers: Vec<Arc<Track>> = cut.project.tracks.clone();
+        // Which of its tracks come back, and what of each.
+        let layers: Vec<(Arc<Track>, Keep)> = match clip.angles {
+            None => cut
+                .project
+                .tracks
+                .iter()
+                .map(|track| (track.clone(), Keep::Both))
+                .collect(),
+            Some(angles) => {
+                let track = |angle: u32| cut.project.tracks[angle as usize].clone();
+                let (picture, sound) = (clip.video, clip.audio);
+                if angles.picture == angles.sound && picture && sound {
+                    vec![(track(angles.picture), Keep::Both)]
+                } else {
+                    let mut layers = Vec::new();
+                    if picture {
+                        layers.push((track(angles.picture), Keep::Picture));
+                    }
+                    if sound {
+                        layers.push((track(angles.sound), Keep::Sound));
+                    }
+                    layers
+                }
+            }
+        };
         {
             let track = self.track_mut(index);
             track.clips.retain(|c| c.id != id);
@@ -2372,11 +2444,12 @@ impl Edit {
         let offset = clip.start - from;
         let mut links: BTreeMap<LinkId, LinkId> = BTreeMap::new();
         let mut target = index;
-        for (layer, source) in layers.iter().enumerate() {
-            let copies: Vec<&Clip> = source
+        for (layer, (source, keep)) in layers.iter().enumerate() {
+            let copies: Vec<ClipSpec> = source
                 .clips
                 .iter()
                 .filter(|c| c.start >= from && c.end() <= to)
+                .filter_map(|c| keep.spec(c))
                 .collect();
             if copies.is_empty() && layer > 0 {
                 continue;
@@ -2393,9 +2466,14 @@ impl Edit {
                     self.project.tracks.insert(target, Arc::new(track));
                 }
             }
+            let originals: Vec<&Clip> = source
+                .clips
+                .iter()
+                .filter(|c| c.start >= from && c.end() <= to && keep.spec(c).is_some())
+                .collect();
             if self.main_index() == Some(target) {
                 let mut end = clip.start;
-                for copy in &copies {
+                for copy in &originals {
                     if copy.start + offset != end {
                         return Err("The sequence's bottom track has gaps: turn off the magnetic main track to break it apart".into());
                     }
@@ -2406,14 +2484,14 @@ impl Edit {
                 }
             }
             let mut renamed: BTreeMap<ClipId, ClipId> = BTreeMap::new();
-            for copy in copies {
-                let mut placed = self.new_clip(&spec_of(copy), copy.start + offset)?;
-                placed.link = copy.link.map(|link| {
+            for (original, spec) in originals.iter().zip(&copies) {
+                let mut placed = self.new_clip(spec, original.start + offset)?;
+                placed.link = original.link.filter(|_| *keep == Keep::Both).map(|link| {
                     *links
                         .entry(link)
                         .or_insert_with(|| LinkId(self.project.alloc_id()))
                 });
-                renamed.insert(copy.id, placed.id);
+                renamed.insert(original.id, placed.id);
                 self.created.push(placed.id.0);
                 self.track_mut(target).insert_sorted(placed);
             }
@@ -2437,6 +2515,195 @@ impl Edit {
             }
             self.check_track(target)?;
         }
+        Ok(())
+    }
+
+    /// True while a command runs inside a multicam sequence.
+    fn in_multicam(&self) -> bool {
+        self.project
+            .swapped
+            .and_then(|id| self.project.sequence(id))
+            .is_some_and(|sequence| sequence.multicam)
+    }
+
+    /// Moves clips `ids` into a multicam sequence, synced by `sync`, and a
+    /// multicam clip into their place.
+    fn make_multicam(
+        &mut self,
+        ids: &[ClipId],
+        sync: &[Flicks],
+        name: Option<&str>,
+    ) -> Result<(), String> {
+        if !(2..=MAX_ANGLES).contains(&ids.len()) {
+            return Err(format!("A multicam clip has 2 to {MAX_ANGLES} angles"));
+        }
+        if sync.len() != ids.len() {
+            return Err("Each angle needs its sync point".into());
+        }
+        if ids.iter().collect::<BTreeSet<_>>().len() != ids.len() {
+            return Err("Each angle is a different clip".into());
+        }
+        let mut found = Vec::new();
+        for &id in ids {
+            let (index, clip) = self.editable(id)?;
+            if clip.kind != ClipKind::Media || !clip.video || self.is_still(&clip) {
+                return Err("Angles are video clips".into());
+            }
+            if clip.retimed() {
+                return Err("Angles play at normal speed, forwards".into());
+            }
+            found.push((index, clip));
+        }
+        // Each clip's first frame on one clock: its media time less its sync point.
+        let clock: Vec<i128> = found
+            .iter()
+            .zip(sync)
+            .map(|((_, clip), sync)| clip.source_in.0 as i128 - sync.0 as i128)
+            .collect();
+        let first = *clock.iter().min().expect("angles");
+        let frame = self.frame.0 as i128;
+        let default_name = format!("Multicam {}", self.project.sequences.len() + 1);
+        let name = check_name(name.unwrap_or(&default_name), "A sequence", MAX_NAME)?;
+        let sequence = SequenceId(self.alloc());
+        let mut tracks = Vec::new();
+        let mut placed = Vec::new();
+        for (angle, ((_, clip), clock)) in found.iter().zip(&clock).enumerate() {
+            // Each angle starts on a frame; its in point takes up the rest, so
+            // the sync stays finer than a frame.
+            let offset = clock - first;
+            let start = (offset + frame - 1).div_euclid(frame) * frame;
+            let shift = Flicks((start - offset) as i64);
+            let duration =
+                Flicks(((clip.duration.0 as i128 - shift.0 as i128) / frame * frame) as i64);
+            if duration < self.frame {
+                return Err(format!("Clip {} is too short to sync", clip.id));
+            }
+            let mut moved = clip.clone();
+            moved.start = Flicks(start as i64);
+            moved.source_in += shift;
+            moved.duration = duration;
+            moved.link = None;
+            moved.fade_in = moved.fade_in.min(duration);
+            moved.fade_out = moved.fade_out.min(duration - moved.fade_in);
+            self.check_clip(&moved)?;
+            let mut track = Track::new(TrackId(self.alloc()));
+            track.name = format!("Angle {}", angle + 1);
+            track.clips.push(moved);
+            tracks.push(Arc::new(track));
+            placed.push(clip.id);
+        }
+        let audio = found.iter().position(|(_, clip)| clip.audio);
+        let at = found
+            .iter()
+            .map(|(_, clip)| clip.start)
+            .min()
+            .expect("angles");
+        let target = found.iter().map(|(index, _)| *index).min().expect("angles");
+        for (index, clip) in &found {
+            let track = self.track_mut(*index);
+            track.clips.retain(|c| c.id != clip.id);
+            track
+                .transitions
+                .retain(|t| t.from != Some(clip.id) && t.to != Some(clip.id));
+        }
+        let length = tracks
+            .iter()
+            .filter_map(|track| track.end())
+            .max()
+            .expect("angles");
+        if !self.project.tracks[target].is_free(at, at + length, &[]) {
+            return Err(format!(
+                "{} has other clips where the multicam clip would go",
+                self.track_name(target)
+            ));
+        }
+        self.project.sequences.push(Arc::new(Sequence {
+            id: sequence,
+            name,
+            main_track: tracks[0].id,
+            tracks,
+            magnetic: false,
+            markers: Vec::new(),
+            multicam: true,
+        }));
+        let spec = ClipSpec {
+            kind: ClipKind::Sequence,
+            sequence: Some(sequence),
+            angles: Some(Angles {
+                picture: 0,
+                sound: audio.unwrap_or(0) as u32,
+            }),
+            duration: length,
+            video: Some(true),
+            audio: Some(audio.is_some()),
+            ..ClipSpec::default()
+        };
+        let clip = self.new_clip(&spec, at)?;
+        self.created.push(clip.id.0);
+        self.created.push(sequence.0);
+        self.track_mut(target).insert_sorted(clip);
+        self.check_track(target)
+    }
+
+    /// The angles of multicam clip `id`, and its sequence's angle count.
+    fn angles_of(&self, clip: &Clip) -> Result<(Angles, u32), String> {
+        let angles = clip
+            .angles
+            .ok_or_else(|| format!("Clip {} is not a multicam clip", clip.id))?;
+        let count = clip
+            .sequence
+            .and_then(|id| self.project.sequence_tracks(id))
+            .map_or(0, |tracks| tracks.len() as u32);
+        Ok((angles, count))
+    }
+
+    fn set_angles(
+        &mut self,
+        id: ClipId,
+        picture: Option<u32>,
+        sound: Option<u32>,
+    ) -> Result<(), String> {
+        let (index, clip) = self.editable(id)?;
+        let (angles, count) = self.angles_of(&clip)?;
+        let next = Angles {
+            picture: picture.unwrap_or(angles.picture),
+            sound: sound.unwrap_or(angles.sound),
+        };
+        if next.picture >= count || next.sound >= count {
+            return Err(format!("This multicam clip has {count} angles"));
+        }
+        self.clip_mut(index, id).angles = Some(next);
+        Ok(())
+    }
+
+    fn switch_angle(&mut self, id: ClipId, at: Flicks, angle: u32) -> Result<(), String> {
+        let at = self.position(at)?;
+        let (index, clip) = self.editable(id)?;
+        let (angles, count) = self.angles_of(&clip)?;
+        if angle >= count {
+            return Err(format!("This multicam clip has {count} angles"));
+        }
+        if !clip.contains(at) {
+            return Err(format!("Clip {id} is not under that point"));
+        }
+        if angles.picture == angle {
+            return Ok(());
+        }
+        // Within its first frame the whole clip switches; a cut needs a frame
+        // after it.
+        let target = if at - clip.start < self.frame {
+            id
+        } else if clip.end() - at < self.frame {
+            return Err("A cut needs at least a frame after it".into());
+        } else {
+            let right = self.split_clip(index, id, at, clip.link)?;
+            self.created.push(right.0);
+            right
+        };
+        self.clip_mut(index, target).angles = Some(Angles {
+            picture: angle,
+            ..angles
+        });
         Ok(())
     }
 
@@ -3049,12 +3316,59 @@ fn check_marker_name(name: &str) -> Result<String, String> {
 }
 
 /// Checks and applies clip property changes.
+/// What a flattened multicam clip keeps of a clip of an angle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Keep {
+    Both,
+    Picture,
+    Sound,
+}
+
+impl Keep {
+    /// A spec that places a copy of what `clip` keeps; None when that is nothing.
+    fn spec(self, clip: &Clip) -> Option<ClipSpec> {
+        let mut spec = spec_of(clip);
+        match self {
+            Keep::Both => {}
+            Keep::Picture => {
+                if !clip.video {
+                    return None;
+                }
+                spec.audio = Some(false);
+                spec.audio_effects.clear();
+                spec.keyframes.remove("volumeDb");
+                if let Some(properties) = &mut spec.properties {
+                    properties.fade_in = Some(Flicks::ZERO);
+                    properties.fade_out = Some(Flicks::ZERO);
+                    properties.denoise = Some(0.0);
+                }
+            }
+            Keep::Sound => {
+                if !clip.audio {
+                    return None;
+                }
+                spec.video = Some(false);
+                spec.effects.clear();
+                spec.masks.clear();
+                spec.keyframes.retain(|name, _| name == "volumeDb");
+                if let Some(properties) = &mut spec.properties {
+                    properties.blend_mode = Some(BlendMode::Normal);
+                    properties.frame_blending = Some(false);
+                    properties.remove_background = Some(false);
+                }
+            }
+        }
+        Some(spec)
+    }
+}
+
 /// A spec that places a copy of `clip`, which gets new ids.
 fn spec_of(clip: &Clip) -> ClipSpec {
     ClipSpec {
         kind: clip.kind,
         media: clip.media.clone(),
         sequence: clip.sequence,
+        angles: clip.angles,
         source_in: clip.source_in,
         duration: clip.duration,
         video: Some(clip.video),
@@ -3145,7 +3459,7 @@ fn apply_properties(clip: &mut Clip, properties: &ClipProperties) -> Result<(), 
         clip.frame_blending = blending;
     }
     if let Some(remove) = properties.remove_background {
-        if remove && (clip.is_generated() || !clip.video) {
+        if remove && (clip.kind != ClipKind::Media || !clip.video) {
             return Err("Only clips showing media have a background to remove".into());
         }
         clip.remove_background = remove;

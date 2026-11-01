@@ -119,6 +119,8 @@ export interface EngineApi {
    * playback, queries and commands then address it. Not an undo step.
    */
   projectOpenSequence(id: number | null): ProjectSnapshot;
+  /** The monitor shows the angles of the multicam clip under the playhead, or the program. */
+  projectSetAngleView(on: boolean): void;
   projectClipsAt(time: number): ClipAt[];
   projectSnapPoints(playhead: number | null, exclude: number[]): number[];
   projectPresets(): Promise<Preset[]>;

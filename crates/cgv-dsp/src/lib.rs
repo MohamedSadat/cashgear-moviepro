@@ -14,6 +14,7 @@ pub mod oversample;
 pub mod reverb;
 pub mod silence;
 pub mod stretch;
+pub mod sync;
 
 pub use effect::{Chain, Settings};
 

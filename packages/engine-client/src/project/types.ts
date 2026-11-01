@@ -221,6 +221,8 @@ export interface Clip {
   media: string;
   /** The sequence a sequence clip shows. */
   sequence?: number;
+  /** A multicam clip's angles: which of its sequence's tracks shows and which plays. */
+  angles?: Angles;
   start: number;
   duration: number;
   sourceIn: number;
@@ -358,6 +360,14 @@ export interface SequenceInfo {
   /** The end of its last clip, in flicks. */
   duration: number;
   tracks: number;
+  /** Its tracks are a multicam clip's angles. */
+  multicam?: boolean;
+}
+
+/** Tracks of a multicam clip's sequence, counted from the bottom. */
+export interface Angles {
+  picture: number;
+  sound: number;
 }
 
 /** Clip values to change; missing ones stay as they are. */
@@ -391,6 +401,8 @@ export interface ClipSpec {
   media?: string;
   /** The sequence a sequence clip shows. */
   sequence?: number;
+  /** A multicam clip's angles; the first for both by default. */
+  angles?: Angles;
   sourceIn?: number;
   /** Timeline length, at `speed`. */
   duration: number;
@@ -528,7 +540,15 @@ export type Command =
   /** Replaces a sequence clip with copies of the clips it shows. */
   | { type: 'breakApart'; clip: number }
   /** Runs `command` on a sequence's tracks (the open sequence's commands do this for you). */
-  | { type: 'inSequence'; sequence: number; command: Command };
+  | { type: 'inSequence'; sequence: number; command: Command }
+  /**
+   * Moves 2 to 4 video clips into a multicam sequence, synced: `sync` holds the
+   * media time (flicks) of one moment in each clip's media.
+   */
+  | { type: 'makeMulticam'; clips: number[]; sync: number[]; name?: string }
+  | { type: 'setAngles'; clip: number; picture?: number; sound?: number }
+  /** Cuts a multicam clip to `angle` from `at` on. */
+  | { type: 'switchAngle'; clip: number; at: number; angle: number };
 
 /** Ids a command created: the new clip, track, marker, effect, transition or LUT first. */
 export interface Outcome {

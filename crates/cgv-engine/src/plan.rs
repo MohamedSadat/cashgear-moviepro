@@ -5,9 +5,11 @@ use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use cgv_model::title::{Background, Font, Shape, ShapeKind, Stroke, Text};
 use cgv_model::{
-    parse_lut_ref, BlendMode, Clip, ClipId, Crop, LutId, LutShape, Mask, ParamValue, Params,
-    Project, Speed, Title, Track, TrackId, Transform, Transition,
+    parse_lut_ref, BlendMode, Clip, ClipId, Color, Content, Crop, Element, ElementId, LutId,
+    LutShape, Mask, ParamValue, Params, Project, Speed, Title, Track, TrackId, Transform,
+    Transition,
 };
 use cgv_time::Flicks;
 use serde::{Deserialize, Serialize};
@@ -393,6 +395,11 @@ impl Planner<'_> {
         let inner = clip
             .sequence
             .and_then(|id| self.project.sequence_tracks(id))?;
+        // A multicam clip shows one angle.
+        let inner = match clip.angles {
+            Some(angles) => inner.get(angles.picture as usize..=angles.picture as usize)?,
+            None => inner,
+        };
         if !clip.video || opacity <= 0.0 || depth >= cgv_model::MAX_NESTING {
             return None;
         }
@@ -434,6 +441,208 @@ impl Planner<'_> {
         });
         Some(layer)
     }
+}
+
+/// The angle viewer: the multicam clip at `time` (on the highest track that
+/// has one there) as its angles in a 2×2 grid, the first at the top left, each
+/// numbered and the one it shows outlined. None without a multicam clip there.
+pub fn plan_angles(project: &Project, time: Flicks) -> Option<FramePlan> {
+    let rate = project.settings.frame_rate;
+    let frame = frame_at(project, time);
+    let time = rate.time_of_frame(frame);
+    let (track, clip) = project
+        .tracks
+        .iter()
+        .rev()
+        .filter(|track| !track.hidden)
+        .find_map(|track| {
+            let next = track.clips.partition_point(|clip| clip.start <= time);
+            let clip = track.clips[..next]
+                .last()
+                .filter(|c| c.contains(time) && c.angles.is_some())?;
+            Some((track, clip))
+        })?;
+    let angles = clip.angles?;
+    let inner = clip.sequence.and_then(|id| project.sequence_tracks(id))?;
+    let mut planner = Planner {
+        project,
+        frame_length: rate.frame_duration(),
+        layers: Vec::new(),
+    };
+    let offset = time - clip.start;
+    let source_time = clip.source_at(offset, planner.frame_length);
+    let (width, height) = (
+        project.settings.width as f64,
+        project.settings.height as f64,
+    );
+    let path = layer_key(0, clip.id);
+    let count = inner.len().min(cgv_model::MAX_ANGLES);
+    let mut steps = Vec::new();
+    let layer = |planner: &mut Planner, key: u64, transform: Transform, title: Option<Title>| {
+        planner.layers.push(LayerPlan {
+            clip: clip.id,
+            key,
+            track: track.id,
+            media: String::new(),
+            still: false,
+            source_time,
+            transform,
+            crop: Crop::default(),
+            opacity: 1.0,
+            clip_start: clip.start,
+            clip_end: clip.end(),
+            source_in: clip.source_in,
+            speed: clip.speed,
+            clip_seconds: offset.as_seconds(),
+            seed: seed(clip.id),
+            effects: Vec::new(),
+            moving: false,
+            nest: title.is_none(),
+            title,
+            reverse: false,
+            blend_frames: false,
+            blend_mode: BlendMode::Normal,
+            masks: Vec::new(),
+            remove_background: false,
+        });
+        planner.layers.len() - 1
+    };
+    for (index, angle) in inner.iter().take(count).enumerate() {
+        let key = layer_key(path, ClipId(index as u64 + 1));
+        let inside = planner.tracks(std::slice::from_ref(angle), source_time, key, 1);
+        if inside.is_empty() {
+            continue;
+        }
+        let (column, row) = ((index % 2) as f64, (index / 2) as f64);
+        let transform = Transform {
+            x: (column - 0.5) * width / 2.0,
+            y: (row - 0.5) * height / 2.0,
+            scale_x: 0.5,
+            scale_y: 0.5,
+            ..Transform::default()
+        };
+        let index = layer(&mut planner, key, transform, None);
+        steps.push(Step::Nest {
+            layer: index,
+            steps: inside,
+        });
+        steps.push(Step::Layer { layer: index });
+    }
+    let marks = angle_marks(width, height, count, angles.picture as usize);
+    let index = layer(
+        &mut planner,
+        layer_key(path, ClipId(0)),
+        Transform::default(),
+        Some(marks),
+    );
+    steps.push(Step::Layer { layer: index });
+    let layers = planner.layers;
+    let luts = frame_luts(project, &layers, &steps);
+    Some(FramePlan {
+        frame,
+        time,
+        width: project.settings.width,
+        height: project.settings.height,
+        layers,
+        steps,
+        luts,
+    })
+}
+
+/// The angle viewer's marks: each angle's number in its corner, and an outline
+/// around the angle the clip shows.
+fn angle_marks(width: f64, height: f64, count: usize, shown: usize) -> Title {
+    let quadrant = |index: usize| {
+        let (column, row) = ((index % 2) as f64, (index / 2) as f64);
+        ((column - 0.5) * width / 2.0, (row - 0.5) * height / 2.0)
+    };
+    let white = Color {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+        a: 1.0,
+    };
+    let size = (height / 18.0).round();
+    let mut elements: Vec<Element> = (0..count)
+        .map(|index| {
+            let (x, y) = quadrant(index);
+            Element {
+                id: ElementId(index as u64 + 1),
+                x: x - width / 4.0 + size,
+                y: y - height / 4.0 + size,
+                scale: 1.0,
+                rotation: 0.0,
+                opacity: 1.0,
+                fill: white,
+                stroke: None,
+                shadow: None,
+                content: Content::Text(Text {
+                    text: (index + 1).to_string(),
+                    font: Font {
+                        family: "Inter".into(),
+                        weight: 700,
+                        italic: false,
+                    },
+                    size,
+                    align: Default::default(),
+                    direction: Default::default(),
+                    line_spacing: 1.0,
+                    letter_spacing: 0.0,
+                    wrap: None,
+                    background: Some(Background {
+                        color: Color {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 0.6,
+                        },
+                        padding: size / 4.0,
+                        radius: size / 6.0,
+                        per_line: false,
+                    }),
+                    reveal: 1.0,
+                    reveal_by: Default::default(),
+                }),
+            }
+        })
+        .collect();
+    if shown < count {
+        let (x, y) = quadrant(shown);
+        let line = (height / 120.0).max(2.0);
+        elements.push(Element {
+            id: ElementId(count as u64 + 1),
+            x,
+            y,
+            scale: 1.0,
+            rotation: 0.0,
+            opacity: 1.0,
+            fill: Color {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.0,
+            },
+            stroke: Some(Stroke {
+                color: Color {
+                    r: 0.949,
+                    g: 0.722,
+                    b: 0.294,
+                    a: 1.0,
+                },
+                width: line * 2.0,
+            }),
+            shadow: None,
+            content: Content::Shape(Shape {
+                kind: ShapeKind::Rectangle,
+                width: width / 2.0 - line * 2.0,
+                height: height / 2.0 - line * 2.0,
+                radius: 0.0,
+                sides: 5,
+                inner: 0.5,
+            }),
+        });
+    }
+    Title { elements }
 }
 
 /// The effects of every adjustment layer among `steps`, sequences' included.
@@ -539,6 +748,13 @@ fn upcoming_in(
                     clip.video && span.depth < cgv_model::MAX_NESTING && first < last,
                 ) else {
                     continue;
+                };
+                let inner = match clip.angles {
+                    Some(angles) => {
+                        let picture = angles.picture as usize;
+                        inner.get(picture..=picture).unwrap_or_default()
+                    }
+                    None => inner,
                 };
                 let offset = clip.source_in - clip.start;
                 let inside = Upcoming {
@@ -1224,5 +1440,106 @@ mod tests {
             (Flicks(FRAME * 5), Flicks(FRAME * 35))
         );
         assert_ne!(media[0].2, media[1].2);
+    }
+
+    /// Three angles of "video" from frames 0, 10 and 20, made a multicam clip
+    /// synced on their in points.
+    fn multicam(session: &mut Session) -> (ClipId, Vec<ClipId>) {
+        session
+            .execute(&Command::AddTrack {
+                index: 2,
+                name: None,
+            })
+            .unwrap();
+        let ids: Vec<ClipId> = (0..3)
+            .map(|index| {
+                let outcome = session
+                    .execute(&Command::Append {
+                        track: track(session, index),
+                        clip: ClipSpec {
+                            media: "video".into(),
+                            source_in: Flicks(FRAME * 10 * index as i64),
+                            duration: Flicks(FRAME * 60),
+                            ..Default::default()
+                        },
+                    })
+                    .unwrap();
+                ClipId(outcome.created[0])
+            })
+            .collect();
+        let outcome = session
+            .execute(&Command::MakeMulticam {
+                clips: ids.clone(),
+                sync: (0..3).map(|index| Flicks(FRAME * 10 * index)).collect(),
+                name: None,
+            })
+            .unwrap();
+        (ClipId(outcome.created[0]), ids)
+    }
+
+    #[test]
+    fn a_multicam_clip_shows_one_angle_and_the_viewer_all_of_them() {
+        let mut session = session();
+        let (clip, ids) = multicam(&mut session);
+        let at = Flicks(FRAME * 5);
+        let media = |plan: &FramePlan| -> Vec<(ClipId, Flicks)> {
+            plan.layers
+                .iter()
+                .filter(|layer| !layer.nest && layer.title.is_none())
+                .map(|layer| (layer.clip, layer.source_time))
+                .collect()
+        };
+        assert_eq!(media(&plan_frame(session.project(), at)), [(ids[0], at)]);
+        session
+            .execute(&Command::SetAngles {
+                clip,
+                picture: Some(2),
+                sound: None,
+            })
+            .unwrap();
+        assert_eq!(
+            media(&plan_frame(session.project(), at)),
+            [(ids[2], Flicks(FRAME * 25))]
+        );
+        // The viewer: every angle at a quarter of the frame, numbered, the one
+        // shown outlined.
+        let plan = plan_angles(session.project(), at).unwrap();
+        assert_eq!(
+            media(&plan),
+            [
+                (ids[0], at),
+                (ids[1], Flicks(FRAME * 15)),
+                (ids[2], Flicks(FRAME * 25))
+            ]
+        );
+        let quarters: Vec<(f64, f64, f64)> = plan
+            .layers
+            .iter()
+            .filter(|layer| layer.nest)
+            .map(|layer| {
+                (
+                    layer.transform.x,
+                    layer.transform.y,
+                    layer.transform.scale_x,
+                )
+            })
+            .collect();
+        assert_eq!(
+            quarters,
+            [
+                (-480.0, -270.0, 0.5),
+                (480.0, -270.0, 0.5),
+                (-480.0, 270.0, 0.5)
+            ]
+        );
+        let marks = plan.layers.last().unwrap().title.as_ref().unwrap();
+        assert_eq!(marks.elements.len(), 4);
+        let outline = marks.elements.last().unwrap();
+        assert_eq!((outline.x, outline.y), (-480.0, 270.0));
+        // Streams of the angles are kept apart.
+        let keys: std::collections::BTreeSet<u64> =
+            plan.layers.iter().map(|layer| layer.key).collect();
+        assert_eq!(keys.len(), plan.layers.len());
+        assert!(plan_angles(session.project(), Flicks(FRAME * 70)).is_none());
     }
 }

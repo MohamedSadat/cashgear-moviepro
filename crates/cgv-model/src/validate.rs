@@ -9,8 +9,8 @@ use crate::edit::{check_crop, check_opacity, check_pan, check_transform, check_v
 use crate::effects::MAX_EFFECTS;
 use crate::masks::{mask_value_ok, MAX_MASKS};
 use crate::project::{
-    Clip, ClipKind, Node, Project, SequenceId, Speed, Timeline, Track, MAX_BEATS, MAX_NESTING,
-    MAX_TIME,
+    Clip, ClipKind, Node, Project, SequenceId, Speed, Timeline, Track, MAX_ANGLES, MAX_BEATS,
+    MAX_NESTING, MAX_TIME,
 };
 use crate::timing::check_ramp;
 use crate::title::{element_value_ok, Content};
@@ -377,6 +377,9 @@ fn check_timeline(
     if timeline.tracks.is_empty() {
         return Err("A timeline needs at least one track".into());
     }
+    if timeline.multicam && timeline.tracks.len() > MAX_ANGLES {
+        return Err(format!("A multicam clip has at most {MAX_ANGLES} angles"));
+    }
     let shown = shows.entry(timeline.node).or_default();
     for (index, track) in timeline.tracks.iter().enumerate() {
         ids.unique(track.id.0, "Track")?;
@@ -394,7 +397,9 @@ fn check_timeline(
                     index + 1
                 ));
             }
-            if clip.sequence.is_some() != clip.is_sequence() {
+            if clip.sequence.is_some() != clip.is_sequence()
+                || (clip.angles.is_some() && !clip.is_sequence())
+            {
                 return Err(format!(
                     "Clip {} names a sequence but is not a sequence clip",
                     clip.id
@@ -432,9 +437,22 @@ fn check_timeline(
                 }
                 ClipKind::Sequence => {
                     let id = clip.sequence.expect("checked above");
-                    if project.timeline(Node::Sequence(id)).is_none() {
+                    let Some(inner) = project.timeline(Node::Sequence(id)) else {
                         return Err(format!(
                             "Clip {} shows a sequence that is not in the project",
+                            clip.id
+                        ));
+                    };
+                    let count = inner.tracks.len() as u32;
+                    let angles_ok = match clip.angles {
+                        Some(angles) => {
+                            inner.multicam && angles.picture < count && angles.sound < count
+                        }
+                        None => !inner.multicam,
+                    };
+                    if !angles_ok {
+                        return Err(format!(
+                            "Multicam clip {} has angles its sequence lacks",
                             clip.id
                         ));
                     }

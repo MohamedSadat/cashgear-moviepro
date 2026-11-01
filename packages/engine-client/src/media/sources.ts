@@ -134,6 +134,21 @@ export async function openInput(ref: MediaSourceRef): Promise<Input> {
   return new Input({ source, formats: ALL_FORMATS });
 }
 
+/** Bytes `start` to `end` of a source (fewer at its end). */
+export async function readRange(
+  ref: MediaSourceRef,
+  start: number,
+  end: number,
+): Promise<Uint8Array> {
+  const blob = await sourceBlob(ref);
+  if (blob) return new Uint8Array(await blob.slice(start, end).arrayBuffer());
+  const response = await fetch(sourceUrl(ref), { headers: { Range: `bytes=${start}-${end - 1}` } });
+  if (!response.ok) throw new Error(`Could not read ${sourceName(ref)}: ${response.status}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  // A server that ignores ranges sends the whole file.
+  return response.status === 206 ? bytes : bytes.subarray(start, end);
+}
+
 /** The whole file, for image decoding. */
 export async function readAll(ref: MediaSourceRef): Promise<ArrayBuffer> {
   const blob = await sourceBlob(ref);

@@ -5,8 +5,8 @@ use crate::animation::{Interpolation, KeyValue, Keyframes};
 use crate::effects::{Alignment, EffectSpec, LutSpec, Params, TransitionSpec};
 use crate::masks::{BlendMode, Mask};
 use crate::project::{
-    ClipId, ClipKind, Crop, Ducking, EffectId, LutId, MarkerColor, MarkerId, MaskId, MediaRef,
-    ProjectSettings, SequenceId, Speed, TrackId, TrackRole, Transform, TransitionId,
+    Angles, ClipId, ClipKind, Crop, Ducking, EffectId, LutId, MarkerColor, MarkerId, MaskId,
+    MediaRef, ProjectSettings, SequenceId, Speed, TrackId, TrackRole, Transform, TransitionId,
 };
 use crate::timing::{RampPoint, RampShape};
 use crate::title::{Caption, Title};
@@ -31,6 +31,9 @@ pub struct ClipSpec {
     /// The sequence a sequence clip shows (`kind` is sequence).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sequence: Option<SequenceId>,
+    /// A multicam clip's angles; the first angle for both by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub angles: Option<Angles>,
     /// Source time of the first frame. Always zero for still images.
     #[serde(default)]
     pub source_in: Flicks,
@@ -641,6 +644,31 @@ pub enum Command {
         sequence: SequenceId,
         command: Box<Command>,
     },
+    /// Moves two to four video clips into a new multicam sequence, one angle a
+    /// track in their order, synced: `sync` holds the media time of one moment
+    /// in each clip's media. A multicam clip showing the first angle goes where
+    /// the earliest of them started, on the lowest of their tracks.
+    MakeMulticam {
+        clips: Vec<ClipId>,
+        sync: Vec<Flicks>,
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Changes which angle a multicam clip shows, or plays the sound of.
+    SetAngles {
+        clip: ClipId,
+        #[serde(default)]
+        picture: Option<u32>,
+        #[serde(default)]
+        sound: Option<u32>,
+    },
+    /// Cuts a multicam clip to `angle` from `at` on: it splits there, and the
+    /// part after shows that angle until its next cut.
+    SwitchAngle {
+        clip: ClipId,
+        at: Flicks,
+        angle: u32,
+    },
 }
 
 impl Command {
@@ -742,6 +770,9 @@ impl Command {
             Command::Nest { .. } => "Nest",
             Command::BreakApart { .. } => "Break apart",
             Command::InSequence { command, .. } => command.label(),
+            Command::MakeMulticam { .. } => "Make multicam clip",
+            Command::SetAngles { .. } => "Change angle",
+            Command::SwitchAngle { .. } => "Switch angle",
         }
     }
 }

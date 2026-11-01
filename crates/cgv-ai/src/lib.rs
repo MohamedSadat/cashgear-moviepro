@@ -209,6 +209,16 @@ mod bindings {
         }
     }
 
+    /// Where `other`'s sound lines up with `reference`'s (both mono at 16 kHz):
+    /// `[seconds, confidence]`, or nothing when either is silent. See
+    /// [`cgv_dsp::sync::lag`].
+    #[wasm_bindgen]
+    pub fn sync_lag(reference: &[f32], other: &[f32], max_lag: f64) -> Vec<f64> {
+        cgv_dsp::sync::lag(reference, other, max_lag)
+            .map(|lag| vec![lag.seconds, lag.confidence as f64])
+            .unwrap_or_default()
+    }
+
     /// When each token row starts; see [`crate::align::token_times`].
     #[wasm_bindgen]
     pub fn token_times(weights: &[f32], heads: usize, tokens: usize, frames: usize) -> Vec<f64> {

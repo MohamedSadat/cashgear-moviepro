@@ -133,7 +133,8 @@ fn check_sync(before: &Project, after: &Project, command: &Command) {
         Command::Nest { .. }
         | Command::BreakApart { .. }
         | Command::RemoveSequence { .. }
-        | Command::InSequence { .. } => true,
+        | Command::InSequence { .. }
+        | Command::MakeMulticam { .. } => true,
         // Edits that push later clips along another track may push a partner.
         Command::Insert { track, .. } => before.track_index(*track) != Some(main),
         Command::RippleDelete { clips } => !named(clips),
