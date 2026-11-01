@@ -3,7 +3,8 @@
 // GPU backends, cross-origin isolation, shared memory and the native command.
 // Then media (native streaming, ffprobe, a ProRes proxy), projects (a saved
 // .cgvproj that reopens, and an autosave that recovers after the app is killed),
-// playback, exports (MP4 written natively, GIF and MP3 converted by FFmpeg),
+// playback, exports (MP4 written natively, GIF and MP3 converted by FFmpeg,
+// ProRes masters encoded by FFmpeg from 10-bit frames that keep their levels),
 // sound, installed fonts, a template filled from the project's media, and the AI
 // tools and noise reduction, which start workers from workers.
 import { spawn, spawnSync } from 'node:child_process';
@@ -420,7 +421,8 @@ try {
   });
 
   // Export: the recovered timeline (the ProRes clip through its proxy) muxed in
-  // WebView2 and written by the native side, then GIF and MP3 made by FFmpeg.
+  // WebView2 and written by the native side, then GIF and MP3 made by FFmpeg, and
+  // a ProRes master FFmpeg encodes from the frames and sound it is handed.
   const ffprobe = join(
     process.env.CGV_FFMPEG_DIR ?? join(root, '.tools/ffmpeg/bin'),
     'ffprobe.exe',
@@ -452,10 +454,22 @@ try {
       video: null,
       audio: { codec: 'pcm-s16', bitrate: 192000 },
     },
+    {
+      format: 'prores-422-hq',
+      width: 1280,
+      height: 720,
+      frameRate: { num: 30, den: 1 },
+      video: { codec: 'prores', bitrate: 0 },
+      audio: { codec: 'pcm-s24', bitrate: 0 },
+    },
   ];
+  const extensions = { 'prores-422-hq': 'mov', 'prores-4444': 'mov' };
   const exported = {};
   for (const settings of exports) {
-    const path = join(exportDir, 'Smoke export.' + settings.format);
+    const path = join(
+      exportDir,
+      'Smoke export.' + (extensions[settings.format] ?? settings.format),
+    );
     const status = await page.evaluate(
       async ({ settings, path }) => {
         const exporter = window.__cgv.exporter;
@@ -485,7 +499,12 @@ try {
       ).stdout,
     );
     const codecs = probed.streams.map((stream) => stream.codec_name);
-    const expected = { mp4: ['h264', 'aac'], gif: ['gif'], mp3: ['mp3'] }[settings.format];
+    const expected = {
+      mp4: ['h264', 'aac'],
+      gif: ['gif'],
+      mp3: ['mp3'],
+      'prores-422-hq': ['prores', 'pcm_s24le'],
+    }[settings.format];
     if (JSON.stringify(codecs) !== JSON.stringify(expected))
       throw new Error(
         `${settings.format} export has ${codecs.join(', ')}: ` + JSON.stringify(probed),
@@ -760,6 +779,279 @@ try {
   if (!ai.removeBackground || ai.unfinished)
     throw new Error('Background removal did not make its mattes: ' + JSON.stringify(ai));
   results.push({ ai });
+
+  // Masters keep ten bits: the 10-bit ramp (tests/e2e/deep-colour.ts), decoded in
+  // software by WebView2, composed in half float and read back at 10 bits,
+  // becomes ProRes 422 HQ and 4444 masters through the frame channel and FFmpeg.
+  // Their luma keeps the ramp's levels, where any 8-bit step keeps at most 220.
+  const { deepClips, encodeRamp, rampFrames, rampLevels } =
+    await import('../tests/e2e/deep-colour.ts');
+  const ffmpeg = join(dirname(ffprobe), 'ffmpeg.exe');
+  const rampFile = join(exportDir, 'ramp-vp9-10bit.webm');
+  encodeRamp(
+    ffmpeg,
+    deepClips.find((clip) => clip.name === 'ramp-vp9-10bit.webm'),
+    1920,
+    1080,
+    rampFile,
+  );
+  const masterPaths = Object.fromEntries(
+    ['prores-422-hq', 'prores-4444'].map((format) => [
+      format,
+      join(exportDir, `Ramp ${format}.mov`),
+    ]),
+  );
+  const masters = await page.evaluate(
+    async ({ rampFile, frames, paths }) => {
+      const hooks = window.__cgv;
+      const api = hooks.client.api;
+      await hooks.project.importRequests(await hooks.platform.registerPaths([rampFile]));
+      const deadline = Date.now() + 60000;
+      let item;
+      while (Date.now() < deadline) {
+        item = (await api.mediaSnapshot()).find((media) => media.name === 'ramp-vp9-10bit.webm');
+        if (item && item.status.state !== 'probing') break;
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      if (item?.status.state !== 'ready')
+        throw new Error('The 10-bit ramp did not import: ' + JSON.stringify(item));
+      const tracks = (await api.projectSnapshot()).project.tracks;
+      const clips = tracks.flatMap((track) => track.clips.map((clip) => clip.id));
+      if (clips.length) await hooks.project.execute({ type: 'delete', clips });
+      await hooks.project.execute({
+        type: 'setSettings',
+        settings: {
+          width: 1920,
+          height: 1080,
+          frameRate: { num: 30, den: 1 },
+          sampleRate: 48000,
+          channels: 2,
+        },
+      });
+      await hooks.project.execute({
+        type: 'append',
+        track: tracks[0].id,
+        clip: { media: item.id, duration: frames * 23_520_000, audio: false },
+      });
+      // The hooks are made again on each render: the exporter must be one that
+      // has seen the clip, or it exports the project as it was.
+      while (
+        !window.__cgv.project.snapshot?.project.tracks.some((track) =>
+          track.clips.some((clip) => clip.media === item.id),
+        )
+      )
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      const statuses = {};
+      for (const [format, path] of Object.entries(paths)) {
+        const exporter = window.__cgv.exporter;
+        const settings = {
+          format,
+          width: 1920,
+          height: 1080,
+          frameRate: { num: 30, den: 1 },
+          video: { codec: 'prores', bitrate: 0 },
+          audio: null,
+        };
+        if (!(await exporter.start(settings, { path })))
+          throw new Error(`The ${format} master did not start`);
+        statuses[format] = await exporter.settled();
+        exporter.dismiss();
+      }
+      return statuses;
+    },
+    { rampFile, frames: rampFrames, paths: masterPaths },
+  );
+  const masterChecks = {};
+  for (const [format, status] of Object.entries(masters)) {
+    if (status.state !== 'done')
+      throw new Error(`The ${format} master failed: ` + JSON.stringify(status));
+    const path = masterPaths[format];
+    const stream = JSON.parse(
+      spawnSync(
+        ffprobe,
+        [
+          '-v',
+          'error',
+          '-show_entries',
+          'stream=codec_name,profile,pix_fmt,color_space,color_range,nb_frames',
+          '-of',
+          'json',
+          path,
+        ],
+        { encoding: 'utf8', windowsHide: true },
+      ).stdout,
+    ).streams[0];
+    const expected =
+      format === 'prores-422-hq'
+        ? { profile: 'HQ', pix_fmt: 'yuv422p10le' }
+        : { profile: '4444', pix_fmt: 'yuva444p12le' };
+    if (
+      stream.codec_name !== 'prores' ||
+      stream.profile !== expected.profile ||
+      stream.pix_fmt !== expected.pix_fmt ||
+      stream.color_space !== 'bt709' ||
+      stream.color_range !== 'tv' ||
+      Number(stream.nb_frames) !== rampFrames
+    )
+      throw new Error(`The ${format} master is not as expected: ` + JSON.stringify(stream));
+    // The middle rows of the first frame, decoded by FFmpeg at 10 bits.
+    const decoded = spawnSync(
+      ffmpeg,
+      [
+        '-v',
+        'error',
+        '-i',
+        path,
+        '-frames:v',
+        '1',
+        '-vf',
+        'crop=1920:2:0:540,format=gray10le',
+        '-f',
+        'rawvideo',
+        '-',
+      ],
+      { windowsHide: true, maxBuffer: 1 << 24 },
+    ).stdout;
+    const levels = new Set(new Uint16Array(decoded.buffer, decoded.byteOffset, 1920)).size;
+    if (levels < Math.ceil(0.95 * rampLevels))
+      throw new Error(`The ${format} master kept ${levels} of ${rampLevels} levels`);
+    masterChecks[format] = {
+      levels,
+      bytes: status.result.bytes,
+      elapsedMs: Math.round(status.result.elapsedMs),
+      stream,
+    };
+  }
+  results.push({ masters: masterChecks });
+
+  // Originals: a 4K ProRes 422 HQ source plays through its 720p proxy, but its
+  // master is made from the original, which FFmpeg decodes for the export. Against
+  // FFmpeg's own decode of the source it reaches 45 dB on Y'CbCr planes, where an
+  // upscaled 720p proxy cannot come near.
+  const sourceFile = join(exportDir, 'detail-4k-prores.mov');
+  const made = spawnSync(
+    ffmpeg,
+    [
+      '-v',
+      'error',
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=size=3840x2160:rate=30',
+      '-frames:v',
+      '15',
+      '-vf',
+      'format=yuv422p10le,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv',
+      '-c:v',
+      'prores_ks',
+      '-profile:v',
+      '3',
+      sourceFile,
+    ],
+    { encoding: 'utf8', windowsHide: true },
+  );
+  if (made.status !== 0) throw new Error('Making the 4K source failed: ' + made.stderr);
+  const originalPath = join(exportDir, 'Detail 4K master.mov');
+  const original = await page.evaluate(
+    async ({ sourceFile, path }) => {
+      const hooks = window.__cgv;
+      const api = hooks.client.api;
+      await hooks.project.importRequests(await hooks.platform.registerPaths([sourceFile]));
+      const deadline = Date.now() + 120000;
+      let item;
+      while (Date.now() < deadline) {
+        item = (await api.mediaSnapshot()).find((media) => media.name === 'detail-4k-prores.mov');
+        if (
+          item &&
+          ['proxyReady', 'proxyFailed', 'unsupported', 'failed'].includes(item.status.state)
+        )
+          break;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      if (item?.status.state !== 'proxyReady')
+        throw new Error('The 4K ProRes source has no proxy: ' + JSON.stringify(item));
+      const tracks = (await api.projectSnapshot()).project.tracks;
+      const clips = tracks.flatMap((track) => track.clips.map((clip) => clip.id));
+      if (clips.length) await hooks.project.execute({ type: 'delete', clips });
+      await hooks.project.execute({
+        type: 'setSettings',
+        settings: {
+          width: 3840,
+          height: 2160,
+          frameRate: { num: 30, den: 1 },
+          sampleRate: 48000,
+          channels: 2,
+        },
+      });
+      await hooks.project.execute({
+        type: 'append',
+        track: tracks[0].id,
+        clip: { media: item.id, duration: 15 * 23_520_000, audio: false },
+      });
+      while (
+        !window.__cgv.project.snapshot?.project.tracks.some((track) =>
+          track.clips.some((clip) => clip.media === item.id),
+        )
+      )
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      const exporter = window.__cgv.exporter;
+      const settings = {
+        format: 'prores-422-hq',
+        width: 3840,
+        height: 2160,
+        frameRate: { num: 30, den: 1 },
+        video: { codec: 'prores', bitrate: 0 },
+        audio: null,
+      };
+      if (!(await exporter.start(settings, { path })))
+        throw new Error('The 4K master did not start');
+      const status = await exporter.settled();
+      exporter.dismiss();
+      return status;
+    },
+    { sourceFile, path: originalPath },
+  );
+  if (original.state !== 'done')
+    throw new Error('The 4K master failed: ' + JSON.stringify(original));
+  const compared = spawnSync(
+    ffmpeg,
+    [
+      '-v',
+      'info',
+      '-i',
+      originalPath,
+      '-i',
+      sourceFile,
+      '-lavfi',
+      '[0:v]format=yuv422p10le[a];[1:v]format=yuv422p10le[b];[a][b]psnr',
+      '-f',
+      'null',
+      '-',
+    ],
+    { encoding: 'utf8', windowsHide: true },
+  );
+  const average = compared.stderr.match(/PSNR .* average:([\d.]+|inf)/)?.[1];
+  const psnr = average === 'inf' ? Infinity : Number(average ?? NaN);
+  const size = JSON.parse(
+    spawnSync(
+      ffprobe,
+      ['-v', 'error', '-show_entries', 'stream=width,height', '-of', 'json', originalPath],
+      { encoding: 'utf8', windowsHide: true },
+    ).stdout,
+  ).streams[0];
+  if (size.width !== 3840 || size.height !== 2160 || !(psnr >= 45))
+    throw new Error(
+      `The 4K master is ${size.width}×${size.height} at ${psnr} dB: ` + compared.stderr.slice(-400),
+    );
+  results.push({
+    original: {
+      psnr,
+      bytes: original.result.bytes,
+      elapsedMs: Math.round(original.result.elapsedMs),
+      fps: Number((15000 / original.result.elapsedMs).toFixed(1)),
+    },
+  });
 
   await page.screenshot({ path: join(root, 'bench/results/desktop.png') });
   await writeFile(
