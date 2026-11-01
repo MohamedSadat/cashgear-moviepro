@@ -32,6 +32,30 @@
         "spill": 0.8,
         "feather": 0.003
       }
+    },
+    {
+      "name": "color-wheels",
+      "params": {
+        "lift_hue": 220,
+        "lift_amount": 0.5,
+        "lift_master": -0.05,
+        "gamma_master": 0.2,
+        "gain_hue": 40,
+        "gain_amount": 0.4,
+        "gain_master": 0.1,
+        "offset_master": 0.02
+      }
+    },
+    {
+      "name": "curves",
+      "params": {
+        "luma_1": 0.2,
+        "luma_3": 0.82,
+        "blue_0": 0.08,
+        "hue_hue_2": 30,
+        "hue_sat_0": 1.4,
+        "luma_sat_4": 0.6
+      }
     }
   ],
   "transitions": [

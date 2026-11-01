@@ -1,0 +1,139 @@
+{
+  "id": "color-wheels",
+  "name": "Color Wheels",
+  "category": "Color",
+  "type": "effect",
+  "version": 1,
+  "description": "Primary correction: lift moves the shadows, gamma the midtones, gain the highlights and offset everything, each in brightness and towards a colour.",
+  "space": "srgb",
+  "params": [
+    {
+      "id": "lift_hue",
+      "name": "Lift hue",
+      "type": "number",
+      "min": 0,
+      "max": 360,
+      "default": 0,
+      "step": 1,
+      "unit": "\u00b0"
+    },
+    {
+      "id": "lift_amount",
+      "name": "Lift colour",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "lift_master",
+      "name": "Lift",
+      "type": "number",
+      "min": -1,
+      "max": 1,
+      "default": 0,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "gamma_hue",
+      "name": "Gamma hue",
+      "type": "number",
+      "min": 0,
+      "max": 360,
+      "default": 0,
+      "step": 1,
+      "unit": "\u00b0"
+    },
+    {
+      "id": "gamma_amount",
+      "name": "Gamma colour",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "gamma_master",
+      "name": "Gamma",
+      "type": "number",
+      "min": -1,
+      "max": 1,
+      "default": 0,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "gain_hue",
+      "name": "Gain hue",
+      "type": "number",
+      "min": 0,
+      "max": 360,
+      "default": 0,
+      "step": 1,
+      "unit": "\u00b0"
+    },
+    {
+      "id": "gain_amount",
+      "name": "Gain colour",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "gain_master",
+      "name": "Gain",
+      "type": "number",
+      "min": -1,
+      "max": 1,
+      "default": 0,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "offset_hue",
+      "name": "Offset hue",
+      "type": "number",
+      "min": 0,
+      "max": 360,
+      "default": 0,
+      "step": 1,
+      "unit": "\u00b0"
+    },
+    {
+      "id": "offset_amount",
+      "name": "Offset colour",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    },
+    {
+      "id": "offset_master",
+      "name": "Offset",
+      "type": "number",
+      "min": -1,
+      "max": 1,
+      "default": 0,
+      "step": 0.01,
+      "unit": "%",
+      "display": 100
+    }
+  ]
+}
