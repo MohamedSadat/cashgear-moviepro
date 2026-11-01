@@ -2,6 +2,19 @@
 
 Dated entries, newest first. Every answer to a phase question is recorded here, along with each small default chosen during a phase.
 
+## 2026-11-01: Phase 12 defaults
+
+- **10-bit in the compositor:** 10- and 12-bit planes upload as 16-bit integers (`R16Uint`) and convert with matrices that take code values (`codes_to_rgb`), into half-float layers (`rgba16float`, or 8-bit on WebGL2 without float targets). 8-bit sources keep their 8-bit sRGB layers, so their goldens and memory stay as they were.
+- **10-bit readback:** `Engine.read_yuv10` packs planar 10-bit Y'CbCr two samples to an RGBA8 texel, so WebGL2 can read it too. 10-bit limited-range codes are the 8-bit ones times four (64 to 940).
+- **Exports decode deep media in software** when the browser has a software decoder (`deepCodec`: VP9 and AV1 name their depth, HEVC profiles 2 and 4, H.264 profiles 110, 122 and 244). Playback still prefers hardware at 4K, at 8 bits.
+- **Masters:** ProRes 422 HQ (`prores_ks` profile 3, `yuv422p10le`) and ProRes 4444 (profile 4, `yuva444p10le`, 16-bit alpha where nothing covers the frame), vendor `apl0`, tagged BT.709 limited range with `setparams`, sound as 24-bit PCM. The sound is mixed first into a raw file in the cache folder, which FFmpeg reads as its second input, so the master is made in one pass. Loudness normalisation applies as for other exports.
+- **Originals:** media that plays through a proxy (codecs the webview cannot decode) exports from its original: FFmpeg decodes it at its own size into the planar layout that keeps its depth (`Layout::for_source`: 8-bit 4:2:0 stays 8-bit; deeper or less subsampled pictures go to 10 or 12 bits at their own chroma; alpha is dropped). A session keeps one FFmpeg reading forwards; it decodes and drops up to 48 frames rather than seeking, and seeks half a frame before the frame it wants, which lands on it whatever the rounding.
+- **Proxies:** besides media the webview cannot decode, the desktop makes proxies for media over 1080p, at half its height by default, or a quarter, all of it, or none (the Media panel's choice, per user). Proxies are never under 720 rows unless the original is, at 6 Mbit/s for 720p and more in proportion to their area. Each size is cached apart.
+- **Scopes:** counted in WASM from a readback 480 pixels across, a few times a second, rather than drawn on the GPU as the plan said: the counts are the same on both backends, cost about a millisecond, and are tested natively. The Scopes tab sits beside the library, so it stays in view with the Inspector's colour controls.
+- **Grading:** two effects in the pack, Color Wheels (lift, gamma, gain and offset, each a brightness and a push towards a hue) and Curves (luma, red, green and blue through five points, hue against hue and against saturation through six, luma against saturation through five). Both work on sRGB-encoded values, as colourists grade, and keyframe and undo like every effect. The Inspector shows wheels and a curve editor over their settings; a drag is one undo step.
+- **Colour management:** frames use their own tags (BT.601, BT.709 or BT.2020, limited or full range, PQ and HLG tone mapped). Camera log footage takes the vendor's LUT through the LUT effect, whose `.cube` values keep 16 bits. Every export is tagged BT.709 limited range. Changing a file's interpretation (wrong or missing tags) is left for a later phase.
+- **A fix found on the way:** the decode preference (`?decode=`) reached only media imported after the engine started. It now reconfigures every reader, whenever it is set.
+
 ## 2026-11-01: Phase 12 findings and defaults
 
 - **The 10-bit test set:** `tests/e2e/deep-colour.ts` draws a luma ramp through every limited-range 10-bit level (64 to 940, so 877 levels) on neutral chroma. The pinned FFmpeg encodes it during the tests:

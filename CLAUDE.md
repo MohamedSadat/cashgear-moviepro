@@ -27,7 +27,7 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
 ## Layout
 
 - `crates/`:
-  - `cgv-render`: wgpu, WGSL.
+  - `cgv-render`: wgpu, WGSL, and the scopes' counting (`scopes.rs`).
   - `cgv-engine`: clock and scheduler.
   - `cgv-wasm`: the only JS-facing API.
   - `cgv-native`: desktop-only native side.
@@ -52,11 +52,12 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `ai/`: the AI worker (onnxruntime-web: WebGPU, else WASM), the model registry (`models.json`, pinned revisions and hashes) and downloads into OPFS, Whisper (`whisper.ts`, `tokenizer.ts`), background removal (`cutout.ts`, MediaPipe Selfie Segmentation) and its mattes in OPFS (`mattes.ts`), read by the engine and export workers.
 - `crates/cgv-model`: the project, every edit command, undo/redo and the `.cgvproj` format, with effects, keyframes (`animation.rs`), transitions, LUTs (`lut.rs`), titles and captions (`title.rs`), speed ramps, reverse and freeze frames (`timing.rs`), masks and blend modes (`masks.rs`), template slots (`FillSlot`), beats, background removal and cutting ranges out (`RemoveRanges`). `packages/ui/src/project`: opening, saving, autosave, recovery and relinking.
 - `crates/cgv-engine`: `plan_frame` (what a frame shows), the audio clip plan, transport, Auto quality and playback stats. `crates/cgv-audio`: the block mixer. `crates/cgv-render`: the compositor and WGSL.
-- `crates/cgv-media`: the media library model (Rust, via WASM). `crates/cgv-native`: the cgv-media protocol registry, byte ranges, ffprobe, proxies, export files and their GIF and MP3 conversions, the cache folder, installed fonts (`fonts.rs`, fontdb), the machine id for licences (`machine.rs`) and free disk space (`disk.rs`).
+- `crates/cgv-media`: the media library model (Rust, via WASM). `crates/cgv-native`: the cgv-media protocol registry, byte ranges, ffprobe, proxies, export files and their GIF and MP3 conversions, the cache folder, installed fonts (`fonts.rs`, fontdb), the machine id for licences (`machine.rs`), free disk space (`disk.rs`), ProRes masters (`master.rs`) and the originals FFmpeg decodes for exports (`originals.rs`).
 - `packages/ui`: React components, on the CG component library (`@cashgear/ui`).
   - `timeline/`: the canvas timeline. `controller.ts` owns the view, drawing and gestures outside React; `geometry.ts` and `draw.ts` are pure.
   - `editing/`: selection, tools, the clipboard and every editing action (`useEditor`), and drag gestures (`Gesture`, one undo step each).
-  - `inspector/`: clip fields with stopwatches (`fields.tsx`), the effect stack, the curve lane and the transition inspector.
+  - `inspector/`: clip fields with stopwatches (`fields.tsx`), the effect stack, the curve lane, the transition inspector, and colour wheels and curves (`ColorControls.tsx`).
+  - `scopes/`: the Scopes tab (waveform, RGB parade, vectorscope and histogram).
   - `effects/`: the catalogue hook, the effects and transitions browser, and keyframe helpers. `editing/transitions.ts` finds cuts and transition windows.
   - `titles/` (the browser, templates, animation presets and fonts), `inspector/TitleInspector.tsx` and `stickers/`.
   - `mixer/` (the mixer panel, meters and their ballistics), `voiceover/` (recording) and `sounds/` (the Music and Sounds tabs).
@@ -68,7 +69,7 @@ CashGear Video is a browser and desktop video editor built on one Rust/WASM engi
   - `ai/` (`useAiTools`: jobs with progress and cancel, silences, beats, scenes, background removal; source-to-timeline timing), `inspector/AiSection.tsx` and `captions/` (the Captions tab, cues from transcripts, SRT and VTT).
   - `licence/` (Pro keys, offline token checks, the grace period and the licence dialog), `updates/` (the desktop's updates), `about/` (About and the third-party notices), `diagnostics/` (reports users may save) and `storage/` (the web's storage warnings).
 - `apps/web`: Vite app. `sw.js` is the service worker that `pwa.ts` builds with the build's files; `public/` has the manifest and install icons (`scripts/make-web-icons.mjs`).
-- `apps/desktop/src-tauri`: Tauri 2 shell, with the licence machine id (`licence.rs`) and updates (`updates.rs`, the updater plugin).
+- `apps/desktop/src-tauri`: Tauri 2 shell, with the licence machine id (`licence.rs`), updates (`updates.rs`, the updater plugin), frame channels (`frames.rs`), masters (`master.rs`) and originals (`originals.rs`).
 - `services/licensing`: the reference licence server (Node 24 TypeScript, no dependencies), on CashGear Backup's protocol. Its README covers the protocol, the seller's commands and deploying.
 - Release: `scripts/desktop-installer.mjs` (the NSIS installer with FFmpeg and its notice), `sign-windows.mjs`, `installer-test.mjs`, `third-party-notices.mjs`, `release-check.mjs` and `release-assets.mjs`; `.github/workflows/release.yml` runs them on a version tag. `CHANGELOG.md` holds each release's notes.
 
@@ -159,6 +160,12 @@ Gotchas:
 - Installed apps read updates from `releases/latest/download/latest.json`. Make data releases (test media) with `--latest=false`, or the feed points at them.
 - Playwright's browser contexts are incognito, where nothing installs: `pwa.spec.ts` makes a profile and installs through CDP's `PWA` domain. Edge starts installed apps outside the test's reach, so there the app's page stands in.
 - The service worker runs in production builds on the web only. It caches the app shell when it installs and other build files when they are used; a range request is answered from the cached file.
+- Browsers hand hardware-decoded 10-bit frames over at 8 bits, even copied into `rgba16float`. Only software decoders' `I420P10` planes keep 10 bits, so exports decode deep media in software (`deepCodec`), and the compositor converts 10- and 12-bit planes itself (`Planar16`, `fs_deep`) into half-float layers.
+- Raw frames between native code and the page go through frame channels (WebView2 shared buffers, `frames.rs` and `apps/web/src/platform/frames.ts`): Tauri's IPC carries about 11 MB/s and the cgv-media protocol about 45 MB/s, shared buffers over 1 GB/s.
+- Masters are ProRes that FFmpeg encodes from `Engine.read_yuv10` frames (planar 10-bit, packed two samples a texel); originals are frames FFmpeg decodes for exports of media that plays through a proxy. Exports never read proxies.
+- `window.__cgv` is made again on each render: a test that edits and then exports must read `window.__cgv.exporter` again (after the snapshot shows the edit), or it exports the project as it was.
+- Seeded effects (noise, glitch, old film) take their seed from the clip's id: add a new effect's fixture at the end of the effects list, or later fixtures' clip ids and goldens shift.
+- Scopes are counted in WASM from a readback 480 pixels across (`cgv-render/src/scopes.rs`), the same on both backends.
 - WebView2 never asks Tauri for the script of a worker started by a worker, so such a worker never loads on the desktop (the browser has no such gap). Start one with `startNestedWorker` (`engine-client/src/nested-worker.ts`), from a `?worker&url` import; `shimNestedWorkers` does the same for a library's own threads (ONNX Runtime's). The desktop smoke covers both.
 - A project template's track plays one clip at a time: placing a template overwrites, so overlapping clips on a track cut each other. `make-project-templates.mjs` and the template tests refuse them.
 - Shells started by the Claude desktop app run inside its MSIX package. What they write to `AppData` lands in `AppData\Local\Packages\Claude_…\LocalCache`, while `HKCU` and `%TEMP%` writes are real. Run an install meant for the user's own use through `explorer.exe`.
