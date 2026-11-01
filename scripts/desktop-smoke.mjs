@@ -1053,6 +1053,101 @@ try {
     },
   });
 
+  // Proxies: a 4K30 H.264 clip gets a half-size (1080p) proxy, and three stacked
+  // tracks of it play through their proxies. On the reference machine no frame
+  // may drop; software GPUs only have to keep time.
+  const uhdFile = join(exportDir, 'uhd-h264.mp4');
+  const uhd = spawnSync(
+    ffmpeg,
+    [
+      '-v',
+      'error',
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=size=3840x2160:rate=30',
+      '-frames:v',
+      '150',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:v',
+      'libopenh264',
+      '-b:v',
+      '40M',
+      uhdFile,
+    ],
+    { encoding: 'utf8', windowsHide: true },
+  );
+  if (uhd.status !== 0) throw new Error('Making the 4K clip failed: ' + uhd.stderr);
+  const proxies = await page.evaluate(async (uhdFile) => {
+    const hooks = window.__cgv;
+    const api = hooks.client.api;
+    await hooks.project.importRequests(await hooks.platform.registerPaths([uhdFile]));
+    const deadline = Date.now() + 240000;
+    let item;
+    while (Date.now() < deadline) {
+      item = (await api.mediaSnapshot()).find((media) => media.name === 'uhd-h264.mp4');
+      if (item && ['proxyReady', 'proxyFailed', 'failed'].includes(item.status.state)) break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    if (item?.status.state !== 'proxyReady')
+      throw new Error('The 4K clip has no proxy: ' + JSON.stringify(item));
+    let tracks = (await api.projectSnapshot()).project.tracks;
+    const clips = tracks.flatMap((track) => track.clips.map((clip) => clip.id));
+    if (clips.length) await hooks.project.execute({ type: 'delete', clips });
+    for (let index = tracks.length; index < 3; index++)
+      await hooks.project.execute({ type: 'addTrack', index });
+    tracks = (await api.projectSnapshot()).project.tracks;
+    await hooks.project.execute({
+      type: 'setSettings',
+      settings: {
+        width: 3840,
+        height: 2160,
+        frameRate: { num: 30, den: 1 },
+        sampleRate: 48000,
+        channels: 2,
+      },
+    });
+    for (const track of tracks.slice(0, 3)) {
+      const [clip] = (
+        await hooks.project.execute({
+          type: 'overwrite',
+          track: track.id,
+          at: 0,
+          clip: { media: item.id, duration: 150 * 23_520_000, audio: false },
+        })
+      ).created;
+      // See-through, so every track is drawn.
+      await hooks.project.execute({
+        type: 'setClipProperties',
+        clip,
+        properties: { opacity: 0.6 },
+      });
+    }
+    await api.seekAndWait(0);
+    return { item: item.status, video: item.video?.codecLabel };
+  }, uhdFile);
+  await page.getByTestId('play-toggle').click();
+  await page.waitForTimeout(5000);
+  const proxyPlayback = await page.evaluate(async () => {
+    const api = window.__cgv.client.api;
+    return { state: await api.playbackState(), stats: await api.playbackStats() };
+  });
+  await page.getByTestId('play-toggle').click();
+  const proxyStats = proxyPlayback.stats;
+  if (proxyPlayback.state.frame < 100 || (!software && proxyStats.dropped > 0))
+    throw new Error('4K proxies did not play smoothly: ' + JSON.stringify(proxyPlayback));
+  results.push({
+    proxies: {
+      ...proxies,
+      presented: proxyStats.presented,
+      dropped: proxyStats.dropped,
+      level: proxyStats.level,
+      reachedFrame: proxyPlayback.state.frame,
+    },
+  });
+
   await page.screenshot({ path: join(root, 'bench/results/desktop.png') });
   await writeFile(
     join(root, 'bench/results/desktop-smoke.json'),
